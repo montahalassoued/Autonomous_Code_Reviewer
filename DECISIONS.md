@@ -46,3 +46,12 @@ names while still passing a mapping dict - raises
 `TypeError: unhashable type: 'list'` at compile time, because dict
 lookups require hashable values. For true parallel fan-out (returning
 a list of node names), the mapping dict must be omitted entirely.
+Why tree-sitter over naive text splitting for the AST parser
+
+Splitting source files by character count (e.g. every 500 chars) can
+cut a function definition in half, producing a chunk that is
+syntactically broken and semantically meaningless on its own.
+tree-sitter parses the actual grammar of the language into a syntax
+tree, so we extract exactly the nodes we want (function_definition)
+as complete, always-valid units - the chunking boundary is always a
+real function boundary, never an arbitrary character offset.
