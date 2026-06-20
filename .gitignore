@@ -1,0 +1,25 @@
+# File purpose: Ignore generated, local, and environment-specific artifacts.
+# Inputs: Local development tooling, caches, secrets, and build outputs.
+# Outputs: A cleaner repository with fewer accidental commits.
+
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.dist/
+build/
+dist/
+*.log
+.streamlit/
+.idea/
+.vscode/
+chroma/
+qdrant_storage/
+postgres_data/
+redis_data/
+coverage.xml
+htmlcov/

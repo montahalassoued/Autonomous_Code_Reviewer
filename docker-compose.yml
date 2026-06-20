@@ -1,0 +1,6 @@
+# File purpose: Local multi-service orchestration for the review stack.
+# Inputs: Environment variables from .env and the container images built from this repository.
+# Outputs: Running application, storage, and observability services for local development.
+
+version: "3.9"
+services: {}

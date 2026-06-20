@@ -1,0 +1,3 @@
+# File purpose: Python dependencies for the autonomous review service.
+# Inputs: pip or other Python packaging tools.
+# Outputs: A reproducible dependency set for local development and deployment.
