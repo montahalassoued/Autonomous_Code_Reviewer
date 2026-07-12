@@ -14,7 +14,10 @@ import hmac
 import json
 import os
 
-os.environ.setdefault("GITHUB_WEBHOOK_SECRET", "test-secret")
+# Force (not setdefault): earlier tests may have already load_dotenv()'d a
+# real .env value for this key, which would silently desync the sign()
+# helper below from what _verify_signature() actually checks against.
+os.environ["GITHUB_WEBHOOK_SECRET"] = "test-secret"
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
