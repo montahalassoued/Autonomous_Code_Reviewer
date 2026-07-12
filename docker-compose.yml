@@ -1,6 +1,19 @@
 # File purpose: Local multi-service orchestration for the review stack.
-# Inputs: Environment variables from .env and the container images built from this repository.
-# Outputs: Running application, storage, and observability services for local development.
+# Inputs: Environment variables from .env and the container image built from this repository.
+# Outputs: A running application container for local development.
 
 version: "3.9"
-services: {}
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - chroma_data:/app/chroma_data
+      - target_repo:/app/target_repo
+
+volumes:
+  chroma_data:
+  target_repo:
