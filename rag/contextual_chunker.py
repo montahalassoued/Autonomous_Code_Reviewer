@@ -18,6 +18,8 @@ expensive/precious Groq calls for the actual agent analysis later.
 import os
 from dataclasses import dataclass
 from google import genai
+from google.genai.errors import ServerError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from rag.ast_parser import ParsedFunction
 
 
@@ -74,10 +76,23 @@ def _build_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
+@retry(
+    retry=retry_if_exception_type(ServerError),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    reraise=True,
+)
 def generate_context(client: genai.Client, function: ParsedFunction) -> str:
     """
     Calls Gemini Flash to generate a one-sentence context for a single
     function. This is the core LLM call of this module.
+
+    Retries on ServerError (5xx - transient outages/overload on
+    Google's side) with exponential backoff, up to 4 attempts total.
+    Does NOT retry on 4xx client errors (bad API key, invalid request)
+    since those won't resolve themselves on retry. Ingestion runs one
+    of these calls per function in a repo - without this, a single
+    transient 503 kills the entire run.
 
     Args:
         client: an initialized genai.Client
