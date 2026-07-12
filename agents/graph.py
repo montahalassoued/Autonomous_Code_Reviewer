@@ -3,115 +3,38 @@ graph.py - builds and compiles the LangGraph StateGraph.
 
 This module defines the TOPOLOGY of the review pipeline: which nodes
 exist, how they connect, and the routing logic that decides what runs
-next. At this stage, node implementations are stubs (they return fake
-data) — the goal here is to validate the graph structure itself:
+next. Every node below is now the real implementation (Groq-backed
+domain agents, the full RAG retriever, and the markdown synthesizer) -
+this file only wires them together and owns the graph's shape:
 sequencing, parallel fan-out, and conditional routing.
 
-Real node logic (calling Groq, querying Qdrant, etc.) will replace these
-stubs in later steps (retriever.py, security.py, etc.) without touching
-this file's topology.
+The retriever node needs objects that don't belong in ReviewState
+(the Chroma collection, the corpus text used by BM25, and the
+knowledge graph) - see build_graph()'s parameters for how those get
+bound in via closure.
 """
 
 from langgraph.graph import StateGraph, END
 from agents.state import ReviewState
-
-
-# ---------------------------------------------------------------------------
-# STUB NODES
-# Each node is a plain function: reads `state`, returns a PARTIAL dict of
-# the fields it updates. LangGraph merges that partial dict into the full
-# state using the reducers defined in state.py (operator.add for findings).
-# ---------------------------------------------------------------------------
+from agents.retriever import retriever_node as _run_retriever_node
+from agents.security import security_node
+from agents.performance import performance_node
+from agents.architecture import architecture_node
+from agents.testing import testing_node
+from agents.documentation import documentation_node
+from agents.synthesizer import synthesizer_node
 
 
 def supervisor_node(state: ReviewState) -> dict:
     """
     Decides what happens next by inspecting the current state.
 
-    Real version (later) will also do bookkeeping; for now it only
-    decides routing, so it returns an empty update.
+    Routing itself is decided by route_after_supervisor(); this node
+    only exists as a place for that routing function to hang off of,
+    so it returns an empty update.
     """
     print("[supervisor] inspecting state...")
     return {}
-
-
-def retriever_node(state: ReviewState) -> dict:
-    """
-    STUB - will become the corrective RAG loop (Step 10).
-    For now, fakes retrieval by returning one dummy chunk with a
-    passing quality score, so we can validate the graph moves on.
-    """
-    print("[retriever] fetching context (stub)...")
-    return {
-        "retrieved_context": [
-            {
-                "file_path": "auth/utils.py",
-                "function_name": "verify_password",
-                "code": "def verify_password(p, h): ...",
-                "context": "stub context",
-                "relevance_score": 0.9,
-                "callers": [],
-            }
-        ],
-        "retrieval_quality_score": 0.9,
-        "retrieval_attempts": state["retrieval_attempts"] + 1,
-    }
-
-
-def security_node(state: ReviewState) -> dict:
-    """STUB - will become agents/security.py (Step 11)."""
-    print("[security] analyzing (stub)...")
-    return {
-        "findings": [
-            {
-                "agent": "security",
-                "severity": "CRITICAL",
-                "file_path": "auth/login.py",
-                "line_number": 2,
-                "title": "SQL Injection (stub)",
-                "description": "stub finding",
-                "evidence": "stub",
-                "suggestion": "stub",
-            }
-        ]
-    }
-
-
-def performance_node(state: ReviewState) -> dict:
-    """STUB - will become agents/performance.py (Step 14)."""
-    print("[performance] analyzing (stub)...")
-    return {
-        "findings": [
-            {
-                "agent": "performance",
-                "severity": "MEDIUM",
-                "file_path": "auth/login.py",
-                "line_number": 5,
-                "title": "N+1 query (stub)",
-                "description": "stub finding",
-                "evidence": "stub",
-                "suggestion": "stub",
-            }
-        ]
-    }
-
-
-def architecture_node(state: ReviewState) -> dict:
-    """STUB - will become agents/architecture.py (Step 14)."""
-    print("[architecture] analyzing (stub)...")
-    return {"findings": []}
-
-
-def testing_node(state: ReviewState) -> dict:
-    """STUB - will become agents/testing.py (Step 14)."""
-    print("[testing] analyzing (stub)...")
-    return {"findings": []}
-
-
-def documentation_node(state: ReviewState) -> dict:
-    """STUB - will become agents/documentation.py (Step 14)."""
-    print("[documentation] analyzing (stub)...")
-    return {"findings": []}
 
 
 def join_agents_node(state: ReviewState) -> dict:
@@ -127,16 +50,6 @@ def join_agents_node(state: ReviewState) -> dict:
     """
     print(f"[join_agents] all parallel agents finished, {len(state['findings'])} findings total")
     return {}
-
-
-def synthesizer_node(state: ReviewState) -> dict:
-    """
-    STUB - will become agents/synthesizer.py (Step 12).
-    For now, just counts findings to prove they all arrived.
-    """
-    print(f"[synthesizer] received {len(state['findings'])} findings total")
-    lines = [f"- [{f['severity']}] {f['title']} ({f['agent']})" for f in state["findings"]]
-    return {"final_review_markdown": "## Review\n" + "\n".join(lines)}
 
 
 # ---------------------------------------------------------------------------
@@ -187,12 +100,32 @@ def route_after_retriever(state: ReviewState) -> list[str] | str:
 # ---------------------------------------------------------------------------
 
 
-def build_graph():
+def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_index):
     """
     Assembles and compiles the StateGraph.
 
-    Returns a compiled graph ready to run via .invoke(initial_state).
+    Args:
+        collection: a populated Chroma collection (db/chroma.py),
+                    passed straight through to agents/retriever.py
+        all_documents: full corpus text list backing hybrid_search.py's
+                        BM25 index (same order as all_ids)
+        all_ids: full corpus id list (same order as all_documents)
+        graph_index: the knowledge graph (rag/knowledge_graph.py), or
+                     None if unavailable (degrades gracefully: no
+                     caller info in retrieved chunks)
+
+    Returns:
+        a compiled graph ready to run via .invoke(initial_state)
     """
+    def retriever_node(state: ReviewState) -> dict:
+        """
+        Binds the RAG pipeline's repo-wide objects (collection,
+        all_documents, all_ids, graph_index) into agents/retriever.py's
+        real retriever_node via closure, since those objects are too
+        large and too repo-wide to belong in per-review ReviewState.
+        """
+        return _run_retriever_node(state, collection, all_documents, all_ids, graph_index)
+
     graph = StateGraph(ReviewState)
 
     # Register every node
