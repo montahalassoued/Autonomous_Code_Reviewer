@@ -1,27 +1,61 @@
 """
-ingestion.py - runs the full ingestion pipeline over a local repository
-checkout: parse -> contextualize -> embed -> store -> build graph.
+ingestion.py - runs the full ingestion pipeline over a repository:
+clone (if given a URL) -> parse -> contextualize -> embed -> store ->
+build graph.
 
-Inputs: a local filesystem path to a repository checkout (already
-cloned; cloning itself is out of scope here - gitpython is available
-for that if a caller needs it before calling into this module).
+Inputs: either a local filesystem path to an existing repository
+checkout, or a remote Git URL to clone first (clone_repository()).
 Outputs: a populated Chroma collection, the parallel (all_documents,
 all_ids) lists hybrid_search.py's BM25 index needs, and the NetworkX
 knowledge graph - exactly the four values agents/graph.py's
 build_graph() needs to wire up the real retriever node.
 
-This is the one-time (or per-webhook-startup) batch job that makes the
+This is the one-time (or per-deploy-startup) batch job that makes the
 rest of the RAG pipeline possible: agents/retriever.py assumes a
 Chroma collection is already populated and a graph is already built -
 this module is what populates them.
 """
 
 import os
+import git
 from rag.ast_parser import parse_file, ParsedFunction
 from rag.contextual_chunker import contextualize_functions, ContextualChunk
 from rag.embedder import embed_chunks
 from db.chroma import get_client, get_collection, store_chunks
 from rag.knowledge_graph import build_knowledge_graph
+
+
+def clone_repository(repo_url: str, target_dir: str) -> str:
+    """
+    Clones a remote Git repository to target_dir, so ingestion can run
+    against a repo that only exists as a URL (e.g. on app/main.py's
+    deployed server, which has no pre-existing local checkout of
+    whatever repository is being reviewed).
+
+    Args:
+        repo_url: an HTTPS Git URL, e.g. "https://github.com/owner/repo.git"
+        target_dir: where to clone it to
+
+    Returns:
+        target_dir, for convenient chaining into ingest_repository()
+
+    A shallow clone (depth=1) is used since ingestion only needs the
+    current state of the files, not history - this keeps startup fast
+    and avoids downloading a repo's entire commit history.
+
+    If target_dir already contains a checkout, this pulls the latest
+    changes instead of re-cloning from scratch, so repeated app
+    restarts don't redundantly re-download the whole repo every time.
+    """
+    if os.path.isdir(os.path.join(target_dir, ".git")):
+        print(f"Existing checkout found at {target_dir}, pulling latest changes...")
+        repo = git.Repo(target_dir)
+        repo.remotes.origin.pull()
+    else:
+        print(f"Cloning {repo_url} into {target_dir}...")
+        git.Repo.clone_from(repo_url, target_dir, depth=1)
+
+    return target_dir
 
 
 def _find_python_files(repo_path: str) -> list[str]:
