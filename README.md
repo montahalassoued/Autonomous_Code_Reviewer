@@ -4,7 +4,7 @@ Inputs: A cloned repository, environment variables from .env, and Docker Compose
 Outputs: A running local review system accessible through FastAPI and Streamlit.
 -->
 
-# autonomous-code-reviewer:
+# autonomous-code-reviewer
 
 An autonomous multi-agent GitHub PR reviewer that uses LangGraph orchestration plus an advanced RAG pipeline to fetch repository context, run specialized security/performance/architecture/testing/documentation analyses in parallel, and post a structured Markdown review back to GitHub.
 
