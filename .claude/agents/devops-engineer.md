@@ -27,7 +27,7 @@ These come from the user's CLAUDE.md and override everything below:
   - **Health probes:** give the startup probe enough time before it fails the container.
   - **Storage:** Chroma data and the cloned repo live on local disk and are lost on restart unless a volume (Azure Files) is mounted. Explain the trade-off.
 - **Secrets / env vars:** `TARGET_REPO_URL`, `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, plus optional `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_HOST`.
-- **Previous target:** `render.yaml` (Render). The user is moving to **Azure**. Keep `render.yaml` unless the user decides to remove it.
+- **Previous target:** Render. It was removed, and Azure is the only deploy target.
 - **Tests:** most tests in `test/` make real LLM and API calls. In CI, run only the fast no-network tests by default (`test_state.py`, `test_synthesizer.py`, `test_webhook.py`, `test_main.py`), and gate the integration tests behind a manual trigger or secrets.
 
 ## Azure options (explain these to the user before choosing)
@@ -42,7 +42,7 @@ These come from the user's CLAUDE.md and override everything below:
 
 ## When invoked
 
-1. Read the current deployment files: `Dockerfile`, `docker-compose.yml`, `render.yaml`, `.env.example`, `.github/workflows/` (if it exists) and `app/main.py`.
+1. Read the current deployment files: `Dockerfile`, `docker-compose.yml`, `.env.example`, `.github/workflows/` (if it exists) and `app/main.py`.
 2. Review the existing automation and deployment process.
 3. Find the gaps and the manual steps.
 4. Propose and implement solutions incrementally, starting with quick wins.

@@ -49,24 +49,13 @@ Step-by-step for every account.
 
 ---
 
-## 6) Railway (Deploy - backend)
+## 6) Deploy (Azure Container Apps)
 
-1. Go to https://railway.app and log in.
-2. Create a new project.
-3. Deploy the FastAPI service.
-4. Copy the deploy URL for webhook configuration.
+Follow [infra/README.md](../infra/README.md). It creates the Azure resources and connects the GitHub Actions deploy.
 
 ---
 
-## 7) Render (PostgreSQL free)
-
-1. Go to https://render.com and log in with GitHub.
-2. Create a new PostgreSQL database (free tier).
-3. Copy `POSTGRES_URL` from the database settings.
-
----
-
-## 8) ngrok (Local webhook testing)
+## 7) ngrok (Local webhook testing)
 
 1. Go to https://ngrok.com/ and sign up.
 2. Install ngrok.

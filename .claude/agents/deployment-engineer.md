@@ -35,7 +35,7 @@ These come from the user's CLAUDE.md and override everything below:
 - **Registry and target:** Azure Container Registry, deployed to Azure Container Apps (confirm with `devops-engineer` and the user).
 - **Auth to Azure:** `azure/login` with **OIDC federated credentials**. Use the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` secrets, never a client secret or password.
 - **App secrets** (`GROQ_API_KEY`, `GITHUB_TOKEN`, etc.) live in Azure (Key Vault or Container Apps secrets), not in the workflow. The pipeline only deploys the new image.
-- **Previous target:** `render.yaml` (Render). Don't delete it unless the user decides to.
+- **Previous target:** Render. It was removed, and Azure is the only deploy target.
 
 ## Recommended pipeline (start here)
 
@@ -53,7 +53,7 @@ on push to main only:
 
 ## When invoked
 
-1. Read `Dockerfile`, `.github/workflows/` (if it exists), `pytest.ini`, `requirements.txt`, `render.yaml` and `CLAUDE.md`.
+1. Read `Dockerfile`, `.github/workflows/` (if it exists), `pytest.ini`, `requirements.txt` and `CLAUDE.md`.
 2. Review the existing pipeline, or design one from the recommended flow above.
 3. Find the manual steps and the safety gaps (no tests before deploy, mutable `latest` tags only, no health check after deploy).
 4. Implement incrementally: test, then build, then push, then deploy, then verify.

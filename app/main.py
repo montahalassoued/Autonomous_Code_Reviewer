@@ -40,7 +40,7 @@ def _resolve_repo_path() -> str:
         a local filesystem path ready for ingest_repository()
 
     TARGET_REPO_URL takes priority: it's the real deployment path
-    (e.g. on Render, where no checkout exists yet). REPO_PATH is the
+    (e.g. on Azure Container Apps, where no checkout exists yet). REPO_PATH is the
     fallback for local development against a repo you've already
     cloned yourself.
     """
