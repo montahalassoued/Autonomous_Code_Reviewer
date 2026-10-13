@@ -29,13 +29,7 @@ Diff → Search queries → BM25 + Dense retrieval (Qdrant) → Graph enrichment
 - Rerank and select the best context.
 - Send validated context to AI agents.
 
-### RAG Retrieval Pipeline
-
-![RAG retrieval pipeline](./rag_pipeline.png)
-
-### Multi Agents
-
-![Multi agents](./multi_agent_exact_bw.png)
+> The architecture diagrams are being redrawn for the new design (see [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)).
 
 ```text
 GitHub → FastAPI → LangGraph → RAG → GitHub comment
