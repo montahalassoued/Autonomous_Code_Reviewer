@@ -10,30 +10,24 @@ An autonomous multi-agent GitHub PR reviewer that uses LangGraph orchestration p
 
 ## Architecture
 
-## Indexing (once)
-
-Repository → Function parsing → Relationship graph → LLM context enrichment → Embeddings → Qdrant
-
-- Parse the codebase into functions/classes.
-- Build a dependency graph between components.
-- Enrich code chunks with LLM-generated context.
-- Generate embeddings and store them in Qdrant.
-
-## Retrieval (per PR)
-
-Diff → Search queries → BM25 + Dense retrieval (Qdrant) → Graph enrichment → Reranking → Top 5 chunks → Quality check → Agents
-
-- Analyze PR changes.
-- Retrieve relevant code using hybrid search.
-- Enrich results with graph relationships.
-- Rerank and select the best context.
-- Send validated context to AI agents.
-
-> The architecture diagrams are being redrawn for the new design (see [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)).
-
 ```text
-GitHub → FastAPI → LangGraph → RAG → GitHub comment
+ GitHub (push / pull request)
+        │  webhook (HMAC-signed)
+        ▼
+ FastAPI server ─ Azure Container Apps
+        │
+        ▼
+ LangGraph review pipeline
+   RAG context  ─►  review agents (parallel)  ─►  synthesizer
+   (code index:      security · logic ·            (findings +
+    parse, graph,    code quality                    recommendations)
+    search)
+        │
+        ▼
+ GitHub (review comments on the PR or commit)
 ```
+
+Everything happens in GitHub. There is no web UI. The design and roadmap are in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
 
 ## Tech Stack
 
