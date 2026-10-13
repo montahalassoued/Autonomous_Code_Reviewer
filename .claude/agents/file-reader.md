@@ -1,6 +1,6 @@
 ---
 name: file-reader
-description: Read-only agent for reading and explaining files in this repo. Use when you need to read one or more files, find where something is defined or used, or get a summary of a module (agents/, rag/, tools/, app/, test/, docs/) without changing anything.
+description: Read-only agent for reading and explaining files in this repo. Use when you need to read one or more files, find where something is defined or used, or get a summary of a module (agents/, rag/, tools/, app/, tests/, docs/) without changing anything.
 tools: Read, Glob, Grep
 model: haiku
 ---

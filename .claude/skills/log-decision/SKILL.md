@@ -1,11 +1,11 @@
 ---
 name: log-decision
-description: Record an architecture or design decision in DECISIONS.md. Use when a real choice was made between alternatives (a library, a pattern, a workaround for an API constraint, a bug-driven redesign), or when the user says "log this decision" / "add to DECISIONS".
+description: Record an architecture or design decision in docs/DECISIONS.md. Use when a real choice was made between alternatives (a library, a pattern, a workaround for an API constraint, a bug-driven redesign), or when the user says "log this decision" / "add to DECISIONS".
 ---
 
 # Log a decision
 
-Decisions go in the **root `DECISIONS.md`**, the detailed log. `docs/DECISIONS.md` is a short one-line summary list. If the decision is important, also add a single bullet there in its `- X over Y: reason` style.
+Decisions go in **`docs/DECISIONS.md`**. Add the detailed entry at the end, and add a one-line bullet to its "At a glance" list in the `- X over Y: reason` style.
 
 ## When to log
 
@@ -18,7 +18,7 @@ Don't log routine implementation details.
 
 ## Format
 
-Append to the end of `DECISIONS.md`, with one blank line before the heading:
+Append to the end of `docs/DECISIONS.md`, with one blank line before the heading:
 
 ```markdown
 ## Why <choice> over <alternative>
@@ -27,7 +27,7 @@ Append to the end of `DECISIONS.md`, with one blank line before the heading:
 <Decision: what we chose and how it works - 1-3 sentences.>
 <Alternatives: what else was considered and why it lost.>
 <Trade-off: what we gave up, and why that's acceptable here.>
-<Optional: "Validated in test/test_x.py." or the file it lives in.>
+<Optional: "Validated in tests/unit/test_x.py." or the file it lives in.>
 ```
 
 Write it as one or two plain paragraphs like the existing entries, not as labeled bullets. The headings in angle brackets above are only a checklist of what to cover.

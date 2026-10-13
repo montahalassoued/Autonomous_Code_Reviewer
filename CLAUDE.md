@@ -7,7 +7,7 @@ Autonomous multi-agent GitHub PR reviewer. A GitHub webhook hits FastAPI, a Lang
 These rules override any skill or subagent instruction that says otherwise.
 
 1. **Terminal commands: there are two kinds.**
-   - **Run these yourself, without asking me:** local git work (`git status`, `diff`, `log`, `show`, `add`, `rm`, `restore` on files you changed, `commit` following the `commit-message` skill), the fast offline tests (`test_state.py`, `test_synthesizer.py`, `test_webhook.py`, `test_main.py`), and read-only checks. After each commit, tell me the commit title and which files went into it.
+   - **Run these yourself, without asking me:** local git work (`git status`, `diff`, `log`, `show`, `add`, `rm`, `restore` on files you changed, `commit` following the `commit-message` skill), local branches (`git switch -c`), the offline unit tests (`pytest tests/unit`), and read-only checks. After each commit, tell me the commit title and which files went into it.
    - **Give these to me to run, because I want to learn them:** Docker (`docker build/run/compose`), Azure (`az ...`), `git push` and any other command that touches GitHub or the cloud, `pip install`, starting servers (`uvicorn`), tests that make real API calls (they use quota), and anything destructive (`git reset --hard`, force-push, deleting branches). For each one:
      - Give the exact command in a code block, ready to copy.
      - Explain what it does, what each important flag means, and what output to expect.
@@ -17,6 +17,20 @@ These rules override any skill or subagent instruction that says otherwise.
    - After editing, list every changed file as a clickable link, with a short summary of what changed in each one.
    - Never change files I didn't expect without telling me.
 3. **Explain before asking.** Before asking me any question, first explain the context: what you found, what the options are, and what each option means for the project. Then ask the question, so I can read the explanation before I answer.
+4. **One branch per piece of work.** Every feature, fix or refactor starts on its own branch off `main` (`feat/…`, `fix/…`, `refactor/…`, `ci/…`, `docs/…`, `chore/…`), and reaches `main` only through a PR. Never commit directly on `main`. Follow the `git-workflow` skill.
+5. **Senior-level structure.** Every new file and folder goes in the folder for its role, with a name that says that role (never `utils.py`, `helpers.py`, `new.py`). Follow the `project-structure` skill.
+
+## Project layout
+
+```text
+app/        api/ (HTTP routers) · jobs/ (queue, dedupe) · main.py (API) · worker.py · bootstrap.py
+agents/     LangGraph graph, review agents, synthesizer, state
+rag/        parsing, chunking, call graph, embeddings, search, reranking
+tools/      external service clients (GitHub)       db/      storage adapters (Chroma)
+eval/       LLM benchmark, datasets, results         infra/   Azure setup
+tests/      unit/ (offline, CI) · integration/ (real APIs, manual) · conftest.py
+docs/       IMPLEMENTATION_PLAN, CI, SETUP, DECISIONS, ...
+```
 
 ## Pipeline
 
@@ -35,8 +49,8 @@ GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storag
 ## Commands
 
 ```bash
-venv/Scripts/python.exe -m pytest test/test_state.py test/test_synthesizer.py test/test_webhook.py test/test_main.py   # fast, no API calls
-venv/Scripts/python.exe -m pytest                       # full suite - many tests make REAL Groq/Gemini/Voyage/GitHub calls
+venv/Scripts/python.exe -m pytest tests/unit   # fast, no API calls
+venv/Scripts/python.exe -m pytest tests/integration    # REAL Groq/Gemini/Voyage/GitHub calls - uses quota, user runs it
 uvicorn app.main:app --host 0.0.0.0 --port 8000         # API
 docker-compose up --build                               # full stack
 ```
@@ -51,8 +65,8 @@ Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAG
 - **API clients:** each module has a `_build_*_client()` that reads its key from the environment and raises a clear `RuntimeError` if it's missing.
 - **LLM output parsing never crashes the pipeline.** A malformed response degrades to zero findings (see `_parse_findings` / `_to_finding` in `agents/security.py`).
 - **Domain agents** share one pattern (Groq `llama-3.3-70b-versatile`, temperature 0.1, JSON array → `Finding`). Use the `add-domain-agent` skill to add one.
-- **Tests** live in `test/test_*.py`. Integration tests hit real APIs, and unit tests monkeypatch. Use the `write-tests` skill.
-- **Architecture decisions** go in the root `DECISIONS.md`. Use the `log-decision` skill.
+- **Tests:** `tests/unit/` (offline, mocked, run in CI) and `tests/integration/` (real APIs, auto-marked `integration`). Use the `write-tests` skill.
+- **Architecture decisions** go in `docs/DECISIONS.md`. Use the `log-decision` skill.
 - **Commits** are a single title line `type(scope): summary` with no Co-Authored-By or Claude attribution. Use the `commit-message` skill. A hook enforces this.
 - Build order and status: `docs/PROGRESS.md`. Deeper docs: `docs/ARCHITECTURE.md`, `docs/RAG.md`, `docs/AGENTS.md`.
 
@@ -63,4 +77,4 @@ Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAG
 - Chunk ids are `file::Class.method` (`make_chunk_id` in `db/chroma.py`), with a `#2` suffix for duplicate names. Never build ids by hand.
 - Implementation roadmap: `docs/IMPLEMENTATION_PLAN.md` (Phase 0 is done).
 - Tests that set env vars must **force** them (`os.environ[...] = ...`), not use `setdefault`, because other tests `load_dotenv()` the real `.env`.
-- `eval/ragas_eval.py` is still a stub.
+- Evaluation: `eval/llm_benchmark.py` compares models on the real prompts. The full review eval harness (Phase 1) is not built yet.

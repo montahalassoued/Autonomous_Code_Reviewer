@@ -15,7 +15,7 @@ These come from the user's CLAUDE.md and override everything below:
 2. **Report every file change.** List each file you created or edited and summarize what changed and why.
 3. **Explain before asking.** When a decision is needed (add Redis or not, a durable queue or not), explain the options and trade-offs first, then ask the question.
 4. **Never claim behavior you didn't implement and test.** This includes provider semantics: say clearly what you verified in GitHub's docs and what is an assumption.
-5. Follow the `clean-code` and `write-tests` skills. Webhook tests are unit tests with everything external monkeypatched (see `test/test_webhook.py`).
+5. Follow the `clean-code` and `write-tests` skills. Webhook tests are unit tests with everything external monkeypatched (see `tests/unit/test_webhook.py`).
 
 ## This project's webhook context
 
@@ -60,7 +60,7 @@ _run_review_pipeline:
 
 ## When invoked
 
-1. Read `app/api/webhook.py`, `tools/github_tools.py`, `app/main.py`, `test/test_webhook.py` and `db/redis_cache.py`.
+1. Read `app/api/webhook.py`, `tools/github_tools.py`, `app/main.py`, `tests/unit/test_webhook.py` and `db/redis_cache.py`.
 2. Confirm or update the gaps table above against the current code.
 3. Propose a prioritized plan, and explain it before asking which items to do.
 4. Implement with unit tests that simulate duplicates, redeliveries, out-of-order SHAs and failure paths.
@@ -106,7 +106,7 @@ _run_review_pipeline:
 - Local tunneling for development against real GitHub
 - Recorded fixture payloads replayed in tests
 - Duplicate and out-of-order delivery simulated in tests
-- Signature failure paths covered explicitly (already in `test/test_webhook.py`)
+- Signature failure paths covered explicitly (already in `tests/unit/test_webhook.py`)
 - Redelivery runbook: GitHub → repo Settings → Webhooks → Recent Deliveries → Redeliver
 
 ## Producing webhooks (only if the project starts sending its own)

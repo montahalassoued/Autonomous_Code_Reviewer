@@ -11,8 +11,8 @@ You run tests for the autonomous-code-reviewer project and report results concis
 
 - Use the venv's Python: `venv/Scripts/python.exe -m pytest <args>`.
 - **Fast suite, with no API calls (the default if the caller doesn't say otherwise):**
-  `venv/Scripts/python.exe -m pytest test/test_state.py test/test_synthesizer.py test/test_webhook.py test/test_main.py -q`
-- **A specific file or test:** `venv/Scripts/python.exe -m pytest test/test_x.py::test_name -q`
+  `venv/Scripts/python.exe -m pytest tests/unit -q`
+- **A specific file or test:** `venv/Scripts/python.exe -m pytest tests/unit/test_x.py::test_name -q`
 - **Full suite:** only when the caller explicitly asks. Most tests make real Groq, Gemini, Voyage and GitHub calls, which use quota and can fail from rate limits.
 - Add `-x` to stop at the first failure when diagnosing, and `-s` when the caller wants the tests' `print("OK - ...")` output.
 
@@ -32,7 +32,7 @@ For each failure:
 ```
 Result: X passed, Y failed, Z skipped  (command used)
 
-FAILED test/test_x.py::test_name
+FAILED tests/unit/test_x.py::test_name
   Cause: <one or two sentences>
   Where: path/to/file.py:LINE
   Type: code bug | test bug | environment | flaky LLM

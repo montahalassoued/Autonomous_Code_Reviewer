@@ -40,9 +40,9 @@ The agent must route only to `join_agents`, which goes on to `synthesizer`. Neve
 
 Open `agents/synthesizer.py` and check whether it groups or labels findings by agent name. If so, add the new agent so its findings render with a proper heading.
 
-## Step 4: Add `test/test_<name>.py`
+## Step 4: Add `tests/integration/test_<name>.py` (real Groq call) and offline unit tests in `tests/unit/`
 
-Mirror `test/test_security.py` (follow the `write-tests` skill):
+Mirror `tests/integration/test_security.py` (follow the `write-tests` skill):
 - `load_dotenv()`, then `build_state(diff)`
 - One test with a diff that clearly contains an issue this agent should catch. Assert at least one finding, `agent == "<name>"`, valid severity, `int` line number, and non-empty title, description and suggestion.
 - One test with a trivial safe diff. It shouldn't crash and should return a list.
@@ -57,7 +57,7 @@ Mirror `test/test_security.py` (follow the `write-tests` skill):
 
 ```bash
 venv/Scripts/python.exe -c "from agents.graph import build_graph; print('graph imports OK')"
-venv/Scripts/python.exe -m pytest test/test_<name>.py -s
+venv/Scripts/python.exe -m pytest tests/integration/test_<name>.py -s
 ```
 
 The second command makes a real Groq call, so tell the user before running it.
