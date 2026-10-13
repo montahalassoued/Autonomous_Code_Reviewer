@@ -1,4 +1,8 @@
 {
+  "statusLine": {
+    "type": "command",
+    "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/statusline.py\""
+  },
   "permissions": {
     "allow": [
       "Bash(git status:*)",
