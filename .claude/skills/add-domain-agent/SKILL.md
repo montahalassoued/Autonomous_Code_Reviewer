@@ -30,11 +30,11 @@ Keep these unchanged, because they make the pipeline robust:
 ## Step 2: Wire it into `agents/graph.py`
 
 1. Import it: `from agents.<name> import <name>_node`
-2. Add `"<name>"` to the `DOMAIN_AGENTS` list. This alone handles the parallel fan-out from both `route_after_supervisor` and `route_after_retriever`, and the `<name> → join_agents` edge in the loop.
+2. Add `"<name>"` to the `DOMAIN_AGENTS` list. This alone handles the parallel fan-out from `route_after_retriever`, and the `<name> → join_agents` edge in the loop.
 3. Register the node: `graph.add_node("<name>", <name>_node)`
 4. Update docstrings and comments that say "5 agents" (in `graph.py`, `agents/state.py`, `agents/synthesizer.py`).
 
-Never point the agent back to `supervisor` directly. It must go through `join_agents`, or supervisor and synthesizer will run once per agent.
+The agent must route only to `join_agents`, which goes on to `synthesizer`. Never add an edge from it back to the retriever or the other agents, because the graph must stay forward-only so that it always terminates.
 
 ## Step 3: Check the synthesizer
 

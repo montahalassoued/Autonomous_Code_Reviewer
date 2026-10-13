@@ -22,9 +22,9 @@ These rules override any skill or subagent instruction that says otherwise.
 
 ```text
 GitHub webhook → app/api/webhook.py → agents/graph.py (LangGraph)
-  supervisor → retriever (corrective RAG loop, max 3 attempts, quality >= 0.5)
-             → security | performance | architecture | testing | documentation  (parallel)
-             → join_agents (barrier) → supervisor → synthesizer → tools/github_tools.py
+  START → retriever (corrective RAG loop: retry while quality < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL_ATTEMPTS)
+        → security | performance | architecture | testing | documentation  (parallel)
+        → join_agents (barrier) → synthesizer → END → tools/github_tools.py   (forward-only: always terminates)
 ```
 
 - **Shared state:** `agents/state.py` holds `ReviewState`. `findings` uses an `operator.add` reducer so parallel agents don't overwrite each other.
@@ -59,6 +59,8 @@ Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAG
 ## Gotchas
 
 - The routing functions in `agents/graph.py` return real node names. `add_conditional_edges` must **not** get a mapping dict when fanning out to a list.
-- Domain agents must point to `join_agents`, not back to `supervisor`. Otherwise supervisor and synthesizer run once per agent.
+- The graph is forward-only. Domain agents point to `join_agents`, which goes straight to `synthesizer`. Never add an edge back to the agents or the retriever after `join_agents`, because the old supervisor loop never terminated on clean PRs.
+- Chunk ids are `file::Class.method` (`make_chunk_id` in `db/chroma.py`), with a `#2` suffix for duplicate names. Never build ids by hand.
+- Implementation roadmap: `docs/IMPLEMENTATION_PLAN.md` (Phase 0 is done).
 - Tests that set env vars must **force** them (`os.environ[...] = ...`), not use `setdefault`, because other tests `load_dotenv()` the real `.env`.
 - `eval/ragas_eval.py` is still a stub.

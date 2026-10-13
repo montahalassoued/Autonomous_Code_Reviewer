@@ -18,7 +18,7 @@ You review the uncommitted changes in the autonomous-code-reviewer project befor
 **Correctness (the most important part)**
 - Logic errors, wrong conditions, off-by-one errors, unhandled `None` or empty cases
 - Broken callers: if a function's signature or return shape changed, grep for its uses
-- LangGraph: routing functions must return real node names; domain agents must route to `join_agents`, not `supervisor`; `findings` updates must be lists (they're merged with `operator.add`)
+- LangGraph: routing functions must return real node names; the graph stays forward-only (agents → `join_agents` → `synthesizer`, never back to the retriever or agents); chunk ids come from `make_chunk_id`, never built by hand; `findings` updates must be lists (they're merged with `operator.add`)
 - LLM-output parsing must degrade to no findings, never raise
 
 **Security**
