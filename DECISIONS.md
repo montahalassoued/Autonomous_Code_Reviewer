@@ -104,3 +104,17 @@ LLM client planned in Phase 3 (agents/llm_client.py), so all LLM calls get
 traced in one place. The eval harness (Phase 1) can push its scores to Langfuse.
 Trade-off: self-hosting adds infrastructure to run, so start on Langfuse Cloud
 and self-host later if needed.
+
+## Why a webhook server (Azure Container Apps) over a GitHub Action
+
+Both deliver the same user experience: everything happens in GitHub. The user
+pushes or opens a PR, and the review appears as inline comments plus a summary.
+There is no web UI (the Streamlit dashboard was removed). A GitHub Action would
+need no server and cost nothing to host, but every run starts cold (installing
+deps, restoring the index from cache) and each repo needs its own workflow file.
+A webhook server keeps the index warm in memory for fast reviews, and can later
+serve many repos as a GitHub App. It is also the goal of the project: a real
+product and portfolio piece showing Docker, Azure, CI/CD and webhook
+engineering. Trade-off: a container runs 24/7 (min replicas = 1) and costs money
+even when idle. The review core (RAG + agents + GitHub posting) is independent
+of the trigger, so an Action-based trigger could still be added later.
