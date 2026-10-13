@@ -1,7 +1,24 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(git rm:*)",
+      "Bash(git restore:*)",
+      "Bash(git commit:*)",
+      "Bash(venv/Scripts/python.exe -m pytest test/test_state.py test/test_synthesizer.py test/test_webhook.py test/test_main.py:*)"
+    ],
     "ask": [
-      "Bash",
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(git branch -D:*)",
+      "Bash(docker:*)",
+      "Bash(az:*)",
+      "Bash(pip:*)",
+      "Bash(uvicorn:*)",
       "PowerShell"
     ]
   },

@@ -6,11 +6,12 @@ Autonomous multi-agent GitHub PR reviewer. A GitHub webhook hits FastAPI, a Lang
 
 These rules override any skill or subagent instruction that says otherwise.
 
-1. **I run terminal commands myself.** Don't execute commands in the terminal (Bash or PowerShell). Instead:
-   - Give me the exact command in a code block, ready to copy.
-   - Explain in one or two sentences what it does and what output to expect.
-   - Wait for me to run it and paste the result before continuing.
-   - This includes git, pytest, pip, uvicorn, streamlit and docker. Reading and searching files with the editor tools (Read, Grep, Glob) is fine.
+1. **Terminal commands: there are two kinds.**
+   - **Run these yourself, without asking me:** local git work (`git status`, `diff`, `log`, `show`, `add`, `rm`, `restore` on files you changed, `commit` following the `commit-message` skill), the fast offline tests (`test_state.py`, `test_synthesizer.py`, `test_webhook.py`, `test_main.py`), and read-only checks. After each commit, tell me the commit title and which files went into it.
+   - **Give these to me to run, because I want to learn them:** Docker (`docker build/run/compose`), Azure (`az ...`), `git push` and any other command that touches GitHub or the cloud, `pip install`, starting servers (`uvicorn`), tests that make real API calls (they use quota), and anything destructive (`git reset --hard`, force-push, deleting branches). For each one:
+     - Give the exact command in a code block, ready to copy.
+     - Explain what it does, what each important flag means, and what output to expect.
+     - Wait for me to run it and paste the result before continuing.
 2. **Show me every file change.**
    - Before editing, say which files you're going to change and why.
    - After editing, list every changed file as a clickable link, with a short summary of what changed in each one.
@@ -29,7 +30,7 @@ GitHub webhook → app/api/webhook.py → agents/graph.py (LangGraph)
 - **Shared state:** `agents/state.py` holds `ReviewState`. `findings` uses an `operator.add` reducer so parallel agents don't overwrite each other.
 - **RAG (`rag/`):** ast_parser (tree-sitter) → contextual_chunker (Gemini) → knowledge_graph (NetworkX) → embedder (Voyage) + `db/chroma.py` → hybrid_search (BM25 + dense + RRF) → graph_retriever → reranker (local BAAI/bge-reranker-v2-m3).
 - **Startup (`app/main.py`):** clones `TARGET_REPO_URL` (or uses `REPO_PATH`), ingests it, compiles the graph, and stores it on `app.state`.
-- **Dashboard:** `streamlit_app.py` (manual review trigger).
+- **No web UI:** reviews are triggered only by the GitHub webhook. The Streamlit dashboard was removed.
 
 ## Commands
 
@@ -37,7 +38,6 @@ GitHub webhook → app/api/webhook.py → agents/graph.py (LangGraph)
 venv/Scripts/python.exe -m pytest test/test_state.py test/test_synthesizer.py test/test_webhook.py test/test_main.py   # fast, no API calls
 venv/Scripts/python.exe -m pytest                       # full suite - many tests make REAL Groq/Gemini/Voyage/GitHub calls
 uvicorn app.main:app --host 0.0.0.0 --port 8000         # API
-streamlit run streamlit_app.py                          # dashboard
 docker-compose up --build                               # full stack
 ```
 

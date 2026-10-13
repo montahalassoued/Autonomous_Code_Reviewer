@@ -43,26 +43,35 @@ def main() -> None:
     # Only react to a real `git commit` invocation: at the start of the
     # command or right after a separator (; & | newline). This avoids
     # blocking commands that merely mention "git commit" inside a string.
-    match = re.search(r"(?:^|[;&|\n]\s*)git(?:\s+-\S+(?:\s+\S+)?)*\s+commit\b", command)
-    if not match:
+    commit_pattern = r"(?:^|[;&|\n]\s*)git(?:\s+-\S+(?:\s+\S+)?)*\s+commit\b"
+    matches = list(re.finditer(commit_pattern, command))
+    if not matches:
         sys.exit(0)
 
-    # Check only from the commit onwards, so earlier commands in a chain don't count.
-    command = command[match.start():]
-    lowered = command.lower()
+    # A chained command can contain several commits ("git commit ... && git
+    # add ... && git commit ..."), so check each commit's own segment:
+    # from its start up to where the next commit begins.
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(command)
+        check_commit_segment(command[match.start():end])
+
+    sys.exit(0)
+
+
+def check_commit_segment(segment: str) -> None:
+    """Blocks the command if this one commit's message breaks the title-only rule."""
+    lowered = segment.lower()
     for pattern in FORBIDDEN_PATTERNS:
         if re.search(pattern, lowered):
             block("remove the Co-Authored-By / Claude attribution - commits are a single title line only.")
 
     # More than one -m flag creates a message body.
-    if len(re.findall(r"(?:^|\s)-m\b", command)) > 1:
+    if len(re.findall(r"(?:^|\s)-m\b", segment)) > 1:
         block("use a single -m with only the title line (no body).")
 
     # A heredoc or a -F file is how multi-line messages usually get passed in.
-    if "<<" in command or re.search(r"(?:^|\s)(-F|--file)\b", command):
+    if "<<" in segment or re.search(r"(?:^|\s)(-F|--file)\b", segment):
         block("pass the title with a single -m \"type(scope): summary\" instead of a heredoc or file.")
-
-    sys.exit(0)
 
 
 if __name__ == "__main__":
