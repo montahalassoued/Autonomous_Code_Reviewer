@@ -1,14 +1,17 @@
 # File purpose: CI/CD pipeline for the autonomous code reviewer. Runs the fast offline tests and a
 #   Docker build on every pull request and push to main. On push to main (or a manual run from
-#   main) it pushes the image to Azure Container Registry, deploys it to Azure Container Apps
-#   and smoke-tests /health.
+#   main) it pushes one image to Azure Container Registry and deploys it to two Azure Container
+#   Apps: the API (verifies webhooks and enqueues reviews, starts in seconds) and the review
+#   worker (ingests the repo, then runs reviews from the queue). It then smoke-tests both.
 # Inputs: The repository source.
 #   GitHub secrets:    AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID (OIDC, no passwords).
-#   GitHub variables:  AZURE_RESOURCE_GROUP, ACR_NAME, CONTAINER_APP_NAME.
-#   App secrets (GROQ_API_KEY, etc.) are NOT used here. They live in the Container App.
+#   GitHub variables:  AZURE_RESOURCE_GROUP, ACR_NAME, CONTAINER_APP_NAME (the API),
+#                      WORKER_APP_NAME (the review worker).
+#   App secrets (GROQ_API_KEY, etc.) are NOT used here. They live in the Container Apps.
 # Outputs: Image <ACR_NAME>.azurecr.io/autonomous-code-reviewer:<git sha> (and :latest), a new
-#   Container App revision running that image, and a job summary with the revision and the
-#   /health result. Rollback steps are in infra/README.md ("Rolling back").
+#   revision of the worker and of the API running that image, and a job summary. The API is
+#   checked on /health. The worker has no ingress, so it is checked on its revision state.
+#   Rollback steps are in infra/README.md ("Rolling back").
 
 name: ci-cd
 
@@ -100,11 +103,13 @@ jobs:
           cache-to: type=gha,scope=build,mode=max
 
   # ---------------------------------------------------------------------------
-  # 3. deploy - push to ACR, update the Container App, then smoke-test /health.
+  # 3. deploy - push one image to ACR, then update the worker and the API to it.
   #    Runs ONLY for push to main or a manual run on main. Never for PRs.
-  #    It's also skipped (not failed) until the ACR_NAME repository variable
-  #    exists, so CI stays green before Azure is set up. Add the variables from
-  #    infra/azure-setup.sh's output to turn deploys on.
+  #    It's skipped (not failed) until the ACR_NAME repository variable exists, so
+  #    CI stays green before Azure is set up. Add the variables from
+  #    infra/azure-setup.sh's output to turn deploys on. Once ACR_NAME is set, a
+  #    missing setting (for example WORKER_APP_NAME) fails the job at the
+  #    "Check required settings" step.
   #    No `environment:` on purpose: the federated credential trusts only
   #    repo:OWNER/REPO:ref:refs/heads/main, and an environment would change the
   #    OIDC subject and fail with AADSTS70021.
@@ -121,7 +126,8 @@ jobs:
     env:
       IMAGE: ${{ vars.ACR_NAME }}.azurecr.io/autonomous-code-reviewer
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-      CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+      CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}   # the API
+      WORKER_APP_NAME: ${{ vars.WORKER_APP_NAME }}         # the review worker (same image)
       ACR_NAME: ${{ vars.ACR_NAME }}
     steps:
       - uses: actions/checkout@v4
@@ -136,12 +142,18 @@ jobs:
         run: |
           missing=0
           for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID \
-                      AZURE_RESOURCE_GROUP ACR_NAME CONTAINER_APP_NAME; do
+                      AZURE_RESOURCE_GROUP ACR_NAME CONTAINER_APP_NAME WORKER_APP_NAME; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing setting: $name (add it under Settings > Secrets and variables > Actions)"
               missing=1
             fi
           done
+          # The API and the worker must be two different apps. Otherwise the worker
+          # image would silently replace the API image.
+          if [ -n "${CONTAINER_APP_NAME:-}" ] && [ "${CONTAINER_APP_NAME:-}" = "${WORKER_APP_NAME:-}" ]; then
+            echo "::error::CONTAINER_APP_NAME and WORKER_APP_NAME must be different Container Apps"
+            missing=1
+          fi
           exit $missing
 
       - name: Log in to Azure (OIDC)
@@ -159,7 +171,8 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # Rebuilds from the same commit. The gha cache written by the build job makes this fast.
+      # One image for both apps. Rebuilds from the same commit. The gha cache written by
+      # the build job makes this fast.
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
@@ -173,27 +186,133 @@ jobs:
           cache-from: type=gha,scope=build
           cache-to: type=gha,scope=deploy,mode=max
 
-      - name: Deploy new image to the Container App
+      # ORDER: worker first, then API. Why:
+      #   - The API now only enqueues. Once the new API runs, every review goes to the
+      #     queue, so a consumer must already exist. Deploying the worker first ensures that.
+      #   - If the new worker fails (bad image, missing setting), the job stops here and the
+      #     webhook path is untouched. The old API keeps serving its old code.
+      #   - The old API (from before the queue change) never enqueues, so it cannot split
+      #     work with the new worker. The worker's ingestion does not affect the old API.
+      #   Caveat: a new worker shows "Running" as soon as its container starts, but it only
+      #   reads the queue after ingestion (minutes). Reviews queued in that time wait; none are lost.
+      - name: Deploy new image to the worker
+        run: |
+          az containerapp update \
+            --name "$WORKER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "${IMAGE}:${GITHUB_SHA}" \
+            -o none
+        # Only --image is passed. The command (python -m app.worker), env vars and secrets
+        # are part of the app template created by infra/azure-setup.sh and stay as they are.
+
+      # The worker has no ingress, so there is no /health. Two checks, both required:
+      #   a. The LATEST revision runs this commit's image, and it is the latest READY revision.
+      #   b. Its runningState is "Running" and stays "Running" for 60 s (a crash loop would
+      #      leave that state within the window).
+      # NOT checked: that ingestion has finished. Running starts before ingestion, so this
+      # step cannot prove the worker is consuming the queue yet. The step needs the worker
+      # to keep at least one replica running. If it scales to zero when idle, runningState
+      # will not be "Running" and this step fails. Not yet verified against a live app.
+      - name: Smoke test worker (no HTTP, waits up to 5 minutes)
+        run: |
+          set -uo pipefail
+          EXPECTED="${IMAGE}:${GITHUB_SHA}"
+          DEADLINE=$(( $(date +%s) + 300 ))
+
+          worker_show() {   # $1 = JMESPath query on the Container App
+            az containerapp show -n "$WORKER_APP_NAME" -g "$AZURE_RESOURCE_GROUP" \
+              --query "$1" -o tsv 2>/dev/null || true
+          }
+          revision_show() {   # $1 = revision name, $2 = JMESPath query on the revision
+            az containerapp revision show -n "$WORKER_APP_NAME" -g "$AZURE_RESOURCE_GROUP" \
+              --revision "$1" --query "$2" -o tsv 2>/dev/null || true
+          }
+
+          # Returns 0 when the latest revision runs EXPECTED, is the latest ready one and is
+          # Running. Sets LATEST, STATE and REASON.
+          check_once() {
+            LATEST="$(worker_show properties.latestRevisionName)"
+            READY="$(worker_show properties.latestReadyRevisionName)"
+            if [ -z "$LATEST" ]; then
+              REASON="could not read the latest revision"
+              return 1
+            fi
+            RUNNING_IMAGE="$(revision_show "$LATEST" 'properties.template.containers[0].image')"
+            STATE="$(revision_show "$LATEST" 'properties.runningState')"
+            if [ "$RUNNING_IMAGE" != "$EXPECTED" ]; then
+              REASON="latest revision $LATEST runs '${RUNNING_IMAGE:-unknown}', waiting for $EXPECTED"
+              return 1
+            fi
+            if [ "$READY" != "$LATEST" ] || [ "$STATE" != "Running" ]; then
+              REASON="revision $LATEST is not running yet (runningState: ${STATE:-unknown}, latest ready: ${READY:-none})"
+              return 1
+            fi
+            return 0
+          }
+
+          attempt=0
+          REASON="no attempt made"
+          LATEST=""
+          STATE=""
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            attempt=$((attempt + 1))
+            if check_once; then
+              echo "Revision $LATEST runs $EXPECTED and is Running. Checking that it stays Running for 60 s."
+              sleep 60
+              if check_once; then
+                echo "SUCCESS after $attempt attempt(s): worker revision $LATEST runs $EXPECTED and is still Running."
+                {
+                  echo "### Worker"
+                  echo "- Image: \`$EXPECTED\`"
+                  echo "- Active revision: \`$LATEST\`"
+                  echo "- State: Running (no HTTP check, the worker has no ingress)"
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              REASON="revision $LATEST left the Running state within 60 s: $REASON"
+            fi
+            echo "[attempt $attempt] $REASON"
+            sleep 15
+          done
+
+          echo "::error::Worker smoke test failed after 5 minutes. Last state: $REASON"
+          echo "Revisions of $WORKER_APP_NAME:"
+          az containerapp revision list -n "$WORKER_APP_NAME" -g "$AZURE_RESOURCE_GROUP" -o table || true
+          echo "Console logs (last 50 lines):"
+          az containerapp logs show -n "$WORKER_APP_NAME" -g "$AZURE_RESOURCE_GROUP" --tail 50 || true
+          echo "System logs (last 50 lines, for image pull or crash-loop errors):"
+          az containerapp logs show -n "$WORKER_APP_NAME" -g "$AZURE_RESOURCE_GROUP" --type system --tail 50 || true
+          {
+            echo "### Worker deployment FAILED"
+            echo "- Expected image: \`$EXPECTED\`"
+            echo "- Last state: $REASON"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      # Runs only after the worker is confirmed. The API starts in seconds (it verifies
+      # webhooks and enqueues), so the update is followed by a short wait.
+      - name: Deploy new image to the API
         run: |
           az containerapp update \
             --name "$CONTAINER_APP_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --image "${IMAGE}:${GITHUB_SHA}" \
             -o none
+        # Only --image is passed. Ingress and env vars come from the app template.
 
-      # Startup is slow: the app clones the repo, ingests it and loads the reranker
-      # before it answers /health with "ok". The loop waits up to 12 minutes.
-      # Two checks, both required:
+      # The API starts in seconds, so this waits up to 3 minutes. Two checks, both required:
       #   a. The LATEST revision runs this commit's image and is READY. In single-revision
       #      mode the old revision keeps serving until the new one is ready, so a /health
       #      check alone could pass against the OLD code.
-      #   b. GET /health returns HTTP 200 AND body {"status": "ok"}. The app returns 200
-      #      with "starting" while it is still ingesting.
-      - name: Smoke test /health (waits up to 12 minutes)
+      #   b. GET /health returns HTTP 200 AND body {"status": "ok"}. The body check still
+      #      guards against a wrong or unexpected response.
+      # Not yet verified against a live app: the exact az field names used below. The first run
+      # of this step is the test. The 3-minute limit is a guess to be tuned from real runs.
+      - name: Smoke test API /health (waits up to 3 minutes)
         run: |
           set -uo pipefail
           EXPECTED="${IMAGE}:${GITHUB_SHA}"
-          DEADLINE=$(( $(date +%s) + 720 ))
+          DEADLINE=$(( $(date +%s) + 180 ))
           HEALTH_BODY="$RUNNER_TEMP/health.json"
 
           app_show() {   # $1 = JMESPath query on the Container App
@@ -235,9 +354,9 @@ jobs:
                 CODE="$(curl -s -o "$HEALTH_BODY" -w '%{http_code}' --max-time 10 "$URL" || true)"
                 CODE="${CODE:-000}"
                 if [ "$CODE" = "200" ] && jq -e '.status == "ok"' "$HEALTH_BODY" >/dev/null 2>&1; then
-                  echo "SUCCESS after $attempt attempt(s): revision $LATEST runs $EXPECTED and /health is ok."
+                  echo "SUCCESS after $attempt attempt(s): API revision $LATEST runs $EXPECTED and /health is ok."
                   {
-                    echo "### Deployment"
+                    echo "### API"
                     echo "- Image: \`$EXPECTED\`"
                     echo "- Active revision: \`$LATEST\`"
                     echo "- Health: \`$URL\` returned 200 with status ok"
@@ -249,16 +368,17 @@ jobs:
             fi
 
             echo "[attempt $attempt] $REASON"
-            sleep 20
+            sleep 15
           done
 
-          echo "::error::Smoke test failed after 12 minutes. Last state: $REASON"
+          echo "::error::API smoke test failed after 3 minutes. Last state: $REASON"
           echo "Revisions of $CONTAINER_APP_NAME:"
           az containerapp revision list -n "$CONTAINER_APP_NAME" -g "$AZURE_RESOURCE_GROUP" -o table || true
           echo "Check the app logs: az containerapp logs show -n $CONTAINER_APP_NAME -g $AZURE_RESOURCE_GROUP --type system"
           {
-            echo "### Deployment FAILED"
+            echo "### API deployment FAILED"
             echo "- Expected image: \`$EXPECTED\`"
             echo "- Last state: $REASON"
+            echo "- The worker was already updated to this image. See the Worker section above."
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
