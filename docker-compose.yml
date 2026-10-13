@@ -2,7 +2,6 @@
 # Inputs: Environment variables from .env and the container image built from this repository.
 # Outputs: A running application container for local development.
 
-version: "3.9"
 services:
   app:
     build: .

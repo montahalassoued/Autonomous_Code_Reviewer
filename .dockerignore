@@ -1,0 +1,35 @@
+# File purpose: Keeps secrets, local state and dev-only files out of the Docker build context.
+# Inputs: The repository root, which is the build context for `docker build .`.
+# Outputs: A smaller, secret-free build context and image.
+
+# Secrets (never bake into an image; pass at runtime)
+.env
+.env.*
+!.env.example
+
+# Python virtualenvs and caches
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+htmlcov/
+coverage.xml
+
+# Local runtime state (recreated or mounted at runtime)
+chroma_data/
+test_chroma_data/
+target_repo/
+
+# VCS and editor/tooling
+.git/
+.claude/
+.vscode/
+.idea/
+
+# Not needed at runtime (CI runs the tests separately)
+test/
+docs/
+eval/results/
+*.png
+*.log
