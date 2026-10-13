@@ -1,12 +1,12 @@
 <!--
-File purpose: Project overview and onboarding guide for autonomous-code-reviewer.
-Inputs: A cloned repository, environment variables from .env, and Docker Compose services.
+File purpose: Short project overview: what it is, how it works, how to run it.
+Inputs: A cloned repository and an .env file (see .env.example).
 Outputs: A running review service (FastAPI) that receives GitHub webhooks and posts reviews back to GitHub.
 -->
 
 # autonomous-code-reviewer
 
-An autonomous multi-agent GitHub PR reviewer that uses LangGraph orchestration plus an advanced RAG pipeline to fetch repository context, run specialized security/performance/architecture/testing/documentation analyses in parallel, and post a structured Markdown review back to GitHub.
+An AI code reviewer that runs entirely through GitHub. You push code or open a pull request, and a multi-agent pipeline (LangGraph + RAG over your codebase) posts a review back on GitHub, grouped by category, with a recommendation for every finding.
 
 ## Architecture
 
@@ -27,92 +27,34 @@ An autonomous multi-agent GitHub PR reviewer that uses LangGraph orchestration p
  GitHub (review comments on the PR or commit)
 ```
 
-Everything happens in GitHub. There is no web UI. The design and roadmap are in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
+## Tech stack
 
-## Tech Stack
+| Area | Choice |
+| --- | --- |
+| Orchestration | LangGraph |
+| LLMs | Groq, Gemini |
+| RAG | tree-sitter, NetworkX call graph, ChromaDB, BM25 + Voyage embeddings, local reranker |
+| API | FastAPI + GitHub webhooks (PyGithub) |
+| Tracing & LLM eval | Langfuse |
+| Deploy | Docker, Azure Container Apps |
+| CI/CD | GitHub Actions |
 
-| Component                | Choice                              |
-| ------------------------ | ----------------------------------- |
-| LLM                      | Groq (llama-3.3-70b-versatile)      |
-| Embeddings               | Voyage AI voyage-code-2             |
-| Reranker                 | BAAI/bge-reranker-v2-m3 (local CPU) |
-| Graph/orchestration      | LangGraph + LangChain               |
-| Retrieval storage (dev)  | ChromaDB                            |
-| Retrieval storage (prod) | Qdrant Cloud                        |
-| Knowledge graph          | NetworkX (in-memory, persisted)     |
-| Backend                  | FastAPI                             |
-| Realtime progress        | WebSocket                           |
-| DB (persistence)         | PostgreSQL (Render free tier)       |
-| Cache                    | Redis (Docker local)                |
-| GitHub integration       | PyGithub + Webhooks                 |
-| Evaluation               | RAGAS                               |
-| Tracing & LLM evaluation | Langfuse (open source)              |
-| Deploy                   | Azure Container Apps (Docker)       |
-| CI/CD                    | GitHub Actions                      |
+## Quick start
+
+```bash
+cp .env.example .env          # fill in the API keys and TARGET_REPO_URL
+docker compose up --build     # API on http://localhost:8000 (GET /health)
+```
+
+Then point a GitHub webhook (pull request and push events) at `https://<your-server>/webhook/github`, with the same secret as `GITHUB_WEBHOOK_SECRET`.
 
 ## CI/CD
 
-The pipeline is defined in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml). It runs on GitHub Actions.
+Every pull request into `main` and every push to `main` runs **offline tests**, then a **Docker build**. Pushes to `main` also **deploy to Azure** once it's configured. Details: [docs/CI.md](docs/CI.md).
 
-### When it runs
+## Docs
 
-| You do | Pipeline | Jobs |
-| --- | --- | --- |
-| Push to a feature branch (no PR) | Doesn't run | none |
-| Open a PR into `main`, or push to that PR | Runs | **Offline tests**, then **Docker build** |
-| Push or merge into `main` | Runs | **Offline tests**, then **Docker build**, then **Deploy** (once Azure is configured) |
-| "Run workflow" in the Actions tab | Runs | Same as a push to `main` |
-
-If a job fails, the jobs after it don't run, so code that fails its tests never gets built or deployed.
-
-### Job 1: Offline tests
-
-This job installs Python 3.11 (the same version as the Docker image), CPU-only PyTorch and `requirements.txt`. Then it runs only the tests that make **no network calls and need no API keys**: every LLM, embedding model and GitHub call is replaced with a fake. So it's fast, free and deterministic.
-
-| Test file | What it checks |
-| --- | --- |
-| `test_pipeline_offline.py` | Runs the **real LangGraph pipeline end to end** with fake LLMs. It checks that:<ul><li>a clean PR finishes and gets a "no issues" review (no infinite loop)</li><li>each agent runs exactly once</li><li>low-quality retrieval stops after 3 attempts</li><li>agent prompts contain the **real code** of the retrieved functions and of their callers</li><li>there are no duplicate chunks</li><li>empty LLM responses don't crash the run</li><li>the reranker scores code, not names</li><li>stale index entries are deleted</li></ul> |
-| `test_ast_parser_identity.py` | The code parser:<ul><li>methods get class-qualified ids (`file::Class.method`)</li><li>decorators are included in the chunk</li><li>nested functions aren't double-counted</li><li>two `__init__` methods don't collide</li></ul> |
-| `test_knowledge.py` | The call graph: nodes, caller and callee edges, qualified ids, saving and loading |
-| `test_graph_retriever.py` | Graph expansion adds callers and callees, without duplicates, and **with their code** |
-| `test_state.py` | The shared review state: the shape of a `Finding`, and that parallel agent results are merged instead of overwritten |
-| `test_synthesizer.py` | The final Markdown review: sorted by severity, the summary counts, and the "no issues found" case |
-| `test_webhook.py` | The GitHub webhook endpoint:<ul><li>rejects a missing or invalid HMAC signature (401)</li><li>ignores non-PR events and actions</li><li>schedules a review for `opened` and `synchronize`</li><li>returns 400 for a malformed payload</li></ul> |
-| `test_main.py` | App startup and `GET /health`, with indexing mocked |
-
-The other tests in `test/` call real APIs (Groq, Gemini, Voyage, GitHub) and use quota. They run only on demand, through the separate **integration-tests** workflow (Actions tab, then "Run workflow").
-
-### Job 2: Docker build
-
-This job builds the production image from the [`Dockerfile`](Dockerfile) to prove it still builds. On PRs it **doesn't push** the image anywhere. Docker layers are cached between runs, which keeps later builds fast.
-
-### Job 3: Deploy
-
-This job runs only on `main`, and only once the Azure variables exist in GitHub. Until then it shows as **skipped**, not failed. When it does run:
-
-1. Log in to Azure with OIDC, so no password is stored in GitHub.
-2. Push the image to Azure Container Registry, tagged with the commit SHA.
-3. Update the Azure Container App to that image.
-4. Wait up to 12 minutes until the **new** version's `/health` returns `ok`.
-
-The setup is in [`infra/README.md`](infra/README.md).
-
-## Quick Start
-
-1. `git clone` the repository.
-2. `cp .env.example .env`
-3. Fill in all required keys/URLs.
-4. Start services: `docker-compose up --build`
-5. Run the API: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
-
-## Quick Start
-
-1. Clone the repository.
-2. Copy `.env.example` to `.env` and fill in the required tokens and connection values.
-3. Start the stack with `docker-compose up --build`.
-
-There is no web UI: GitHub is the interface. Push code or open a pull request, and the review appears on GitHub.
-
-```
-
-```
+- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md): target design and roadmap
+- [infra/README.md](infra/README.md): Azure setup and deployment
+- [docs/SETUP.md](docs/SETUP.md): getting the API keys
+- [DECISIONS.md](DECISIONS.md): architecture decisions
