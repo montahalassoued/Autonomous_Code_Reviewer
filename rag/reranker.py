@@ -30,13 +30,16 @@ content) wherever the candidate count allows it.
 """
 
 from dataclasses import dataclass
-from sentence_transformers import CrossEncoder
+from typing import TYPE_CHECKING
 from rag.graph_retriever import EnrichedResult
+
+if TYPE_CHECKING:
+    from sentence_transformers import CrossEncoder
 
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
-_model_cache: CrossEncoder | None = None
+_model_cache: "CrossEncoder | None" = None
 
 
 @dataclass
@@ -52,16 +55,22 @@ class RankedChunk:
     source: str  # carried over from EnrichedResult: "hybrid_search", "caller_of_X", etc.
 
 
-def _get_model() -> CrossEncoder:
+def _get_model() -> "CrossEncoder":
     """
     Lazily loads the cross-encoder once and caches it at module level.
 
     Loading a CrossEncoder is expensive (downloads + loads model
     weights into memory) - we do not want to pay that cost on every
-    single call to rerank(), only once per process lifetime.
+    single call to rerank(), only once per process lifetime. The
+    sentence_transformers import itself (which pulls in torch, ~230MB)
+    is deferred here too, not just the model construction - importing
+    it at module load time would cost that memory at app startup even
+    before any rerank() call, which is what blew past Render's 512MB
+    free-tier limit during ingestion.
     """
     global _model_cache
     if _model_cache is None:
+        from sentence_transformers import CrossEncoder
         _model_cache = CrossEncoder(RERANKER_MODEL)
     return _model_cache
 
