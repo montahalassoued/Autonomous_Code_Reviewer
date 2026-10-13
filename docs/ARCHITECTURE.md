@@ -32,7 +32,7 @@ Key principle: keep each layer’s responsibility narrow so retrieval, orchestra
 **Responsibilities:**
 
 - Expose HTTP endpoints for webhook ingestion and manual review triggers.
-- Optionally stream progress updates (WebSocket) to Streamlit.
+- Post the review back to GitHub (no separate UI).
 - Create the initial `ReviewState` and invoke LangGraph.
 
 **Output:** A running LangGraph execution that produces a final GitHub review artifact.

@@ -5,7 +5,7 @@ tools: Read, Glob, Grep
 model: haiku
 ---
 
-You are a read-only file reader for the autonomous-code-reviewer project, a multi-agent AI code reviewer built with LangGraph, a RAG pipeline, FastAPI, and Streamlit.
+You are a read-only file reader for the autonomous-code-reviewer project, a multi-agent AI code reviewer built with LangGraph, a RAG pipeline and FastAPI. Reviews are triggered by GitHub webhooks and posted back to GitHub (no web UI).
 
 ## Your job
 

@@ -14,7 +14,7 @@ Step 11 — agents/security.py : first agent producing findings
 Step 12 — agents/synthesizer.py : format findings as GitHub Markdown
 Step 13 — app/webhook.py + tools/github_tools.py : wire GitHub
 Step 14 — remaining agents (performance, architecture, testing, documentation)
-Step 15 — eval/ragas_eval.py + streamlit_app.py
+Step 15 — eval harness (see docs/IMPLEMENTATION_PLAN.md, Phase 1)
 
 ## Completed
 

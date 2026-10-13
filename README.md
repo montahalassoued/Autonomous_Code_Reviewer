@@ -1,7 +1,7 @@
 <!--
 File purpose: Project overview and onboarding guide for autonomous-code-reviewer.
 Inputs: A cloned repository, environment variables from .env, and Docker Compose services.
-Outputs: A running local review system accessible through FastAPI and Streamlit.
+Outputs: A running review service (FastAPI) that receives GitHub webhooks and posts reviews back to GitHub.
 -->
 
 # autonomous-code-reviewer
@@ -59,7 +59,6 @@ GitHub → FastAPI → LangGraph → RAG → GitHub comment
 | GitHub integration       | PyGithub + Webhooks                 |
 | Evaluation               | RAGAS                               |
 | Tracing & LLM evaluation | Langfuse (open source)              |
-| Dashboard                | Streamlit                           |
 | Deploy                   | Railway (Docker-based)              |
 | CI/CD                    | GitHub Actions                      |
 
@@ -77,7 +76,7 @@ GitHub → FastAPI → LangGraph → RAG → GitHub comment
 2. Copy `.env.example` to `.env` and fill in the required tokens and connection values.
 3. Start the stack with `docker-compose up --build`.
 
-The FastAPI service, supporting stores, and the Streamlit dashboard are intended to run together in the same local environment.
+There is no web UI: GitHub is the interface. Push code or open a pull request, and the review appears on GitHub.
 
 ```
 

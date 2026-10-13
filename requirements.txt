@@ -59,8 +59,6 @@ gitpython>=3.1.40                  # clone repos for ingestion
 ragas>=0.1.0
 datasets>=2.20.0                   # required by ragas
 
-# --- Dashboard (Step 15) ---
-streamlit>=1.38.0
 
 # --- Core utilities ---
 pydantic>=2.8.0
