@@ -32,7 +32,7 @@ GitHub (pull_request webhook)
                                         +-------------------------------+
 ```
 
-A job is deleted from the queue only after it succeeded. If the worker crashes or the review fails, the message reappears after the visibility timeout and is retried; after `MAX_ATTEMPTS` (3) failures it moves to `review-jobs-poison`. Posting the comment is an upsert, so a retry edits the comment instead of duplicating it. Reasoning: see `DECISIONS.md`, "Why a durable queue + separate worker for reviews".
+A job is deleted from the queue only after it succeeded. If the worker crashes or the review fails, the message reappears after the visibility timeout and is retried; after `MAX_ATTEMPTS` (3) failures it moves to `review-jobs-poison`. Posting the comment is an upsert, so a retry edits the comment instead of duplicating it. Reasoning: see `docs/DECISIONS.md`, "Why a durable queue + separate worker for reviews".
 
 ## What gets created and why
 

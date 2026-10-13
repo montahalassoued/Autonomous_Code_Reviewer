@@ -28,7 +28,7 @@ This job installs Python 3.11 (the same version as the Docker image), CPU-only P
 | `test_webhook.py` | The GitHub webhook endpoint:<ul><li>rejects a missing or invalid HMAC signature (401)</li><li>ignores non-PR events and actions</li><li>schedules a review for `opened` and `synchronize`</li><li>returns 400 for a malformed payload</li></ul> |
 | `test_main.py` | App startup and `GET /health`, with indexing mocked |
 
-The other tests in `test/` call real APIs (Groq, Gemini, Voyage, GitHub) and use quota. They run only on demand, through the separate **integration-tests** workflow (Actions tab, then "Run workflow").
+The other tests in `tests/` call real APIs (Groq, Gemini, Voyage, GitHub) and use quota. They run only on demand, through the separate **integration-tests** workflow (Actions tab, then "Run workflow").
 
 ## Job 2: Docker build
 

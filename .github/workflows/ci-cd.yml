@@ -60,19 +60,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run offline tests
-        run: >
-          python -m pytest -q
-          test/test_pipeline_offline.py
-          test/test_ast_parser_identity.py
-          test/test_knowledge.py
-          test/test_graph_retriever.py
-          test/test_state.py
-          test/test_synthesizer.py
-          test/test_webhook.py
-          test/test_main.py
-          test/test_job_queue.py
-          test/test_dedupe.py
-          test/test_worker.py
+        # Every test in tests/unit/ runs: offline, no API keys. New unit tests are
+        # picked up automatically (no hand-maintained file list).
+        run: python -m pytest tests/unit -q
 
   # ---------------------------------------------------------------------------
   # 2. build - proves the Dockerfile builds. Never pushes (push: false).

@@ -5,7 +5,7 @@ No Azure, ingestion, or LLM calls: with JOBS_BACKEND=memory the lifespan
 startup only builds the in-memory queue and dedupe store. This test
 verifies main.py's own wiring (routes mounted, health is immediately ok,
 queue and dedupe are on app.state, nothing is ingested). The worker's
-startup work is covered by test/test_worker.py.
+startup work is covered by tests/unit/test_worker.py.
 """
 
 import os
