@@ -1,0 +1,258 @@
+# File purpose: CI/CD pipeline for the autonomous code reviewer. Runs the fast offline tests and a
+#   Docker build on every pull request and push to main. On push to main (or a manual run from
+#   main) it pushes the image to Azure Container Registry, deploys it to Azure Container Apps
+#   and smoke-tests /health.
+# Inputs: The repository source.
+#   GitHub secrets:    AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID (OIDC, no passwords).
+#   GitHub variables:  AZURE_RESOURCE_GROUP, ACR_NAME, CONTAINER_APP_NAME.
+#   App secrets (GROQ_API_KEY, etc.) are NOT used here. They live in the Container App.
+# Outputs: Image <ACR_NAME>.azurecr.io/autonomous-code-reviewer:<git sha> (and :latest), a new
+#   Container App revision running that image, and a job summary with the revision and the
+#   /health result. Rollback steps are in infra/README.md ("Rolling back").
+
+name: ci-cd
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One run per ref at a time. PR runs are cancelled when superseded. Main runs are NOT
+# cancelled, so a deploy that is already running always finishes.
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege by default. The deploy job adds id-token: write for OIDC.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. test - fast tests that make NO network calls and need NO API keys.
+  #    No env vars are set here on purpose: test_webhook.py and test_main.py set
+  #    their own values, and there is no .env file in CI.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Offline tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # matches ARG PYTHON_VERSION=3.11 in the Dockerfile
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # CPU-only torch first, so sentence-transformers finds it already installed
+      # and does not pull the multi-GB CUDA wheels.
+      - name: Install CPU-only torch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install project requirements
+        run: pip install -r requirements.txt
+
+      - name: Run offline tests
+        run: >
+          python -m pytest -q
+          test/test_pipeline_offline.py
+          test/test_ast_parser_identity.py
+          test/test_knowledge.py
+          test/test_graph_retriever.py
+          test/test_state.py
+          test/test_synthesizer.py
+          test/test_webhook.py
+          test/test_main.py
+
+  # ---------------------------------------------------------------------------
+  # 2. build - proves the Dockerfile builds. Never pushes (push: false).
+  #    Runs on PRs and on main. Writes the gha cache that the deploy job reuses.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Docker build (no push)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: autonomous-code-reviewer:${{ github.sha }}
+          # Optional, OFF for now: to bake the reranker model into the image, add the line
+          #   PRELOAD_RERANKER=true
+          # under build-args below. The image gets bigger and the build slower.
+          build-args: |
+            PYTHON_VERSION=3.11
+          cache-from: type=gha,scope=build
+          cache-to: type=gha,scope=build,mode=max
+
+  # ---------------------------------------------------------------------------
+  # 3. deploy - push to ACR, update the Container App, then smoke-test /health.
+  #    Runs ONLY for push to main or a manual run on main. Never for PRs.
+  #    No `environment:` on purpose: the federated credential trusts only
+  #    repo:OWNER/REPO:ref:refs/heads/main, and an environment would change the
+  #    OIDC subject and fail with AADSTS70021.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Push and deploy to Azure Container Apps
+    needs: build
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write   # required by azure/login (OIDC)
+    env:
+      IMAGE: ${{ vars.ACR_NAME }}.azurecr.io/autonomous-code-reviewer
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check required settings
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          missing=0
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID \
+                      AZURE_RESOURCE_GROUP ACR_NAME CONTAINER_APP_NAME; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing setting: $name (add it under Settings > Secrets and variables > Actions)"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Log in to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install the Container Apps CLI extension
+        run: az extension add --name containerapp --upgrade --yes
+
+      - name: Log in to ACR
+        run: az acr login --name "$ACR_NAME"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Rebuilds from the same commit. The gha cache written by the build job makes this fast.
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          build-args: |
+            PYTHON_VERSION=3.11
+          cache-from: type=gha,scope=build
+          cache-to: type=gha,scope=deploy,mode=max
+
+      - name: Deploy new image to the Container App
+        run: |
+          az containerapp update \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "${IMAGE}:${GITHUB_SHA}" \
+            -o none
+
+      # Startup is slow: the app clones the repo, ingests it and loads the reranker
+      # before it answers /health with "ok". The loop waits up to 12 minutes.
+      # Two checks, both required:
+      #   a. The LATEST revision runs this commit's image and is READY. In single-revision
+      #      mode the old revision keeps serving until the new one is ready, so a /health
+      #      check alone could pass against the OLD code.
+      #   b. GET /health returns HTTP 200 AND body {"status": "ok"}. The app returns 200
+      #      with "starting" while it is still ingesting.
+      - name: Smoke test /health (waits up to 12 minutes)
+        run: |
+          set -uo pipefail
+          EXPECTED="${IMAGE}:${GITHUB_SHA}"
+          DEADLINE=$(( $(date +%s) + 720 ))
+          HEALTH_BODY="$RUNNER_TEMP/health.json"
+
+          app_show() {   # $1 = JMESPath query on the Container App
+            az containerapp show -n "$CONTAINER_APP_NAME" -g "$AZURE_RESOURCE_GROUP" \
+              --query "$1" -o tsv 2>/dev/null || true
+          }
+          revision_show() {   # $1 = revision name, $2 = JMESPath query on the revision
+            az containerapp revision show -n "$CONTAINER_APP_NAME" -g "$AZURE_RESOURCE_GROUP" \
+              --revision "$1" --query "$2" -o tsv 2>/dev/null || true
+          }
+
+          FQDN="$(app_show properties.configuration.ingress.fqdn)"
+          if [ -z "$FQDN" ]; then
+            echo "::error::Could not read the ingress FQDN of $CONTAINER_APP_NAME"
+            exit 1
+          fi
+          URL="https://${FQDN}/health"
+          echo "Expected image: $EXPECTED"
+          echo "Health URL:     $URL"
+
+          attempt=0
+          REASON="no attempt made"
+          LATEST=""
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            attempt=$((attempt + 1))
+            LATEST="$(app_show properties.latestRevisionName)"
+            READY="$(app_show properties.latestReadyRevisionName)"
+
+            if [ -z "$LATEST" ]; then
+              REASON="could not read the latest revision"
+            else
+              RUNNING_IMAGE="$(revision_show "$LATEST" 'properties.template.containers[0].image')"
+              if [ "$RUNNING_IMAGE" != "$EXPECTED" ]; then
+                REASON="latest revision $LATEST runs '${RUNNING_IMAGE:-unknown}', waiting for $EXPECTED"
+              elif [ "$READY" != "$LATEST" ]; then
+                STATE="$(revision_show "$LATEST" 'properties.runningState')"
+                REASON="revision $LATEST is not ready yet (runningState: ${STATE:-unknown})"
+              else
+                CODE="$(curl -s -o "$HEALTH_BODY" -w '%{http_code}' --max-time 10 "$URL" || true)"
+                CODE="${CODE:-000}"
+                if [ "$CODE" = "200" ] && jq -e '.status == "ok"' "$HEALTH_BODY" >/dev/null 2>&1; then
+                  echo "SUCCESS after $attempt attempt(s): revision $LATEST runs $EXPECTED and /health is ok."
+                  {
+                    echo "### Deployment"
+                    echo "- Image: \`$EXPECTED\`"
+                    echo "- Active revision: \`$LATEST\`"
+                    echo "- Health: \`$URL\` returned 200 with status ok"
+                  } >> "$GITHUB_STEP_SUMMARY"
+                  exit 0
+                fi
+                REASON="revision $LATEST is ready but /health returned HTTP $CODE: $(head -c 200 "$HEALTH_BODY" 2>/dev/null)"
+              fi
+            fi
+
+            echo "[attempt $attempt] $REASON"
+            sleep 20
+          done
+
+          echo "::error::Smoke test failed after 12 minutes. Last state: $REASON"
+          echo "Revisions of $CONTAINER_APP_NAME:"
+          az containerapp revision list -n "$CONTAINER_APP_NAME" -g "$AZURE_RESOURCE_GROUP" -o table || true
+          echo "Check the app logs: az containerapp logs show -n $CONTAINER_APP_NAME -g $AZURE_RESOURCE_GROUP --type system"
+          {
+            echo "### Deployment FAILED"
+            echo "- Expected image: \`$EXPECTED\`"
+            echo "- Last state: $REASON"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
