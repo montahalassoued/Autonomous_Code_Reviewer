@@ -80,7 +80,7 @@ It is optimized for code review by working at function-level granularity, using 
 
 **Observability:**
 
-- LangSmith tracing (free tier) for debugging agent/tool decisions.
+- Langfuse tracing (open source, self-hostable) for debugging agent/tool decisions and evaluating LLM outputs.
 - RAGAS evaluation scripts for measuring retrieval quality.
 
 **Output:** Persisted records, traces, and evaluation reports.

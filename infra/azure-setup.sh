@@ -20,7 +20,7 @@
 #        export TARGET_REPO_URL='https://github.com/owner/repo.git'
 #        export GROQ_API_KEY='...'  GOOGLE_API_KEY='...'  VOYAGE_API_KEY='...'
 #        export GITHUB_TOKEN='...'  GITHUB_WEBHOOK_SECRET='...'
-#        # optional: export LANGSMITH_API_KEY='...'
+#        # optional (Langfuse tracing): export LANGFUSE_PUBLIC_KEY='...' LANGFUSE_SECRET_KEY='...'
 #   3. Run:   bash infra/azure-setup.sh
 #      Set PAUSE=1 to stop and wait for Enter between steps:
 #                PAUSE=1 bash infra/azure-setup.sh
@@ -71,7 +71,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 # App secrets are read from YOUR shell environment. Required ones must be set,
 # because Container Apps refuses empty secret values.
 REQUIRED_SECRETS=(TARGET_REPO_URL GROQ_API_KEY GOOGLE_API_KEY VOYAGE_API_KEY GITHUB_TOKEN GITHUB_WEBHOOK_SECRET)
-OPTIONAL_SECRETS=(LANGSMITH_API_KEY)
+OPTIONAL_SECRETS=(LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY)
 missing=0
 for v in "${REQUIRED_SECRETS[@]}"; do
   if [ -z "${!v:-}" ]; then echo "WARNING: required variable $v is empty in your shell." >&2; missing=1; fi
@@ -161,7 +161,7 @@ for v in "${REQUIRED_SECRETS[@]}" "${OPTIONAL_SECRETS[@]}"; do
   fi
 done
 # Non-secret settings (plain env vars).
-ENV_ARGS+=("ENV=production" "LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-autonomous-code-reviewer}")
+ENV_ARGS+=("ENV=production" "LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}")
 
 if ! az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null; then
   # NOTE: the placeholder image listens on port 80, not 8000, so the first
@@ -225,8 +225,8 @@ YAML_FILE="./containerapp.generated.yaml"   # relative path: avoids Git Bash/Win
   done
   echo "          - name: ENV"
   echo "            value: production"
-  echo "          - name: LANGSMITH_PROJECT"
-  echo "            value: ${LANGSMITH_PROJECT:-autonomous-code-reviewer}"
+  echo "          - name: LANGFUSE_HOST"
+  echo "            value: ${LANGFUSE_HOST:-https://cloud.langfuse.com}"
   cat <<EOF
         probes:
           - type: Startup

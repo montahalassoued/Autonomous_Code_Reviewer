@@ -38,12 +38,14 @@ Step-by-step for every account.
 
 ---
 
-## 5) LangSmith (Tracing)
+## 5) Langfuse (tracing + LLM evaluation, open source)
 
-1. Go to https://smith.langchain.com and sign up.
-2. Create a project/workspace.
-3. Copy `LANGSMITH_API_KEY`.
-4. Set `LANGSMITH_PROJECT` to `autonomous-code-reviewer`.
+1. Pick where Langfuse runs:
+   - **Langfuse Cloud:** sign up at https://cloud.langfuse.com. This is the easiest option.
+   - **Self-hosted:** run Langfuse with its official Docker Compose setup (see the Langfuse docs, "Self-hosting").
+2. Create a project named `autonomous-code-reviewer`.
+3. In the project settings, create API keys, then copy `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`.
+4. Set `LANGFUSE_HOST` to the cloud URL for your region, or to your self-hosted URL.
 
 ---
 

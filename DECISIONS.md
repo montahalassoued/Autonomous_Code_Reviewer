@@ -90,3 +90,17 @@ long inputs anyway). The position-aware duplicate of the best chunk
 was also removed: with 5 chunks it put the same code into every agent
 prompt twice. Whether this improves retrieval quality has not been
 measured yet (Phase 1 eval).
+
+## Why Langfuse over LangSmith for tracing and LLM evaluation
+
+We need traces of every LLM call (prompts, outputs, tokens, latency, cost),
+plus evaluation of review quality across prompt and model changes. LangSmith is
+a paid SaaS beyond its free tier and is closed source. Langfuse is open source
+(MIT), so it can be self-hosted (no per-trace cost, data stays with us) or used
+via its managed cloud, and it covers tracing, prompt versioning, datasets and
+scores in one tool. LangSmith was only declared in requirements and config, with
+no tracing code yet, so switching costs nothing. Integration point: the shared
+LLM client planned in Phase 3 (agents/llm_client.py), so all LLM calls get
+traced in one place. The eval harness (Phase 1) can push its scores to Langfuse.
+Trade-off: self-hosting adds infrastructure to run, so start on Langfuse Cloud
+and self-host later if needed.

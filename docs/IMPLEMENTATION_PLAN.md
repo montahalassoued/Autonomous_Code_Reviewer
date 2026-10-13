@@ -96,6 +96,8 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
 - **Findings:** precision and recall per category, false positives on clean PRs, the injection case.
 - **Ops:** calls per review, latency. Each configuration runs 3 times, and differences of about 0.02 or less count as noise.
 
+**Langfuse:** each eval run is logged as a Langfuse dataset run, with the scores attached to the traces, so runs can be compared in the Langfuse UI. The JSON files in `eval/results/` stay the source of truth.
+
 **Agents:** ai-engineer.
 
 ### Phase 2: Webhook reliability for PR events (S-M, can run in parallel with Phase 1)
@@ -122,6 +124,7 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
   - JSON mode
   - call counters
   - a concurrency limit
+  - **Langfuse tracing:** one trace per review, with a generation for each LLM call (prompt, output, tokens, latency). It's enabled only when `LANGFUSE_PUBLIC_KEY` is set, and it's a no-op in tests.
 - `agents/prompting.py`: `wrap_untrusted()` with nonce delimiters, so untrusted content is treated as data.
 - `agents/agent_runner.py` and `agents/agent_specs.py`: an `AgentSpec(name: security|logic|quality, system_prompt, focus, model, temperature, max_findings)`, plus `run_agent()` and `make_agent_node()`. It validates severity, the line number and a non-empty recommendation, and logs every dropped finding.
 - `Finding` gains a `category` (and optionally `end_line`).

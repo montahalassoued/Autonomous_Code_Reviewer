@@ -58,7 +58,9 @@ export VOYAGE_API_KEY='...'
 export GITHUB_TOKEN='...'
 export GITHUB_WEBHOOK_SECRET='choose-a-long-random-string'
 # optional
-export LANGSMITH_API_KEY='...'
+export LANGFUSE_PUBLIC_KEY='...'
+export LANGFUSE_SECRET_KEY='...'
+export LANGFUSE_HOST='https://cloud.langfuse.com'   # or your self-hosted Langfuse URL
 ```
 
 If `TARGET_REPO_URL` is a private repo, the clone needs credentials; check how `clone_repository` in `rag/ingestion.py` handles that before relying on it.
@@ -129,7 +131,7 @@ Live stream:
 az containerapp logs show -n <APP_NAME> -g <RESOURCE_GROUP> --follow
 ```
 
-Add `--type system` to see platform events (image pull, probe failures). For history and queries, open the Log Analytics workspace in the portal and run, for example, `ContainerAppConsoleLogs_CL | order by TimeGenerated desc`. If you set `LANGSMITH_API_KEY`, LLM traces also show up in LangSmith.
+Add `--type system` to see platform events (image pull, probe failures). For history and queries, open the Log Analytics workspace in the portal and run, for example, `ContainerAppConsoleLogs_CL | order by TimeGenerated desc`. If you set the `LANGFUSE_*` variables, LLM traces also show up in Langfuse.
 
 ## Rolling back
 

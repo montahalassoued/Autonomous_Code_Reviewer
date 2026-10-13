@@ -10,4 +10,5 @@
 - Corrective RAG loop: guarantees every review has sufficient context before agents run
 - NetworkX over Neo4j: zero infrastructure cost, in-memory, sufficient for single repo graphs
 - ChromaDB dev / Qdrant prod: zero setup locally, horizontal scaling in production
+- Langfuse over LangSmith: open source, self-hostable, tracing + evals + prompt versioning, no per-trace cost
 - Railway over DigitalOcean: GitHub login only, no credit card, Docker-native

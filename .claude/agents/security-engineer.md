@@ -22,7 +22,7 @@ These come from the user's CLAUDE.md and override everything below:
 **What it is:** a public HTTPS service that receives GitHub webhooks, reads PR diffs with a GitHub token, sends code to third-party LLM and embedding APIs (Groq, Google Gemini, Voyage), and posts comments back to GitHub. It will be deployed as a Docker container on **Azure**.
 
 **Assets to protect:**
-- Secrets: `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `LANGSMITH_API_KEY`
+- Secrets: `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`
 - The GitHub token's write access to PRs and comments
 - The source code of the reviewed repo, which is sent to external LLM providers
 

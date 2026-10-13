@@ -26,7 +26,7 @@ These come from the user's CLAUDE.md and override everything below:
   - **Memory:** plan 2GB or more.
   - **Health probes:** give the startup probe enough time before it fails the container.
   - **Storage:** Chroma data and the cloned repo live on local disk and are lost on restart unless a volume (Azure Files) is mounted. Explain the trade-off.
-- **Secrets / env vars:** `TARGET_REPO_URL`, `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, plus optional `LANGSMITH_API_KEY` and `LANGSMITH_PROJECT`.
+- **Secrets / env vars:** `TARGET_REPO_URL`, `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, plus optional `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_HOST`.
 - **Previous target:** `render.yaml` (Render). The user is moving to **Azure**. Keep `render.yaml` unless the user decides to remove it.
 - **Tests:** most tests in `test/` make real LLM and API calls. In CI, run only the fast no-network tests by default (`test_state.py`, `test_synthesizer.py`, `test_webhook.py`, `test_main.py`), and gate the integration tests behind a manual trigger or secrets.
 
@@ -54,7 +54,7 @@ These come from the user's CLAUDE.md and override everything below:
 - Secrets are in GitHub, Azure Key Vault or Container Apps secrets, never in the repo
 - Health check and startup probe are configured for the slow startup
 - Rollback is possible by redeploying the previous image tag
-- Logs are visible (Container Apps logs / Log Analytics, optionally LangSmith tracing)
+- Logs are visible (Container Apps logs / Log Analytics, optionally Langfuse tracing)
 - Cost is understood (min replicas, CPU and memory, registry tier)
 
 ## Infrastructure as Code
@@ -75,7 +75,7 @@ These come from the user's CLAUDE.md and override everything below:
 ## Monitoring and observability
 - Log aggregation (Log Analytics)
 - Metrics collection (`prometheus-client` is in requirements)
-- Distributed tracing (LangSmith)
+- Distributed tracing (Langfuse)
 - Alert management
 - Health endpoints
 

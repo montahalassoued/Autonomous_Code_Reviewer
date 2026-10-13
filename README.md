@@ -58,7 +58,7 @@ GitHub → FastAPI → LangGraph → RAG → GitHub comment
 | Cache                    | Redis (Docker local)                |
 | GitHub integration       | PyGithub + Webhooks                 |
 | Evaluation               | RAGAS                               |
-| Tracing                  | LangSmith (free tier)               |
+| Tracing & LLM evaluation | Langfuse (open source)              |
 | Dashboard                | Streamlit                           |
 | Deploy                   | Railway (Docker-based)              |
 | CI/CD                    | GitHub Actions                      |
