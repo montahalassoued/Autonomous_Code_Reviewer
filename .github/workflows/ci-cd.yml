@@ -99,6 +99,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # 3. deploy - push to ACR, update the Container App, then smoke-test /health.
   #    Runs ONLY for push to main or a manual run on main. Never for PRs.
+  #    It's also skipped (not failed) until the ACR_NAME repository variable
+  #    exists, so CI stays green before Azure is set up. Add the variables from
+  #    infra/azure-setup.sh's output to turn deploys on.
   #    No `environment:` on purpose: the federated credential trusts only
   #    repo:OWNER/REPO:ref:refs/heads/main, and an environment would change the
   #    OIDC subject and fail with AADSTS70021.
@@ -106,7 +109,7 @@ jobs:
   deploy:
     name: Push and deploy to Azure Container Apps
     needs: build
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.ACR_NAME != ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
