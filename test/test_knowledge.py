@@ -8,7 +8,9 @@ previous steps, and verify:
 3. External calls (bcrypt.hashpw, db.execute) are correctly SKIPPED
    (not turned into broken edges to non-existent nodes)
 4. get_callers / get_callees correctly traverse the graph
-5. save_graph / load_graph round-trip works
+5. methods get class-qualified node ids ("file::Class.method"), so two
+   __init__ methods in one file don't collide
+6. save_graph / load_graph round-trip works
 """
 
 import os
@@ -99,6 +101,40 @@ def test_get_callees_finds_what_a_function_calls():
     print(f"OK - login() calls: {callees}")
 
 
+METHOD_CODE = '''class UserService:
+    def __init__(self, db):
+        self.db = db
+
+    def register(self, email):
+        return normalize_email(email)
+
+
+class AdminService:
+    def __init__(self, db):
+        self.db = db
+
+
+def normalize_email(email):
+    return email.strip().lower()
+'''
+
+
+def test_methods_get_class_qualified_node_ids():
+    functions = parse_file("services.py", METHOD_CODE)
+    graph = build_knowledge_graph(functions)
+
+    # two __init__ methods in one file must be two distinct nodes
+    assert "services.py::UserService.__init__" in graph
+    assert "services.py::AdminService.__init__" in graph
+    assert graph.number_of_nodes() == 4, f"Expected 4 nodes, got {list(graph.nodes)}"
+
+    # calls still resolve by bare name, and the edge uses qualified ids
+    assert graph.has_edge("services.py::UserService.register", "services.py::normalize_email")
+    assert get_callers(graph, "services.py", "normalize_email") == ["services.py::UserService.register"]
+    assert get_callees(graph, "services.py", "UserService.register") == ["services.py::normalize_email"]
+    print(f"OK - qualified node ids: {list(graph.nodes)}")
+
+
 def test_save_and_load_roundtrip():
     functions = parse_file("auth/utils.py", SAMPLE_CODE)
     graph = build_knowledge_graph(functions)
@@ -119,5 +155,6 @@ if __name__ == "__main__":
     test_external_calls_are_skipped_not_broken()
     test_get_callers_finds_who_calls_a_function()
     test_get_callees_finds_what_a_function_calls()
+    test_methods_get_class_qualified_node_ids()
     test_save_and_load_roundtrip()
     print("\nAll knowledge_graph tests passed.")

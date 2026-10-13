@@ -136,6 +136,6 @@ def contextualize_functions(
     for fn in functions:
         context = generate_context(client, fn)
         results.append(ContextualChunk(function=fn, context=context))
-        print(f"  contextualized {fn.name} ({fn.file_path}:{fn.start_line})")
+        print(f"  contextualized {fn.qualified_name} ({fn.file_path}:{fn.start_line})")
 
     return results

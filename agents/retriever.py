@@ -14,8 +14,9 @@ RAG pipeline never had: an LLM-as-judge that scores whether the
 retrieved context is actually good enough, and triggers a retry with
 reformulated queries if not - bounded by ReviewState.retrieval_attempts
 to guarantee termination (agents/graph.py's route_after_retriever
-already implements the bounded-retry routing logic; this module is
-what actually DOES the retrieval work that routing function inspects).
+implements the bounded-retry routing using QUALITY_THRESHOLD and
+MAX_RETRIEVAL_ATTEMPTS from this module; this module is what actually
+DOES the retrieval work that routing function inspects).
 """
 
 import os
@@ -30,7 +31,13 @@ from rag.reranker import rerank, RankedChunk
 
 
 JUDGE_MODEL = "llama-3.3-70b-versatile"
+
+# Corrective-RAG loop bounds, read by agents/graph.py's routing: retry
+# retrieval while the judge scores below QUALITY_THRESHOLD, but never
+# more than MAX_RETRIEVAL_ATTEMPTS times in total, so a review always
+# reaches the agents even when retrieval stays poor.
 QUALITY_THRESHOLD = 0.5
+MAX_RETRIEVAL_ATTEMPTS = 3
 
 JUDGE_PROMPT_TEMPLATE = """You are evaluating whether retrieved code context is good enough
 to review a pull request diff.
@@ -60,6 +67,21 @@ def _build_groq_client() -> Groq:
     return Groq(api_key=api_key)
 
 
+def _qualified_name(metadata: dict) -> str:
+    """
+    Returns a chunk's qualified name ("Class.method"), falling back to
+    the bare function_name for metadata written before qualified names
+    existed (module-level functions have the same value for both).
+
+    Args:
+        metadata: a chunk metadata dict (Chroma or graph_retriever shape)
+
+    Returns:
+        the qualified name
+    """
+    return metadata.get("qualified_name", metadata["function_name"])
+
+
 def _ranked_chunk_to_retrieved_chunk(chunk: RankedChunk, graph) -> RetrievedChunk:
     """
     Converts a reranker.py RankedChunk (chunk_id + metadata dict) into
@@ -67,16 +89,26 @@ def _ranked_chunk_to_retrieved_chunk(chunk: RankedChunk, graph) -> RetrievedChun
     that's the contract every domain agent (security.py, etc.) will
     read from. Pulls caller info from the graph directly rather than
     re-deriving it, since we already have the graph loaded here.
+
+    function_name is set to the qualified name ("Class.method") so the
+    agents can tell two same-named methods apart.
+
+    Args:
+        chunk: one reranked chunk
+        graph: the knowledge graph, or None
+
+    Returns:
+        the RetrievedChunk for ReviewState.retrieved_context
     """
     from rag.knowledge_graph import get_callers
 
     file_path = chunk.metadata["file_path"]
-    function_name = chunk.metadata["function_name"]
-    callers = get_callers(graph, file_path, function_name) if graph is not None else []
+    qualified_name = _qualified_name(chunk.metadata)
+    callers = get_callers(graph, file_path, qualified_name) if graph is not None else []
 
     return RetrievedChunk(
         file_path=file_path,
-        function_name=function_name,
+        function_name=qualified_name,
         code=chunk.metadata.get("code", ""),
         context=chunk.metadata.get("context", ""),
         relevance_score=chunk.rerank_score,
@@ -98,7 +130,7 @@ def _judge_retrieval_quality(diff: str, chunks: list[RankedChunk]) -> float:
 
     client = _build_groq_client()
     context_summary = "\n".join(
-        f"- {c.metadata['function_name']} ({c.metadata['file_path']})"
+        f"- {_qualified_name(c.metadata)} ({c.metadata['file_path']})"
         for c in chunks
     )
     prompt = JUDGE_PROMPT_TEMPLATE.format(diff=diff, context_summary=context_summary)
@@ -109,7 +141,9 @@ def _judge_retrieval_quality(diff: str, chunks: list[RankedChunk]) -> float:
         temperature=0.0,  # deterministic scoring, not creative
     )
 
-    raw_output = response.choices[0].message.content.strip()
+    # content can be None on an empty or filtered completion; "" then
+    # fails to parse below and scores 0.0, same as any bad output.
+    raw_output = (response.choices[0].message.content or "").strip()
     raw_output = raw_output.strip("`").removeprefix("json").strip()
 
     try:

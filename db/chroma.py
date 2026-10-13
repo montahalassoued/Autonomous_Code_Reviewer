@@ -47,6 +47,23 @@ def get_collection(client: chromadb.ClientAPI):
     )
 
 
+def make_chunk_id(chunk: ContextualChunk) -> str:
+    """
+    Builds the stable id of a chunk: "file_path::qualified_name".
+
+    This is the same id rag/knowledge_graph.py uses for graph nodes,
+    so a search hit can be looked up in the graph directly. It is
+    defined once here so ingestion and storage can't drift apart.
+
+    Args:
+        chunk: a ContextualChunk from rag/contextual_chunker.py
+
+    Returns:
+        the chunk id, e.g. "auth/service.py::AuthService.login"
+    """
+    return f"{chunk.function.file_path}::{chunk.function.qualified_name}"
+
+
 def store_chunks(
     collection,
     chunks: list[ContextualChunk],
@@ -63,26 +80,28 @@ def store_chunks(
                     (same order as chunks - this pairing is the
                     caller's responsibility, enforced here by zip())
 
-    Each chunk's metadata (file_path, function_name, line numbers) is
-    stored alongside its vector, so a search result can be turned
-    directly into a RetrievedChunk (agents/state.py) without a second
-    lookup anywhere else.
+    Each chunk's metadata (file_path, function_name, qualified_name,
+    line numbers, context, code) is stored alongside its vector, so a
+    search result can be turned directly into a RetrievedChunk
+    (agents/state.py) without a second lookup anywhere else. The code
+    is stored in metadata (not only in `documents`) because every
+    downstream consumer (graph_retriever, reranker, retriever) reads
+    chunk metadata, and documents also carry the context sentence.
     """
     if not chunks:
         return
 
-    ids = [
-        f"{chunk.function.file_path}::{chunk.function.name}"
-        for chunk in chunks
-    ]
+    ids = [make_chunk_id(chunk) for chunk in chunks]
     documents = [chunk.embeddable_text for chunk in chunks]
     metadatas = [
         {
             "file_path": chunk.function.file_path,
             "function_name": chunk.function.name,
+            "qualified_name": chunk.function.qualified_name,
             "start_line": chunk.function.start_line,
             "end_line": chunk.function.end_line,
             "context": chunk.context,
+            "code": chunk.function.code,
             # ChromaDB metadata values must be str/int/float/bool, not
             # lists - we join calls into a comma-separated string and
             # split it back when reading results out.

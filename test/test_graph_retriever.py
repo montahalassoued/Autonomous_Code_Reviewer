@@ -132,9 +132,28 @@ def test_traversal_stops_at_one_hop():
     print("OK - isolated function (no callers/callees) adds nothing, as expected")
 
 
+def test_graph_neighbours_carry_their_code():
+    functions = parse_file("auth/utils.py", SAMPLE_CODE)
+    graph = build_knowledge_graph(functions)
+
+    search_results = [_fake_search_result("auth/utils.py", "verify_password", 0.9)]
+
+    enriched = enrich_with_graph_context(search_results, graph)
+    login_entry = next(e for e in enriched if e.chunk_id == "auth/utils.py::login")
+
+    # agents read metadata["code"], so a neighbour without it would
+    # reach the prompt as a bare name
+    assert login_entry.metadata["code"].startswith("def login(username, password):")
+    assert "verify_password(password, user.password)" in login_entry.metadata["code"]
+    assert login_entry.metadata["context"] == ""
+    assert login_entry.metadata["qualified_name"] == "login"
+    print("OK - graph neighbour login() carries its real code")
+
+
 if __name__ == "__main__":
     test_caller_is_pulled_in_for_a_search_result()
     test_callees_are_pulled_in_for_a_search_result()
     test_no_duplicates_when_already_in_search_results()
     test_traversal_stops_at_one_hop()
+    test_graph_neighbours_carry_their_code()
     print("\nAll graph_retriever tests passed.")

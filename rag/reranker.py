@@ -21,12 +21,15 @@ during earlier steps. The trade-off is a one-time model download
 entirely acceptable for reranking 15-20 candidates rather than
 scanning a full corpus.
 
-Why position-aware assembly at the end: LLMs exhibit a well-documented
-recency/primacy bias - they pay more attention to the beginning and
-end of their context window than the middle. We exploit this by
-placing the single most relevant chunk both FIRST and LAST in the
-final ordered list (a small, deliberate duplication of position, not
-content) wherever the candidate count allows it.
+What gets scored: the query against the chunk's context sentence plus
+its code (truncated to MAX_RERANK_CODE_CHARS). Scoring only the
+"file::name" label would leave the cross-encoder nothing to judge
+relevance on, which defeats the point of reranking.
+
+The output is the top_k chunks sorted by score, with no duplicates.
+An earlier version repeated the best chunk at the end (to exploit LLM
+primacy/recency bias), but that put the same code into every agent
+prompt twice for little benefit with only 5 chunks.
 """
 
 from dataclasses import dataclass
@@ -38,6 +41,11 @@ if TYPE_CHECKING:
 
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+
+# Cap on code characters per pair. The cross-encoder truncates long
+# inputs anyway (a few hundred tokens), so sending more only costs CPU
+# time; ~2000 chars covers the signature and the start of the body.
+MAX_RERANK_CODE_CHARS = 2000
 
 _model_cache: "CrossEncoder | None" = None
 
@@ -77,13 +85,24 @@ def _get_model() -> "CrossEncoder":
 
 def _build_document_text(metadata: dict) -> str:
     """
-    Builds the text representation of a chunk that the cross-encoder
-    will score against the query. We use file_path + function_name as
-    light structural context, similar in spirit to (but lighter than)
-    the full contextual_chunker.py treatment - the cross-encoder
-    itself is powerful enough to not need heavy pre-enrichment here.
+    Builds the text the cross-encoder scores against the query: the
+    chunk's context sentence, a newline, then its code (truncated).
+
+    Args:
+        metadata: a chunk's metadata dict (from Chroma or from
+                  graph_retriever._node_to_metadata)
+
+    Returns:
+        the document text for the (query, document) pair. Falls back
+        to "file::name" only if a chunk has neither context nor code,
+        so the model still gets something to score.
     """
-    return f"{metadata['file_path']}::{metadata['function_name']}"
+    context = metadata.get("context", "")
+    code = metadata.get("code", "")[:MAX_RERANK_CODE_CHARS]
+    if not context and not code:
+        name = metadata.get("qualified_name", metadata["function_name"])
+        return f"{metadata['file_path']}::{name}"
+    return f"{context}\n{code}"
 
 
 def rerank(
@@ -93,8 +112,7 @@ def rerank(
 ) -> list[RankedChunk]:
     """
     Re-scores every candidate against the query using the cross-encoder,
-    and returns the top_k, with the single best result duplicated at
-    both the start and end of the list (position-aware assembly).
+    and returns the top_k by descending score.
 
     Args:
         query: the original search query (same one passed to
@@ -105,11 +123,8 @@ def rerank(
         top_k: how many final chunks to keep for the LLM context
 
     Returns:
-        RankedChunk objects ordered for prompt assembly: best result
-        first, then the rest by descending score, with the best
-        result repeated at the end too (if top_k allows more than 1
-        unique result) - the classic primacy + recency anchoring used
-        in LLM context construction.
+        at most top_k RankedChunk objects, best first, each chunk at
+        most once
     """
     if not candidates:
         return []
@@ -123,7 +138,7 @@ def rerank(
     scored_candidates.sort(key=lambda pair: pair[1], reverse=True)
 
     top_candidates = scored_candidates[:top_k]
-    ranked_chunks = [
+    return [
         RankedChunk(
             chunk_id=c.chunk_id,
             metadata=c.metadata,
@@ -132,20 +147,3 @@ def rerank(
         )
         for c, score in top_candidates
     ]
-
-    return _assemble_position_aware(ranked_chunks)
-
-
-def _assemble_position_aware(ranked_chunks: list[RankedChunk]) -> list[RankedChunk]:
-    """
-    Reorders so the single best chunk appears both first and last.
-
-    With fewer than 2 unique chunks there's nothing meaningful to
-    duplicate, so we return the input unchanged in that case.
-    """
-    if len(ranked_chunks) < 2:
-        return ranked_chunks
-
-    best = ranked_chunks[0]
-    middle = ranked_chunks[1:]
-    return [best] + middle + [best]

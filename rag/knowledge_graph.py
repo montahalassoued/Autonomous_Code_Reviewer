@@ -13,6 +13,12 @@ no network access. It directly reuses ParsedFunction.calls from
 rag/ast_parser.py , so the call-detection limitation documented
 there (plain identifiers only, not attribute calls) also applies here:
 the graph will under-count edges involving method calls.
+
+Node ids are "file_path::qualified_name" (e.g. "auth/service.py::
+AuthService.login"), the same ids db/chroma.py uses, so a search hit's
+chunk_id can be looked up directly in the graph. Call resolution is
+still by BARE name, because a call site only knows `login(...)`, not
+which class it belongs to.
 """
 
 import pickle
@@ -20,15 +26,23 @@ import networkx as nx
 from rag.ast_parser import ParsedFunction
 
 
-def _node_id(file_path: str, function_name: str) -> str:
+def _node_id(file_path: str, qualified_name: str) -> str:
     """
     Builds a unique node identifier for a function.
 
-    Using file_path + function_name (not just the name) avoids
+    Using file_path + qualified_name (not just the bare name) avoids
     collisions: two different files can each have a function called
-    `get()`, and they must be distinct nodes in the graph.
+    `get()`, and two classes in one file can each have an `__init__`,
+    and they must all be distinct nodes in the graph.
+
+    Args:
+        file_path: the repo-relative file path
+        qualified_name: ParsedFunction.qualified_name, e.g. "Class.method"
+
+    Returns:
+        the node id, "file_path::qualified_name"
     """
-    return f"{file_path}::{function_name}"
+    return f"{file_path}::{qualified_name}"
 
 
 def build_knowledge_graph(functions: list[ParsedFunction]) -> nx.DiGraph:
@@ -48,7 +62,7 @@ def build_knowledge_graph(functions: list[ParsedFunction]) -> nx.DiGraph:
                     of rag/ast_parser.py's parse_file()
 
     Returns:
-        a networkx.DiGraph where node IDs are "file_path::function_name"
+        a networkx.DiGraph where node IDs are "file_path::qualified_name"
         and each node carries the original ParsedFunction as data
     """
     graph = nx.DiGraph()
@@ -58,7 +72,7 @@ def build_knowledge_graph(functions: list[ParsedFunction]) -> nx.DiGraph:
     # known?" in the second pass, ALL nodes already exist regardless
     # of which function appears first in the input list.
     for fn in functions:
-        node_id = _node_id(fn.file_path, fn.name)
+        node_id = _node_id(fn.file_path, fn.qualified_name)
         graph.add_node(node_id, function=fn)
 
     # Build a lookup from plain function name -> list of node_ids that
@@ -69,14 +83,16 @@ def build_knowledge_graph(functions: list[ParsedFunction]) -> nx.DiGraph:
     # this kind of cross-referencing.
     name_to_node_ids: dict[str, list[str]] = {}
     for fn in functions:
-        name_to_node_ids.setdefault(fn.name, []).append(_node_id(fn.file_path, fn.name))
+        name_to_node_ids.setdefault(fn.name, []).append(
+            _node_id(fn.file_path, fn.qualified_name)
+        )
 
     # Second pass: add edges for every detected call, but only to
     # functions we actually know about (skip calls to external
     # libraries like bcrypt.hashpw, db.execute, etc. - those aren't
     # nodes in our graph since we never parsed bcrypt's source).
     for fn in functions:
-        caller_id = _node_id(fn.file_path, fn.name)
+        caller_id = _node_id(fn.file_path, fn.qualified_name)
         for called_name in fn.calls:
             if called_name not in name_to_node_ids:
                 continue  # external call, e.g. a library function - skip
@@ -88,28 +104,46 @@ def build_knowledge_graph(functions: list[ParsedFunction]) -> nx.DiGraph:
     return graph
 
 
-def get_callers(graph: nx.DiGraph, file_path: str, function_name: str) -> list[str]:
+def get_callers(graph: nx.DiGraph, file_path: str, qualified_name: str) -> list[str]:
     """
     Returns the node IDs of every function that calls the given function.
 
     In graph terms: predecessors = nodes with an edge POINTING TO this
     node. This answers "who calls this?" - useful for an agent to see
     the blast radius of changing a function.
+
+    Args:
+        graph: the graph from build_knowledge_graph()
+        file_path: the function's repo-relative file path
+        qualified_name: the function's qualified name ("Class.method",
+                        or the bare name at module level)
+
+    Returns:
+        caller node ids, or [] if the function isn't in the graph
     """
-    node_id = _node_id(file_path, function_name)
+    node_id = _node_id(file_path, qualified_name)
     if node_id not in graph:
         return []
     return list(graph.predecessors(node_id))
 
 
-def get_callees(graph: nx.DiGraph, file_path: str, function_name: str) -> list[str]:
+def get_callees(graph: nx.DiGraph, file_path: str, qualified_name: str) -> list[str]:
     """
     Returns the node IDs of every function that the given function calls.
 
     In graph terms: successors = nodes this node has an edge POINTING TO.
     Answers "what does this depend on?".
+
+    Args:
+        graph: the graph from build_knowledge_graph()
+        file_path: the function's repo-relative file path
+        qualified_name: the function's qualified name ("Class.method",
+                        or the bare name at module level)
+
+    Returns:
+        callee node ids, or [] if the function isn't in the graph
     """
-    node_id = _node_id(file_path, function_name)
+    node_id = _node_id(file_path, qualified_name)
     if node_id not in graph:
         return []
     return list(graph.successors(node_id))

@@ -67,9 +67,9 @@ def decompose_diff(diff: str) -> list[str]:
     Returns:
         a list of 1-3 query strings, each targeting a different
         concern found in the diff. Falls back to a single query built
-        from the raw diff if the LLM output can't be parsed as JSON,
-        rather than crashing the whole retrieval pipeline over a
-        formatting hiccup.
+        from the raw diff if the LLM output is empty, can't be parsed
+        as JSON, or is an empty list, rather than crashing (or silently
+        retrieving nothing) over a formatting hiccup.
     """
     client = _build_client()
     prompt = DECOMPOSE_PROMPT_TEMPLATE.format(diff=diff)
@@ -81,14 +81,23 @@ def decompose_diff(diff: str) -> list[str]:
                           # focused queries, not creative variation
     )
 
-    raw_output = response.choices[0].message.content.strip()
+    # content can be None on an empty or filtered completion - treat it
+    # like unparseable output so we reach the fallback below.
+    raw_output = (response.choices[0].message.content or "").strip()
     # Defensive stripping: models sometimes wrap JSON in markdown
     # code fences even when explicitly told not to.
     raw_output = raw_output.strip("`").removeprefix("json").strip()
 
     try:
         queries = json.loads(raw_output)
-        if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
+        # An empty list (or a list of blank strings) parses fine but
+        # would make retrieval search for nothing, so it counts as a
+        # failure and falls through to the fallback too.
+        if (
+            isinstance(queries, list)
+            and queries
+            and all(isinstance(q, str) and q.strip() for q in queries)
+        ):
             return queries[:3]  # defensive cap, even if the model ignores the limit
     except json.JSONDecodeError:
         pass

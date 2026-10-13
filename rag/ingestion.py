@@ -1,7 +1,7 @@
 """
 ingestion.py - runs the full ingestion pipeline over a repository:
 clone (if given a URL) -> parse -> contextualize -> embed -> store ->
-build graph.
+delete stale ids -> build graph.
 
 Inputs: either a local filesystem path to an existing repository
 checkout, or a remote Git URL to clone first (clone_repository()).
@@ -21,7 +21,7 @@ import git
 from rag.ast_parser import parse_file, ParsedFunction
 from rag.contextual_chunker import contextualize_functions, ContextualChunk
 from rag.embedder import embed_chunks
-from db.chroma import get_client, get_collection, store_chunks
+from db.chroma import get_client, get_collection, store_chunks, make_chunk_id
 from rag.knowledge_graph import build_knowledge_graph
 
 
@@ -110,6 +110,33 @@ def _parse_repo(repo_path: str) -> list[ParsedFunction]:
     return functions
 
 
+def delete_stale_ids(collection, current_ids: list[str]) -> list[str]:
+    """
+    Removes chunks that are in the collection but not in this run.
+
+    The Chroma collection persists on disk across restarts, and upsert
+    only adds or overwrites. Without this, deleted or renamed
+    functions (and ids in an older format, like "file::name" before
+    methods were class-qualified) would stay searchable forever and
+    reach the agents as context that no longer exists.
+
+    Args:
+        collection: the Chroma collection that was just upserted into
+        current_ids: every chunk id produced by this ingestion run
+
+    Returns:
+        the ids that were deleted (empty if nothing was stale)
+    """
+    # include=[] asks Chroma for ids only, not documents or embeddings
+    stored_ids = collection.get(include=[])["ids"]
+    current = set(current_ids)
+    stale_ids = [chunk_id for chunk_id in stored_ids if chunk_id not in current]
+    # Chroma rejects delete(ids=[]), so only call it when there's work
+    if stale_ids:
+        collection.delete(ids=stale_ids)
+    return stale_ids
+
+
 def ingest_repository(repo_path: str, persist_directory: str = "./chroma_data"):
     """
     Runs the full ingestion pipeline over a local repository checkout.
@@ -142,11 +169,14 @@ def ingest_repository(repo_path: str, persist_directory: str = "./chroma_data"):
     collection = get_collection(client)
     store_chunks(collection, chunks, embeddings)
 
+    all_documents = [chunk.embeddable_text for chunk in chunks]
+    all_ids = [make_chunk_id(chunk) for chunk in chunks]
+
+    stale_ids = delete_stale_ids(collection, all_ids)
+    print(f"Removed {len(stale_ids)} stale chunk(s) from ChromaDB.")
+
     print("Building knowledge graph...")
     graph = build_knowledge_graph(functions)
-
-    all_documents = [chunk.embeddable_text for chunk in chunks]
-    all_ids = [f"{chunk.function.file_path}::{chunk.function.name}" for chunk in chunks]
 
     print(f"Ingestion complete: {len(all_ids)} chunks indexed, "
           f"{graph.number_of_nodes()} graph nodes, {graph.number_of_edges()} graph edges.")

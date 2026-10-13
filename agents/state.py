@@ -2,7 +2,7 @@
 ReviewState - the central shared state of the LangGraph.
 
 This module defines the data structure that flows through ALL agents:
-supervisor, retriever, security, performance, architecture, testing,
+retriever, security, performance, architecture, testing,
 documentation, synthesizer.
 
 Principle: each agent reads what it needs from this state, does its work,
@@ -40,7 +40,7 @@ class RetrievedChunk(TypedDict):
     (self-query + hybrid search + graph traversal + reranking).
     """
     file_path: str
-    function_name: str
+    function_name: str  # qualified: "Class.method", or "func" at module level
     code: str
     context: str
     relevance_score: float
@@ -75,5 +75,7 @@ class ReviewState(TypedDict):
     # Final output - populated by agents/synthesizer.py
     final_review_markdown: str
 
-    # Routing - read/written by agents/supervisor.py
+    # Legacy routing hint. No node reads it any more (agents/graph.py
+    # routes on retrieval_quality_score and retrieval_attempts), but
+    # app/api/webhook.py still sets it in the initial state.
     next_step: Literal["retriever", "parallel_agents", "synthesizer", "end"]

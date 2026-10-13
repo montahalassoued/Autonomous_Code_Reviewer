@@ -43,9 +43,9 @@ class SearchResult:
     A single fused search result, ready to be passed downstream to
     rag/graph_retriever.py and eventually rag/reranker.py.
     """
-    chunk_id: str          # "file_path::function_name", matches Chroma's id scheme
+    chunk_id: str          # "file_path::qualified_name", matches Chroma's id scheme
     rrf_score: float
-    metadata: dict          # file_path, function_name, line numbers, context, calls
+    metadata: dict          # file_path, function_name, qualified_name, line numbers, context, code, calls
 
 
 def _tokenize(text: str) -> list[str]:

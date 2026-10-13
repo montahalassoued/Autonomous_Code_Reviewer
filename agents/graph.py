@@ -3,10 +3,23 @@ graph.py - builds and compiles the LangGraph StateGraph.
 
 This module defines the TOPOLOGY of the review pipeline: which nodes
 exist, how they connect, and the routing logic that decides what runs
-next. Every node below is now the real implementation (Groq-backed
-domain agents, the full RAG retriever, and the markdown synthesizer) -
-this file only wires them together and owns the graph's shape:
-sequencing, parallel fan-out, and conditional routing.
+next. Every node below is the real implementation (Groq-backed domain
+agents, the full RAG retriever, and the markdown synthesizer) - this
+file only wires them together and owns the graph's shape: sequencing,
+parallel fan-out, and conditional routing.
+
+Flow:
+    START -> retriever --(score < QUALITY_THRESHOLD and
+                          attempts < MAX_RETRIEVAL_ATTEMPTS)--> retriever
+                       --(otherwise)--> 5 domain agents in parallel
+          -> join_agents -> synthesizer -> END
+
+Why there is no supervisor node: an earlier version routed through a
+no-op supervisor after the agents and sent the graph back to the
+agents whenever there were no findings, so a clean PR looped until
+the recursion limit and never got a review. Every path here moves
+forward, so the graph always terminates and always reaches the
+synthesizer.
 
 The retriever node needs objects that don't belong in ReviewState
 (the Chroma collection, the corpus text used by BM25, and the
@@ -14,9 +27,13 @@ knowledge graph) - see build_graph()'s parameters for how those get
 bound in via closure.
 """
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 from agents.state import ReviewState
-from agents.retriever import retriever_node as _run_retriever_node
+from agents.retriever import (
+    retriever_node as _run_retriever_node,
+    QUALITY_THRESHOLD,
+    MAX_RETRIEVAL_ATTEMPTS,
+)
 from agents.security import security_node
 from agents.performance import performance_node
 from agents.architecture import architecture_node
@@ -25,16 +42,7 @@ from agents.documentation import documentation_node
 from agents.synthesizer import synthesizer_node
 
 
-def supervisor_node(state: ReviewState) -> dict:
-    """
-    Decides what happens next by inspecting the current state.
-
-    Routing itself is decided by route_after_supervisor(); this node
-    only exists as a place for that routing function to hang off of,
-    so it returns an empty update.
-    """
-    print("[supervisor] inspecting state...")
-    return {}
+DOMAIN_AGENTS = ["security", "performance", "architecture", "testing", "documentation"]
 
 
 def join_agents_node(state: ReviewState) -> dict:
@@ -43,61 +51,43 @@ def join_agents_node(state: ReviewState) -> dict:
     before running this node, because it is the single common downstream
     target they all converge on via plain (non-conditional) edges.
 
-    This is what fixes the "supervisor re-routes once per finished agent"
-    bug: instead of each agent pointing straight back to supervisor
-    (which re-evaluates routing 5 times), they all point here once, and
-    THIS node is the only one that hands back to supervisor.
+    Without it, each agent pointing straight at the next step would
+    run that step once per finished agent instead of once per review.
+
+    Args:
+        state: the current ReviewState, with all agents' findings merged
+
+    Returns:
+        an empty update - this node only exists as a synchronization point
     """
     print(f"[join_agents] all parallel agents finished, {len(state['findings'])} findings total")
     return {}
 
 
-# ---------------------------------------------------------------------------
-# ROUTING FUNCTIONS
-# These read the state and return a STRING KEY (or list of node names for
-# fan-out) telling LangGraph which edge to follow.
-# ---------------------------------------------------------------------------
-
-
-DOMAIN_AGENTS = ["security", "performance", "architecture", "testing", "documentation"]
-
-
-def route_after_supervisor(state: ReviewState) -> list[str] | str:
+def route_after_retriever(state: ReviewState) -> list[str] | str:
     """
-    First routing decision: do we need to retrieve context, or do we
-    already have findings (review done) and should go to synthesizer?
+    Corrective RAG decision: is retrieval quality good enough, or do we
+    retry (bounded by MAX_RETRIEVAL_ATTEMPTS to guarantee termination)?
 
     IMPORTANT: when fanning out to multiple parallel nodes, LangGraph
     requires the routing function to return the ACTUAL node names
     directly (not abstract keys mapped through a dict) - that's why
-    this returns "retriever" / DOMAIN_AGENTS / "synthesizer" as literal
-    node names, and build_graph() below calls add_conditional_edges
-    WITHOUT a mapping dict for this case.
-    """
-    if not state["retrieved_context"]:
-        return "retriever"
-    if not state["findings"]:
-        return DOMAIN_AGENTS
-    return "synthesizer"
+    this returns "retriever" / DOMAIN_AGENTS as literal node names, and
+    build_graph() below calls add_conditional_edges WITHOUT a mapping
+    dict.
 
+    Args:
+        state: the ReviewState right after a retrieval attempt
 
-def route_after_retriever(state: ReviewState) -> list[str] | str:
+    Returns:
+        "retriever" to retry, or DOMAIN_AGENTS to fan out to all agents
     """
-    Corrective RAG decision: is retrieval quality good enough, or do we
-    retry (bounded by retrieval_attempts to avoid infinite loops)?
-    Returns actual node names, same reasoning as route_after_supervisor.
-    """
-    quality_ok = state["retrieval_quality_score"] >= 0.5
-    attempts_exhausted = state["retrieval_attempts"] >= 3
+    quality_ok = state["retrieval_quality_score"] >= QUALITY_THRESHOLD
+    attempts_exhausted = state["retrieval_attempts"] >= MAX_RETRIEVAL_ATTEMPTS
 
     if quality_ok or attempts_exhausted:
         return DOMAIN_AGENTS
     return "retriever"
-
-
-# ---------------------------------------------------------------------------
-# GRAPH ASSEMBLY
-# ---------------------------------------------------------------------------
 
 
 def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_index):
@@ -129,7 +119,6 @@ def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_
     graph = StateGraph(ReviewState)
 
     # Register every node
-    graph.add_node("supervisor", supervisor_node)
     graph.add_node("retriever", retriever_node)
     graph.add_node("security", security_node)
     graph.add_node("performance", performance_node)
@@ -139,27 +128,22 @@ def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_
     graph.add_node("join_agents", join_agents_node)
     graph.add_node("synthesizer", synthesizer_node)
 
-    graph.set_entry_point("supervisor")
+    graph.add_edge(START, "retriever")
 
-    # supervisor decides where to go. route_after_supervisor returns the
-    # ACTUAL node name(s) directly - "retriever", DOMAIN_AGENTS (a list,
-    # for true parallel fan-out), or "synthesizer". No mapping dict needed.
-    graph.add_conditional_edges("supervisor", route_after_supervisor)
-
-    # retriever decides: retry itself, or fan out to all 5 agents directly.
+    # retriever decides: retry itself, or fan out to all 5 agents.
+    # route_after_retriever returns real node names (a list for the
+    # parallel fan-out), so no mapping dict is passed.
     graph.add_conditional_edges("retriever", route_after_retriever)
 
     # CONVERGENCE: every domain agent points to the SAME single downstream
     # node (join_agents) via a plain edge. LangGraph automatically waits
     # for all active parallel branches to finish before running a node
     # that they all share as their only target - this is what guarantees
-    # join_agents (and therefore supervisor afterwards) runs exactly once
-    # per batch, not once per agent.
+    # join_agents (and therefore synthesizer) runs exactly once per review.
     for agent in DOMAIN_AGENTS:
         graph.add_edge(agent, "join_agents")
 
-    graph.add_edge("join_agents", "supervisor")
-
+    graph.add_edge("join_agents", "synthesizer")
     graph.add_edge("synthesizer", END)
 
     return graph.compile()

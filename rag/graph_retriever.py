@@ -41,16 +41,32 @@ class EnrichedResult:
 def _node_to_metadata(graph: nx.DiGraph, node_id: str) -> dict:
     """
     Builds a metadata dict for a graph node, matching the shape Chroma
-    already returns (file_path, function_name, line numbers, calls),
-    so EnrichedResult.metadata has a consistent structure regardless
-    of whether a result came from hybrid search or from the graph.
+    already returns (file_path, function_name, qualified_name, line
+    numbers, context, code, calls), so EnrichedResult.metadata has a
+    consistent structure regardless of whether a result came from
+    hybrid search or from the graph.
+
+    The code comes from the ParsedFunction stored on the node, so
+    graph neighbours reach the agents with their real source, not
+    just a name. The graph doesn't hold the LLM context sentence, so
+    context is left empty here.
+
+    Args:
+        graph: the knowledge graph from rag/knowledge_graph.py
+        node_id: a node id ("file_path::qualified_name")
+
+    Returns:
+        a Chroma-shaped metadata dict for that function
     """
     fn = graph.nodes[node_id]["function"]
     return {
         "file_path": fn.file_path,
         "function_name": fn.name,
+        "qualified_name": fn.qualified_name,
         "start_line": fn.start_line,
         "end_line": fn.end_line,
+        "context": "",
+        "code": fn.code,
         "calls": ",".join(fn.calls),
     }
 
@@ -101,9 +117,12 @@ def enrich_with_graph_context(
                       # search index were built from the same ingestion
 
         file_path = result.metadata["file_path"]
-        function_name = result.metadata["function_name"]
+        # Graph node ids use the qualified name ("Class.method"); fall
+        # back to the bare name for metadata without one (module-level
+        # functions have qualified_name == function_name anyway).
+        qualified_name = result.metadata.get("qualified_name", result.metadata["function_name"])
 
-        for caller_id in get_callers(graph, file_path, function_name):
+        for caller_id in get_callers(graph, file_path, qualified_name):
             if caller_id in seen_ids:
                 continue
             enriched.append(
@@ -116,7 +135,7 @@ def enrich_with_graph_context(
             )
             seen_ids.add(caller_id)
 
-        for callee_id in get_callees(graph, file_path, function_name):
+        for callee_id in get_callees(graph, file_path, qualified_name):
             if callee_id in seen_ids:
                 continue
             enriched.append(

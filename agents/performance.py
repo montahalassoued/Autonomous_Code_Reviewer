@@ -185,7 +185,9 @@ def performance_node(state: ReviewState) -> dict:
         temperature=0.1,  # consistency over creativity for analysis
     )
 
-    raw_output = response.choices[0].message.content
+    # content can be None (e.g. a filtered or empty completion); treat
+    # that as "no findings" instead of crashing on .strip() later.
+    raw_output = response.choices[0].message.content or ""
     raw_findings = _parse_findings(raw_output)
     findings = [f for f in (_to_finding(raw) for raw in raw_findings) if f is not None]
 
