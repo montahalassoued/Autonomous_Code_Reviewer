@@ -23,3 +23,6 @@ postgres_data/
 redis_data/
 coverage.xml
 htmlcov/
+
+# Claude Code personal settings (the shared .claude/settings.json IS committed)
+.claude/settings.local.json

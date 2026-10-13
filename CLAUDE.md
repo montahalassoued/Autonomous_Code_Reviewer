@@ -1,0 +1,64 @@
+# CLAUDE.md
+
+Autonomous multi-agent GitHub PR reviewer. A GitHub webhook hits FastAPI, a LangGraph pipeline retrieves repo context through an advanced RAG pipeline, five domain agents analyze the diff in parallel, and a synthesizer posts one Markdown review comment back to the PR.
+
+## Working with me (these rules come first)
+
+These rules override any skill or subagent instruction that says otherwise.
+
+1. **I run terminal commands myself.** Don't execute commands in the terminal (Bash or PowerShell). Instead:
+   - Give me the exact command in a code block, ready to copy.
+   - Explain in one or two sentences what it does and what output to expect.
+   - Wait for me to run it and paste the result before continuing.
+   - This includes git, pytest, pip, uvicorn, streamlit and docker. Reading and searching files with the editor tools (Read, Grep, Glob) is fine.
+2. **Show me every file change.**
+   - Before editing, say which files you're going to change and why.
+   - After editing, list every changed file as a clickable link, with a short summary of what changed in each one.
+   - Never change files I didn't expect without telling me.
+3. **Explain before asking.** Before asking me any question, first explain the context: what you found, what the options are, and what each option means for the project. Then ask the question, so I can read the explanation before I answer.
+
+## Pipeline
+
+```text
+GitHub webhook → app/api/webhook.py → agents/graph.py (LangGraph)
+  supervisor → retriever (corrective RAG loop, max 3 attempts, quality >= 0.5)
+             → security | performance | architecture | testing | documentation  (parallel)
+             → join_agents (barrier) → supervisor → synthesizer → tools/github_tools.py
+```
+
+- **Shared state:** `agents/state.py` holds `ReviewState`. `findings` uses an `operator.add` reducer so parallel agents don't overwrite each other.
+- **RAG (`rag/`):** ast_parser (tree-sitter) → contextual_chunker (Gemini) → knowledge_graph (NetworkX) → embedder (Voyage) + `db/chroma.py` → hybrid_search (BM25 + dense + RRF) → graph_retriever → reranker (local BAAI/bge-reranker-v2-m3).
+- **Startup (`app/main.py`):** clones `TARGET_REPO_URL` (or uses `REPO_PATH`), ingests it, compiles the graph, and stores it on `app.state`.
+- **Dashboard:** `streamlit_app.py` (manual review trigger).
+
+## Commands
+
+```bash
+venv/Scripts/python.exe -m pytest test/test_state.py test/test_synthesizer.py test/test_webhook.py test/test_main.py   # fast, no API calls
+venv/Scripts/python.exe -m pytest                       # full suite - many tests make REAL Groq/Gemini/Voyage/GitHub calls
+uvicorn app.main:app --host 0.0.0.0 --port 8000         # API
+streamlit run streamlit_app.py                          # dashboard
+docker-compose up --build                               # full stack
+```
+
+## Environment
+
+Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, and `TARGET_REPO_URL` or `REPO_PATH`. Never commit `.env`.
+
+## Conventions
+
+- Every file starts with a module docstring: what it does, Inputs/Outputs, and **why** it's designed that way. Every function has a docstring with Args/Returns. See the `clean-code` skill.
+- **API clients:** each module has a `_build_*_client()` that reads its key from the environment and raises a clear `RuntimeError` if it's missing.
+- **LLM output parsing never crashes the pipeline.** A malformed response degrades to zero findings (see `_parse_findings` / `_to_finding` in `agents/security.py`).
+- **Domain agents** share one pattern (Groq `llama-3.3-70b-versatile`, temperature 0.1, JSON array → `Finding`). Use the `add-domain-agent` skill to add one.
+- **Tests** live in `test/test_*.py`. Integration tests hit real APIs, and unit tests monkeypatch. Use the `write-tests` skill.
+- **Architecture decisions** go in the root `DECISIONS.md`. Use the `log-decision` skill.
+- **Commits** are a single title line `type(scope): summary` with no Co-Authored-By or Claude attribution. Use the `commit-message` skill. A hook enforces this.
+- Build order and status: `docs/PROGRESS.md`. Deeper docs: `docs/ARCHITECTURE.md`, `docs/RAG.md`, `docs/AGENTS.md`.
+
+## Gotchas
+
+- The routing functions in `agents/graph.py` return real node names. `add_conditional_edges` must **not** get a mapping dict when fanning out to a list.
+- Domain agents must point to `join_agents`, not back to `supervisor`. Otherwise supervisor and synthesizer run once per agent.
+- Tests that set env vars must **force** them (`os.environ[...] = ...`), not use `setdefault`, because other tests `load_dotenv()` the real `.env`.
+- `eval/ragas_eval.py` is still a stub.
