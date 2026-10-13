@@ -1,0 +1,4 @@
+# File purpose: force Unix line endings where Windows CRLF would break tools.
+*.sh text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf
