@@ -53,9 +53,28 @@ def main() -> None:
     # from its start up to where the next commit begins.
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(command)
-        check_commit_segment(command[match.start():end])
+        check_commit_segment(cut_at_command_end(command[match.start():end]))
 
     sys.exit(0)
+
+
+def cut_at_command_end(segment: str) -> str:
+    """
+    Trims the segment to the commit command itself: up to the first &&, ||, ;
+    or | that sits outside quotes. Otherwise flags of later commands in a
+    chain (e.g. `python -m pytest`) would be mistaken for commit flags.
+    A heredoc (<<) is kept, because it belongs to the commit.
+    """
+    quote = None
+    for position, char in enumerate(segment):
+        if quote:
+            if char == quote:
+                quote = None
+        elif char in "\"'":
+            quote = char
+        elif char in ";|" or segment.startswith("&&", position):
+            return segment[:position]
+    return segment
 
 
 def check_commit_segment(segment: str) -> None:
