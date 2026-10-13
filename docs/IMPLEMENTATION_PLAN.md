@@ -37,7 +37,7 @@
 | V7 | Full re-ingest on every startup, with no deletes, no 429 retry and one unbatched Voyage call | `rag/ingestion.py`, `app/main.py:70-72`, `rag/contextual_chunker.py:79-84`, `rag/embedder.py:64` |
 | V8 | `message.content` can be None, which crashes `.strip()`, and the decomposer accepts `[]` | `rag/query_decomposer.py:84,91`, `agents/retriever.py:112`, `agents/security.py:119,199` |
 | V10 | Webhook: no dedupe, no head SHA, no error handling, no repo guard, PR only, a new comment each time | `app/api/webhook.py:98-171`, `tools/github_tools.py:88` |
-| V12 | No test of the graph routing or of what the agents actually receive. Most tests make real API calls | `test/` |
+| V12 | No test of the graph routing or of what the agents actually receive. Most tests make real API calls | `tests/` |
 
 ## Phases
 
@@ -63,13 +63,13 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
 - **Reranker:** score `context + code` instead of the name, and remove the duplicated best chunk.
 
 **Tests (offline):**
-- `test/test_pipeline_offline.py` (an ephemeral Chroma, fake embeddings, a fake reranker and a fake Groq that records prompts). It checks that:
+- `tests/unit/test_pipeline_offline.py` (an ephemeral Chroma, fake embeddings, a fake reranker and a fake Groq that records prompts). It checks that:
   - a clean PR terminates, and each agent is called once
   - empty retrieval terminates
   - prompts contain real code bodies
   - there are no duplicate chunks
   - None content doesn't crash
-- `test/test_ast_parser_identity.py`
+- `tests/unit/test_ast_parser_identity.py`
 - an update to `test_knowledge.py`
 
 **Done when:** all tests pass, and a real PR, including a clean one, gets one comment.
@@ -193,7 +193,7 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
 
 **Agents:** webhook-engineer and ai-engineer.
 
-**Every phase:** test-runner, then pre-commit-reviewer, then a single-line commit. Add a `DECISIONS.md` entry for each design choice.
+**Every phase:** test-runner, then pre-commit-reviewer, then a single-line commit. Add a `docs/DECISIONS.md` entry for each design choice.
 
 ## Overview
 

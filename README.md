@@ -57,4 +57,4 @@ Every pull request into `main` and every push to `main` runs **offline tests**, 
 - [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md): target design and roadmap
 - [infra/README.md](infra/README.md): Azure setup and deployment
 - [docs/SETUP.md](docs/SETUP.md): getting the API keys
-- [DECISIONS.md](DECISIONS.md): architecture decisions
+- [docs/DECISIONS.md](docs/DECISIONS.md): architecture decisions
