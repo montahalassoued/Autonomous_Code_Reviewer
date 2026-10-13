@@ -21,7 +21,7 @@ These rules override any skill or subagent instruction that says otherwise.
 ## Pipeline
 
 ```text
-GitHub webhook → app/api/webhook.py → agents/graph.py (LangGraph)
+GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storage Queue → app/worker.py → agents/graph.py (LangGraph)
   START → retriever (corrective RAG loop: retry while quality < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL_ATTEMPTS)
         → security | performance | architecture | testing | documentation  (parallel)
         → join_agents (barrier) → synthesizer → END → tools/github_tools.py   (forward-only: always terminates)
@@ -29,7 +29,7 @@ GitHub webhook → app/api/webhook.py → agents/graph.py (LangGraph)
 
 - **Shared state:** `agents/state.py` holds `ReviewState`. `findings` uses an `operator.add` reducer so parallel agents don't overwrite each other.
 - **RAG (`rag/`):** ast_parser (tree-sitter) → contextual_chunker (Gemini) → knowledge_graph (NetworkX) → embedder (Voyage) + `db/chroma.py` → hybrid_search (BM25 + dense + RRF) → graph_retriever → reranker (local BAAI/bge-reranker-v2-m3).
-- **Startup (`app/main.py`):** clones `TARGET_REPO_URL` (or uses `REPO_PATH`), ingests it, compiles the graph, and stores it on `app.state`.
+- **Startup:** the API (`app/main.py`) only creates the job queue and dedupe store (`JOBS_BACKEND=memory|azure`). The worker (`python -m app.worker`) clones `TARGET_REPO_URL` (or uses `REPO_PATH`) via `app/bootstrap.py`, ingests it, and compiles the graph once.
 - **No web UI:** reviews are triggered only by the GitHub webhook. The Streamlit dashboard was removed.
 
 ## Commands

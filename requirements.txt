@@ -51,6 +51,11 @@ alembic>=1.13.0                    # DB migrations
 # --- Cache ---
 redis>=5.0.0
 
+# --- Durable review jobs (Azure Storage) ---
+azure-storage-queue>=12.9.0        # review job queue + poison queue
+azure-data-tables>=12.5.0          # shared dedupe store (Table Storage)
+azure-identity>=1.17.0             # managed identity auth (DefaultAzureCredential)
+
 # --- GitHub integration (Step 13) ---
 PyGithub>=2.3.0
 gitpython>=3.1.40                  # clone repos for ingestion

@@ -2,28 +2,37 @@
 webhook.py - GitHub webhook route handler.
 
 Inputs: GitHub webhook HTTP requests (pull_request event, "opened" or
-"synchronize" action), including the raw request body and the
-X-Hub-Signature-256 header GitHub signs every payload with.
-Outputs: a 200 response once the payload is validated and the review
-pipeline has been scheduled to run in the background; triggers
-agents/graph.py's compiled LangGraph asynchronously via
-tools/github_tools.py for the diff fetch and the final comment post.
+"synchronize" action), including the raw request body, the
+X-Hub-Signature-256 header GitHub signs every payload with, and the
+X-GitHub-Delivery header (a unique id per delivery).
+Outputs: 202 {"status": "queued"} after the review job is stored in the
+durable queue; 200 {"status": "duplicate"} if that commit was already
+queued; 503 if the queue is unavailable so the delivery shows as failed
+in GitHub and can be redelivered.
 
-The compiled graph itself is not built here - app/main.py owns
-ingestion/startup and stores the compiled graph on `request.app.state`,
-since building it requires the Chroma collection, BM25 corpus, and
-knowledge graph, none of which this module should know how to
-construct.
+The handler never runs a review and never needs the compiled graph or
+the repo index: app/worker.py does that. The queue and dedupe store live
+on `request.app.state` (set in app/main.py, replaced in tests).
+
+Why dedupe by (repo, head sha, PR): GitHub delivers at least once and
+users can redeliver by hand. The same commit must not be reviewed twice.
+The claim is made BEFORE enqueueing and released if enqueueing fails,
+so a failed enqueue never blocks the redelivery.
 """
 
 import hashlib
 import hmac
+import logging
 import os
 
-from fastapi import APIRouter, Request, Header, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Request, Header, HTTPException
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
-from tools.github_tools import get_pr_diff, post_review_comment
+from app.jobs.models import DedupeKey, ReviewJob
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -66,18 +75,18 @@ def _verify_signature(payload_body: bytes, signature_header: str | None) -> None
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
 
-def _extract_pr_fields(payload: dict) -> tuple[int, str]:
+def _extract_pr_fields(payload: dict) -> tuple[int, str, str]:
     """
-    Pulls the fields the review pipeline needs out of a GitHub
+    Pulls the fields the review job needs out of a GitHub
     pull_request webhook payload.
 
     Args:
         payload: the parsed JSON webhook body
 
     Returns:
-        (pr_number, repo_full_name) - the list of changed files is NOT
-        in the webhook payload itself; it's fetched separately via the
-        GitHub API inside get_pr_diff()
+        (pr_number, repo_full_name, head_sha) - the list of changed
+        files is NOT in the payload; the worker fetches it via
+        get_pr_diff()
 
     Raises:
         HTTPException: 400 if required fields are missing, so a
@@ -86,72 +95,44 @@ def _extract_pr_fields(payload: dict) -> tuple[int, str]:
     try:
         pr_number = payload["pull_request"]["number"]
         repo_full_name = payload["repository"]["full_name"]
-    except KeyError as exc:
+        head_sha = payload["pull_request"]["head"]["sha"]
+    except (KeyError, TypeError) as exc:
         raise HTTPException(
             status_code=400,
             detail=f"Malformed webhook payload, missing field: {exc}",
         ) from exc
 
-    return pr_number, repo_full_name
-
-
-def _run_review_pipeline(compiled_graph, repo_full_name: str, pr_number: int) -> None:
-    """
-    Runs the full review pipeline for one PR and posts the result back
-    to GitHub as a comment. Runs as a FastAPI BackgroundTask so the
-    webhook HTTP response returns immediately - GitHub expects a fast
-    ack and will retry deliveries that time out.
-
-    Args:
-        compiled_graph: the LangGraph graph from agents/graph.py's
-                        build_graph(), already bound to the RAG
-                        dependencies via closure
-        repo_full_name: the repository in "owner/repo" form
-        pr_number: the pull request number
-    """
-    diff = get_pr_diff(repo_full_name, pr_number)
-
-    initial_state = {
-        "pr_number": pr_number,
-        "repo_full_name": repo_full_name,
-        "pr_diff": diff,
-        "changed_files": [],
-        "retrieved_context": [],
-        "retrieval_quality_score": 0.0,
-        "retrieval_attempts": 0,
-        "findings": [],
-        "final_review_markdown": "",
-        "next_step": "retriever",
-    }
-
-    final_state = compiled_graph.invoke(initial_state)
-    post_review_comment(repo_full_name, pr_number, final_state["final_review_markdown"])
+    return pr_number, repo_full_name, head_sha
 
 
 @router.post("/webhook/github")
 async def github_webhook(
     request: Request,
-    background_tasks: BackgroundTasks,
     x_hub_signature_256: str | None = Header(default=None),
     x_github_event: str | None = Header(default=None),
-) -> dict:
+    x_github_delivery: str | None = Header(default=None),
+):
     """
-    Receives a GitHub webhook delivery, validates it, and schedules a
-    review run for "opened" or "synchronize" pull_request events.
+    Receives a GitHub webhook delivery, validates it, and queues a
+    review job for "opened" or "synchronize" pull_request events.
 
     Args:
         request: the raw FastAPI request, used to read the exact body
                  bytes needed for signature verification
-        background_tasks: FastAPI's background task runner, used to
-                           run the (slow, multi-LLM-call) review
-                           pipeline after this handler returns
         x_hub_signature_256: GitHub's HMAC signature header
         x_github_event: GitHub's event-type header (e.g. "pull_request")
+        x_github_delivery: GitHub's unique delivery id (logging only;
+                           dedupe uses the commit, which also catches
+                           separate deliveries of the same commit)
 
     Returns:
-        a small JSON status dict - "ignored" for event types/actions
-        this endpoint doesn't act on, "scheduled" once the review has
-        been queued as a background task
+        200 {"status": "ignored"} for events/actions not acted on,
+        200 {"status": "duplicate"} if the commit was already queued,
+        202 {"status": "queued", "job_id": ...} once the job is stored.
+
+    Raises:
+        HTTPException: 401 bad signature, 400 malformed payload,
+        503 if the dedupe store or queue is unavailable
     """
     payload_body = await request.body()
     _verify_signature(payload_body, x_hub_signature_256)
@@ -163,9 +144,38 @@ async def github_webhook(
     if payload.get("action") not in {"opened", "synchronize"}:
         return {"status": "ignored", "reason": f"unhandled action: {payload.get('action')}"}
 
-    pr_number, repo_full_name = _extract_pr_fields(payload)
+    pr_number, repo_full_name, head_sha = _extract_pr_fields(payload)
+    dedupe = request.app.state.dedupe
+    queue = request.app.state.job_queue
+    dedupe_key = DedupeKey(repo_full_name, head_sha, target=f"pr:{pr_number}")
 
-    compiled_graph = request.app.state.compiled_graph
-    background_tasks.add_task(_run_review_pipeline, compiled_graph, repo_full_name, pr_number)
+    # The Azure SDK is blocking, so run it off the event loop.
+    try:
+        is_new = await run_in_threadpool(dedupe.claim, dedupe_key)
+    except Exception as exc:  # storage outage: fail the delivery so it can be redelivered
+        logger.exception("Dedupe claim failed delivery=%s", x_github_delivery)
+        raise HTTPException(status_code=503, detail="Dedupe store unavailable") from exc
 
-    return {"status": "scheduled", "pr_number": pr_number, "repo": repo_full_name}
+    if not is_new:
+        logger.info("Duplicate delivery=%s repo=%s pr=%s sha=%s", x_github_delivery, repo_full_name, pr_number, head_sha)
+        return {"status": "duplicate", "pr_number": pr_number, "repo": repo_full_name}
+
+    job = ReviewJob(
+        repo_full_name=repo_full_name,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        delivery_id=x_github_delivery or "",
+    )
+    try:
+        await run_in_threadpool(queue.enqueue, job)
+    except Exception as exc:
+        # Release the claim, otherwise the manual redelivery would be called a duplicate.
+        logger.exception("Enqueue failed job_id=%s delivery=%s", job.job_id, x_github_delivery)
+        await run_in_threadpool(dedupe.release, dedupe_key)
+        raise HTTPException(status_code=503, detail="Review queue unavailable") from exc
+
+    logger.info("Queued job_id=%s delivery=%s repo=%s pr=%s sha=%s", job.job_id, x_github_delivery, repo_full_name, pr_number, head_sha)
+    return JSONResponse(
+        status_code=202,
+        content={"status": "queued", "job_id": job.job_id, "pr_number": pr_number, "repo": repo_full_name},
+    )

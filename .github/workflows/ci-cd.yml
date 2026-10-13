@@ -67,6 +67,9 @@ jobs:
           test/test_synthesizer.py
           test/test_webhook.py
           test/test_main.py
+          test/test_job_queue.py
+          test/test_dedupe.py
+          test/test_worker.py
 
   # ---------------------------------------------------------------------------
   # 2. build - proves the Dockerfile builds. Never pushes (push: false).

@@ -1,75 +1,31 @@
 """
-main.py - FastAPI application entrypoint.
+main.py - FastAPI application entrypoint (the webhook receiver).
 
-Inputs: environment variables - either TARGET_REPO_URL (a remote Git
-URL to clone, e.g. for a deployed server with no pre-existing
-checkout) or REPO_PATH (a local checkout already on disk, e.g. for
-local development), plus everything the RAG pipeline and
-Groq/Voyage/Gemini clients need - see the other modules'
-_build_*_client() functions.
+Inputs: environment variables for the job backend - JOBS_BACKEND
+("memory" or "azure") and the Azure Storage settings read by
+app/jobs/factory.py - plus GITHUB_WEBHOOK_SECRET for signature checks.
 Outputs: a FastAPI app instance with the webhook router mounted and a
 GET /health endpoint, ready to run via `uvicorn app.main:app`.
 
-Startup does the expensive one-time work the review pipeline depends
-on: obtaining a checkout of the target repo, ingesting it into a
-Chroma collection + BM25 corpus + knowledge graph (rag/ingestion.py),
-then compiling the LangGraph (agents/graph.py) bound to that data and
-storing it on app.state so app/api/webhook.py can invoke it per
-incoming PR.
+Startup only creates the job queue and the dedupe store and puts them on
+app.state. It does NOT clone or ingest the repo and does not build the
+graph: that heavy work moved to the review worker (app/worker.py), so
+the API starts in seconds and /health is "ok" immediately.
 """
 
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.api.webhook import router as webhook_router
-from rag.ingestion import ingest_repository, clone_repository
-from agents.graph import build_graph
-
-
-CLONE_DIR = "./target_repo"
-
-
-def _resolve_repo_path() -> str:
-    """
-    Determines the local path to ingest, cloning a remote repo first
-    if TARGET_REPO_URL is set.
-
-    Returns:
-        a local filesystem path ready for ingest_repository()
-
-    TARGET_REPO_URL takes priority: it's the real deployment path
-    (e.g. on Azure Container Apps, where no checkout exists yet). REPO_PATH is the
-    fallback for local development against a repo you've already
-    cloned yourself.
-    """
-    repo_url = os.environ.get("TARGET_REPO_URL")
-    if repo_url:
-        return clone_repository(repo_url, CLONE_DIR)
-
-    repo_path = os.environ.get("REPO_PATH")
-    if repo_path:
-        return repo_path
-
-    raise RuntimeError(
-        "Neither TARGET_REPO_URL nor REPO_PATH is set. Set one in "
-        "your .env file: TARGET_REPO_URL for a remote repo to clone "
-        "(e.g. on a deployed server), or REPO_PATH for a repo already "
-        "checked out locally."
-    )
+from app.jobs.factory import build_dedupe, build_queue
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Runs ingestion once at startup and compiles the review graph,
-    storing it on app.state so route handlers can reach it without
-    reaching into globals.
-    """
-    repo_path = _resolve_repo_path()
-    collection, all_documents, all_ids, graph_index = ingest_repository(repo_path)
-    app.state.compiled_graph = build_graph(collection, all_documents, all_ids, graph_index)
+    """Creates the queue and dedupe store once and stores them on app.state."""
+    app.state.job_queue = build_queue()
+    app.state.dedupe = build_dedupe()
 
     yield
 
@@ -84,11 +40,7 @@ async def health() -> dict:
     Liveness/readiness check.
 
     Returns:
-        a small JSON status dict - "ok" once ingestion has finished
-        and the compiled graph is ready, "starting" while the app is
-        still ingesting the repo. Distinguishing these matters because
-        webhook deliveries that arrive before ingestion finishes would
-        otherwise hit an AttributeError on app.state.compiled_graph.
+        {"status": "ok"} - the API has no slow startup anymore, so it
+        is ready as soon as it answers.
     """
-    graph_ready = hasattr(app.state, "compiled_graph")
-    return {"status": "ok" if graph_ready else "starting"}
+    return {"status": "ok"}

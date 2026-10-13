@@ -118,3 +118,26 @@ product and portfolio piece showing Docker, Azure, CI/CD and webhook
 engineering. Trade-off: a container runs 24/7 (min replicas = 1) and costs money
 even when idle. The review core (RAG + agents + GitHub posting) is independent
 of the trigger, so an Action-based trigger could still be added later.
+
+## Why a durable queue + separate worker for reviews
+
+The webhook used to run the review in a FastAPI BackgroundTask. GitHub got its 2xx,
+but a restart, deploy, or scale-down mid-review lost the event with no retry, and a
+redelivery posted a second comment. Now the webhook only verifies, dedupes and
+enqueues a ReviewJob (Azure Storage Queue, 202 response); a separate worker
+(`python -m app.worker`, same image, own Container App) ingests the repo once,
+builds the graph once, and processes one job at a time. A job is deleted only after
+it succeeds; a crash makes it reappear after the visibility timeout (900 s), and
+after 3 attempts (dequeue_count) it moves to the `<queue>-poison` queue. Dedupe is a
+claim on (repo, head sha, PR) in Azure Table Storage (atomic insert, shared by all
+API replicas), released if the enqueue fails so GitHub's redelivery works. Delivery
+is at-least-once, so posting is idempotent: one summary comment per PR, found by a
+hidden marker and the bot's login, edited instead of duplicated.
+Alternatives: Redis (a new service to run, persistence needs care), Service Bus
+(more features than needed, higher cost), keeping BackgroundTasks (loses events).
+Trade-offs: one more Container App and a storage account to operate; Table Storage
+has no TTL so dedupe rows accumulate (tiny); a review that exceeds the visibility
+timeout can run twice (the upsert makes the result the same); a slow or stale review
+of an old commit can still overwrite a newer one (stale-SHA check not done yet).
+Local dev and offline tests use in-memory backends (JOBS_BACKEND=memory).
+Validated in test/test_webhook.py, test/test_worker.py, test/test_job_queue.py, test/test_dedupe.py.
