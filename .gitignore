@@ -26,3 +26,6 @@ htmlcov/
 # Claude Code personal settings (the shared .claude/settings.json IS committed)
 .claude/settings.local.json
 .claude/handoff.md
+
+# Local Chroma data written by integration tests
+test_chroma_data/
