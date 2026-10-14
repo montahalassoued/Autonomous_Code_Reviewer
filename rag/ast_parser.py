@@ -10,17 +10,9 @@ PY_LANGUAGE = Language(tspython.language())
 NESTED_SCOPE_TYPES = {"function_definition", "class_definition", "decorated_definition"}
 
 
+# One function from a source file, with what later steps need.
 @dataclass
 class ParsedFunction:
-    """
-    A single function extracted from a source file, with everything
-    downstream pipeline steps will need about it.
-
-    `name` is the bare name ("login"), used to resolve calls in
-    rag/knowledge_graph.py since a call site only knows the bare name.
-    `qualified_name` ("AuthService.login") is the unique identity
-    within the file, used to build chunk and graph node ids.
-    """
     name: str
     file_path: str
     code: str               # the exact source text, decorators included
@@ -29,56 +21,35 @@ class ParsedFunction:
     calls: list[str] = field(default_factory=list)  # names of functions called inside
     qualified_name: str = ""
 
+    # Defaults qualified_name to the bare name for module-level functions.
     def __post_init__(self) -> None:
-        """Defaults qualified_name to the bare name for module-level functions."""
         if not self.qualified_name:
             self.qualified_name = self.name
 
 
+# tree-sitter gives byte offsets, so slice the source bytes to get the text.
 def _get_node_text(node: Node, source_bytes: bytes) -> str:
-    """
-    tree-sitter gives node positions as byte offsets, not the text
-    itself - we slice the original source bytes to get the actual code.
-    """
     return source_bytes[node.start_byte:node.end_byte].decode("utf-8")
 
 
+# The identifier child of a function_definition node.
 def _extract_function_name(function_node: Node, source_bytes: bytes) -> str:
-    """
-    A function_definition node's children include 'def', the name
-    identifier, parameters, ':', and the body. We look for the child
-    of type 'identifier' to get just the name (e.g. 'login').
-    """
     for child in function_node.children:
         if child.type == "identifier":
             return _get_node_text(child, source_bytes)
     return "<unknown>"
 
 
+# The name of a class_definition node.
 def _extract_class_name(class_node: Node, source_bytes: bytes) -> str:
-    """
-    Returns the name of a class_definition node (e.g. 'AuthService'),
-    or '<unknown>' if tree-sitter couldn't find one (broken source).
-    """
     name_node = class_node.child_by_field_name("name")
     if name_node is None:
         return "<unknown>"
     return _get_node_text(name_node, source_bytes)
 
 
+# Names of the plain function calls inside a function.
 def _extract_calls(function_node: Node, source_bytes: bytes) -> list[str]:
-    """
-    Walks the function's subtree looking for 'call' nodes (function
-    invocations) and collects the name being called.
-
-    Example: inside `def login(): verify_password(p, h)`, this finds
-    the call node for verify_password and extracts "verify_password".
-    This list becomes the edges of the knowledge graph in Step 5.
-
-    Nested defs and classes are skipped: their calls only happen if
-    the nested function is itself invoked, so counting them as the
-    parent's calls would create misleading graph edges.
-    """
     calls: list[str] = []
 
     def walk(node: Node) -> None:
@@ -99,25 +70,8 @@ def _extract_calls(function_node: Node, source_bytes: bytes) -> list[str]:
     return calls
 
 
+# Makes a qualified name unique within one file.
 def _unique_qualified_name(qualified_name: str, seen_counts: dict[str, int]) -> str:
-    """
-    Makes a qualified name unique within one file.
-
-    The same qualified name can legitimately appear twice in a file
-    (a @property and its @x.setter, or a function redefined under an
-    `if`). Chroma rejects duplicate ids in one upsert, so the second
-    occurrence becomes "name#2", the third "name#3", and so on. The
-    first occurrence keeps the plain name, so ids stay stable for the
-    common case.
-
-    Args:
-        qualified_name: the name built from the class stack
-        seen_counts: how many times each name was seen so far in this
-                     file (updated in place)
-
-    Returns:
-        the qualified name, suffixed if it was already used
-    """
     count = seen_counts.get(qualified_name, 0) + 1
     seen_counts[qualified_name] = count
     if count == 1:
@@ -125,20 +79,8 @@ def _unique_qualified_name(qualified_name: str, seen_counts: dict[str, int]) -> 
     return f"{qualified_name}#{count}"
 
 
+# One ParsedFunction per function or method in the file.
 def parse_file(file_path: str, source_code: str) -> list[ParsedFunction]:
-    """
-    Parses a single Python source file and returns one ParsedFunction
-    per module-level function or method (at any class nesting depth).
-    Functions defined inside other functions are not emitted.
-
-    Args:
-        file_path: path to the file, stored as metadata on each chunk
-                    (used later for GitHub line-pointing and graph nodes)
-        source_code: the raw text content of the file
-
-    Returns:
-        list of ParsedFunction, in source order
-    """
     parser = Parser(PY_LANGUAGE)
     source_bytes = source_code.encode("utf-8")
     tree = parser.parse(source_bytes)

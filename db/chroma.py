@@ -5,74 +5,30 @@ from rag.contextual_chunker import ContextualChunk
 COLLECTION_NAME = "code_chunks"
 
 
+# Persistent ChromaDB client stored on disk.
 def get_client(persist_directory: str = "./chroma_data") -> chromadb.ClientAPI:
-    """
-    Returns a persistent ChromaDB client - data survives between runs,
-    written to disk at persist_directory. This matters because
-    ingestion (Step 3-6) runs once, and the review pipeline (Step 8+)
-    needs to read this data back later, potentially in a completely
-    separate process.
-    """
     return chromadb.PersistentClient(path=persist_directory)
 
 
+# Gets or creates the collection where all chunks live.
 def get_collection(client: chromadb.ClientAPI):
-    """
-    Gets or creates the collection where all chunks live.
-
-    embedding_function=None tells Chroma "do not compute embeddings
-    yourself - I will always provide pre-computed vectors". Without
-    this, Chroma would silently use its own default model whenever we
-    forget to pass embeddings explicitly, producing vectors that are
-    NOT compatible with Voyage's vector space.
-    """
     return client.get_or_create_collection(
         name=COLLECTION_NAME,
         embedding_function=None,
     )
 
 
+# Builds the stable id of a chunk: "file_path::qualified_name".
 def make_chunk_id(chunk: ContextualChunk) -> str:
-    """
-    Builds the stable id of a chunk: "file_path::qualified_name".
-
-    This is the same id rag/knowledge_graph.py uses for graph nodes,
-    so a search hit can be looked up in the graph directly. It is
-    defined once here so ingestion and storage can't drift apart.
-
-    Args:
-        chunk: a ContextualChunk from rag/contextual_chunker.py
-
-    Returns:
-        the chunk id, e.g. "auth/service.py::AuthService.login"
-    """
     return f"{chunk.function.file_path}::{chunk.function.qualified_name}"
 
 
+# Stores a batch of chunks together with their pre-computed embeddings and metadata.
 def store_chunks(
     collection,
     chunks: list[ContextualChunk],
     embeddings: list[list[float]],
 ) -> None:
-    """
-    Stores a batch of chunks together with their pre-computed
-    embeddings and metadata.
-
-    Args:
-        collection: a Chroma collection from get_collection()
-        chunks: ContextualChunk objects (same order as embeddings)
-        embeddings: vectors from rag/embedder.py's embed_chunks()
-                    (same order as chunks - this pairing is the
-                    caller's responsibility, enforced here by zip())
-
-    Each chunk's metadata (file_path, function_name, qualified_name,
-    line numbers, context, code) is stored alongside its vector, so a
-    search result can be turned directly into a RetrievedChunk
-    (review/state.py) without a second lookup anywhere else. The code
-    is stored in metadata (not only in `documents`) because every
-    downstream consumer (graph_retriever, reranker, retriever) reads
-    chunk metadata, and documents also carry the context sentence.
-    """
     if not chunks:
         return
 
@@ -103,16 +59,8 @@ def store_chunks(
     )
 
 
+# Top_k chunks closest to query_embedding.
 def query_collection(collection, query_embedding: list[float], top_k: int = 10) -> dict:
-    """
-    Runs a dense similarity search: finds the top_k chunks whose
-    embeddings are closest to query_embedding.
-
-    Returns Chroma's raw result dict - rag/hybrid_search.py (Step 7)
-    will be responsible for combining this with BM25 results, so we
-    keep this function a thin, unopinionated wrapper rather than
-    reshaping the output here.
-    """
     return collection.query(
         query_embeddings=[query_embedding],
         n_results=top_k,

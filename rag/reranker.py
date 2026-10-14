@@ -16,32 +16,17 @@ MAX_RERANK_CODE_CHARS = 2000
 _model_cache: "CrossEncoder | None" = None
 
 
+# One reranked context chunk, converted to a RetrievedChunk by the retriever.
 @dataclass
 class RankedChunk:
-    """
-    A final, reranked piece of context - this is the shape that feeds
-    directly into review/state.py's RetrievedChunk once Step 10
-    (review/retriever.py) wires this whole pipeline into the graph.
-    """
     chunk_id: str
     metadata: dict
     rerank_score: float
     source: str  # carried over from EnrichedResult: "hybrid_search", "caller_of_X", etc.
 
 
+# Lazily loads the cross-encoder once and caches it at module level.
 def _get_model() -> "CrossEncoder":
-    """
-    Lazily loads the cross-encoder once and caches it at module level.
-
-    Loading a CrossEncoder is expensive (downloads + loads model
-    weights into memory) - we do not want to pay that cost on every
-    single call to rerank(), only once per process lifetime. The
-    sentence_transformers import itself (which pulls in torch, ~230MB)
-    is deferred here too, not just the model construction - importing
-    it at module load time would cost that memory at app startup even
-    before any rerank() call, which is what blew past Render's 512MB
-    free-tier limit during ingestion.
-    """
     global _model_cache
     if _model_cache is None:
         from sentence_transformers import CrossEncoder
@@ -49,20 +34,8 @@ def _get_model() -> "CrossEncoder":
     return _model_cache
 
 
+# Text the cross-encoder scores: context sentence + truncated code.
 def _build_document_text(metadata: dict) -> str:
-    """
-    Builds the text the cross-encoder scores against the query: the
-    chunk's context sentence, a newline, then its code (truncated).
-
-    Args:
-        metadata: a chunk's metadata dict (from Chroma or from
-                  graph_retriever._node_to_metadata)
-
-    Returns:
-        the document text for the (query, document) pair. Falls back
-        to "file::name" only if a chunk has neither context nor code,
-        so the model still gets something to score.
-    """
     context = metadata.get("context", "")
     code = metadata.get("code", "")[:MAX_RERANK_CODE_CHARS]
     if not context and not code:
@@ -71,27 +44,12 @@ def _build_document_text(metadata: dict) -> str:
     return f"{context}\n{code}"
 
 
+# Score each candidate with the cross-encoder; return the top_k.
 def rerank(
     query: str,
     candidates: list[EnrichedResult],
     top_k: int = 5,
 ) -> list[RankedChunk]:
-    """
-    Re-scores every candidate against the query using the cross-encoder,
-    and returns the top_k by descending score.
-
-    Args:
-        query: the original search query (same one passed to
-               hybrid_search.py earlier in the pipeline)
-        candidates: output of rag/graph_retriever.py's
-                    enrich_with_graph_context() - the combined set of
-                    direct search hits plus their graph neighbors
-        top_k: how many final chunks to keep for the LLM context
-
-    Returns:
-        at most top_k RankedChunk objects, best first, each chunk at
-        most once
-    """
     if not candidates:
         return []
 

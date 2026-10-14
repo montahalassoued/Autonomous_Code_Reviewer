@@ -10,51 +10,28 @@ RRF_K = 60  # standard constant from the original RRF paper - softens
             # default used in most hybrid search implementations
 
 
+# One fused search result, passed on to graph expansion and reranking.
 @dataclass
 class SearchResult:
-    """
-    A single fused search result, ready to be passed downstream to
-    rag/graph_retriever.py and eventually rag/reranker.py.
-    """
     chunk_id: str          # "file_path::qualified_name", matches Chroma's id scheme
     rrf_score: float
     metadata: dict          # file_path, function_name, qualified_name, line numbers, context, code, calls
 
 
+# Tokenization for BM25: lowercase, strip code punctuation, split on whitespace.
 def _tokenize(text: str) -> list[str]:
-    """
-    Tokenization for BM25: lowercase, strip code punctuation, split on
-    whitespace.
-
-    Bug fixed here after testing: a naive .lower().split() leaves code
-    punctuation glued to identifiers - "verify_password(password," was
-    a SINGLE token, which never matches a clean query term like
-    "verify_password". Stripping everything except letters/digits/
-    underscore (so identifiers with underscores stay intact as one
-    token, but get separated from surrounding ()[]{}:,.  etc.) fixes
-    this while still treating verify_password as one meaningful unit
-    rather than splitting it into "verify" + "password".
-    """
     text = text.lower()
     text = re.sub(r"[^a-z0-9_]+", " ", text)
     return text.split()
 
 
+# Runs BM25 over the full corpus and returns the top_k chunk_ids, ranked best-to-worst.
 def _bm25_search(
     query: str,
     all_documents: list[str],
     all_ids: list[str],
     top_k: int,
 ) -> list[str]:
-    """
-    Runs BM25 over the full corpus and returns the top_k chunk_ids,
-    ranked best-to-worst.
-
-    Note: BM25Okapi has no persistence/index - we rebuild it from the
-    full document list on every call. This is fine at the scale of a
-    single repo (hundreds to low thousands of functions) but would
-    need a persisted index for very large corpora.
-    """
     tokenized_corpus = [_tokenize(doc) for doc in all_documents]
     bm25 = BM25Okapi(tokenized_corpus)
 
@@ -66,35 +43,18 @@ def _bm25_search(
     return [chunk_id for chunk_id, _score in ranked[:top_k]]
 
 
+# Dense search via Chroma; top_k chunk ids, best first.
 def _dense_search(query: str, collection, top_k: int) -> list[str]:
-    """
-    Runs the dense vector search via Chroma (Step 6) and returns the
-    top_k chunk_ids, ranked best-to-worst (Chroma already returns
-    results sorted by similarity).
-    """
     query_vector = embed_query(query)
     results = query_collection(collection, query_vector, top_k=top_k)
     return results["ids"][0]
 
 
+# RRF score for every chunk id in the ranked lists.
 def _reciprocal_rank_fusion(
     ranked_lists: list[list[str]],
     k: int = RRF_K,
 ) -> dict[str, float]:
-    """
-    Computes RRF scores for every chunk_id appearing in any of the
-    given ranked lists.
-
-    Args:
-        ranked_lists: one or more lists of chunk_ids, each already
-                       sorted best-to-worst by its own method
-        k: the RRF smoothing constant
-
-    Returns:
-        a dict mapping chunk_id -> combined RRF score. A chunk_id
-        missing from one list simply doesn't get a contribution from
-        that list - it isn't penalized further than "not appearing".
-    """
     scores: dict[str, float] = {}
     for ranked_list in ranked_lists:
         for rank, chunk_id in enumerate(ranked_list):
@@ -105,6 +65,7 @@ def _reciprocal_rank_fusion(
     return scores
 
 
+# BM25 + dense search fused with RRF; returns the top_k results.
 def hybrid_search(
     query: str,
     collection,
@@ -112,28 +73,6 @@ def hybrid_search(
     all_ids: list[str],
     top_k: int = 10,
 ) -> list[SearchResult]:
-    """
-    Runs BM25 and dense search in parallel (conceptually - sequential
-    here, since both are fast enough at this scale), fuses them with
-    RRF, and returns the top_k fused results.
-
-    Args:
-        query: the search query text (e.g. one of the sub-queries from
-               rag/query_decomposer.py, Step 11)
-        collection: a Chroma collection (db/chroma.py) already
-                    populated with embedded chunks
-        all_documents: the full list of chunk texts in the collection,
-                        needed to rebuild the BM25 index - same order
-                        as all_ids
-        all_ids: the full list of chunk_ids in the collection, same
-                  order as all_documents
-        top_k: how many results to retrieve from EACH method before
-               fusion (the final fused list may be shorter if there's
-               overlap, or contain up to 2*top_k unique results)
-
-    Returns:
-        SearchResult objects sorted by descending RRF score
-    """
     bm25_ranked = _bm25_search(query, all_documents, all_ids, top_k)
     dense_ranked = _dense_search(query, collection, top_k)
 

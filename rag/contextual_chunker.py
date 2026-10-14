@@ -24,31 +24,20 @@ Code:
 Context sentence:"""
 
 
+# A ParsedFunction plus its LLM-written context sentence.
 @dataclass
 class ContextualChunk:
-    """
-    A ParsedFunction enriched with an LLM-generated context sentence,
-    ready to be embedded in Step 6.
-    """
     function: ParsedFunction
     context: str
 
+    # Text sent to the embedder: context sentence + code.
     @property
     def embeddable_text(self) -> str:
-        """
-        The actual text that will be sent to the embedding model:
-        context sentence prepended to the raw code, exactly as
-        Anthropic's technique prescribes.
-        """
         return f"{self.context}\n\n{self.function.code}"
 
 
+# Reads GOOGLE_API_KEY from the environment.
 def _build_client() -> genai.Client:
-    """
-    Reads GOOGLE_API_KEY from the environment. Raises a clear error
-    early if it's missing, instead of failing deep inside an API call
-    with a confusing message.
-    """
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError(
@@ -59,6 +48,7 @@ def _build_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
+# Calls Gemini Flash to generate a one-sentence context for a single function.
 @retry(
     retry=retry_if_exception_type(ServerError),
     stop=stop_after_attempt(4),
@@ -66,24 +56,6 @@ def _build_client() -> genai.Client:
     reraise=True,
 )
 def generate_context(client: genai.Client, function: ParsedFunction) -> str:
-    """
-    Calls Gemini Flash to generate a one-sentence context for a single
-    function. This is the core LLM call of this module.
-
-    Retries on ServerError (5xx - transient outages/overload on
-    Google's side) with exponential backoff, up to 4 attempts total.
-    Does NOT retry on 4xx client errors (bad API key, invalid request)
-    since those won't resolve themselves on retry. Ingestion runs one
-    of these calls per function in a repo - without this, a single
-    transient 503 kills the entire run.
-
-    Args:
-        client: an initialized genai.Client
-        function: a ParsedFunction from rag/ast_parser.py
-
-    Returns:
-        a short context sentence (stripped of whitespace/quotes)
-    """
     prompt = CONTEXT_PROMPT_TEMPLATE.format(
         file_path=function.file_path,
         calls=", ".join(function.calls) if function.calls else "none",
@@ -100,19 +72,10 @@ def generate_context(client: genai.Client, function: ParsedFunction) -> str:
     return response.text.strip().strip('"').strip("'")
 
 
+# Runs generate_context on every function in the list.
 def contextualize_functions(
     functions: list[ParsedFunction],
 ) -> list[ContextualChunk]:
-    """
-    Runs generate_context on every function in the list.
-
-    This is the function that ingestion.py (Step 7+) will call after
-    ast_parser.py has produced the raw functions for a whole repo.
-
-    Note: this makes one LLM call PER function, sequentially. For a
-    large repo this could be slow - parallelizing this with asyncio is
-    a reasonable future optimization, noted in docs/DECISIONS.md.
-    """
     client = _build_client()
     results: list[ContextualChunk] = []
 

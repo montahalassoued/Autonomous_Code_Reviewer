@@ -23,12 +23,8 @@ Diff:
 Queries:"""
 
 
+# Reads GROQ_API_KEY from the environment.
 def _build_client() -> Groq:
-    """
-    Reads GROQ_API_KEY from the environment. Same defensive pattern
-    used in rag/contextual_chunker.py and rag/embedder.py: fail early
-    with a clear message instead of a cryptic error mid-call.
-    """
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError(
@@ -39,21 +35,8 @@ def _build_client() -> Groq:
     return Groq(api_key=api_key)
 
 
+# Generates 1-3 search queries from a raw PR diff.
 def decompose_diff(diff: str) -> list[str]:
-    """
-    Generates 1-3 search queries from a raw PR diff.
-
-    Args:
-        diff: the raw diff text, as it would arrive from a GitHub
-              webhook payload
-
-    Returns:
-        a list of 1-3 query strings, each targeting a different
-        concern found in the diff. Falls back to a single query built
-        from the raw diff if the LLM output is empty, can't be parsed
-        as JSON, or is an empty list, rather than crashing (or silently
-        retrieving nothing) over a formatting hiccup.
-    """
     client = _build_client()
     prompt = DECOMPOSE_PROMPT_TEMPLATE.format(diff=diff)
 

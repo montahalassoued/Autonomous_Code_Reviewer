@@ -7,12 +7,8 @@ EMBEDDING_MODEL = "voyage-code-2"
 EMBEDDING_DIMENSION = 1536  # voyage-code-2's native output size
 
 
+# Reads VOYAGE_API_KEY from the environment.
 def _build_client() -> voyageai.Client:
-    """
-    Reads VOYAGE_API_KEY from the environment. Same defensive pattern
-    as contextual_chunker.py's _build_client: fail early with a clear
-    message instead of a cryptic error deep inside the API call.
-    """
     api_key = os.environ.get("VOYAGE_API_KEY")
     if not api_key:
         raise RuntimeError(
@@ -23,23 +19,8 @@ def _build_client() -> voyageai.Client:
     return voyageai.Client(api_key=api_key)
 
 
+# Embeds a batch of contextual chunks in a SINGLE API call.
 def embed_chunks(chunks: list[ContextualChunk]) -> list[list[float]]:
-    """
-    Embeds a batch of contextual chunks in a SINGLE API call.
-
-    Why batch instead of one call per chunk: Voyage's embed() endpoint
-    accepts a list of texts natively, and batching is both faster
-    (one network round-trip instead of N) and friendlier to API rate
-    limits than embedding chunks one at a time.
-
-    Args:
-        chunks: ContextualChunk objects from rag/contextual_chunker.py
-
-    Returns:
-        a list of embedding vectors, in the SAME ORDER as the input
-        chunks - caller is responsible for keeping chunk and vector
-        paired together (db/chroma.py does this via zip()).
-    """
     if not chunks:
         return []
 
@@ -55,16 +36,8 @@ def embed_chunks(chunks: list[ContextualChunk]) -> list[list[float]]:
     return result.embeddings
 
 
+# Embeds a single search query string.
 def embed_query(query_text: str) -> list[float]:
-    """
-    Embeds a single search query string.
-
-    Separate from embed_chunks because Voyage's API distinguishes
-    input_type="document" (what we're indexing) from input_type="query"
-    (what we're searching with) - using the right one improves
-    retrieval quality, since the model was trained knowing which side
-    of a search a given text represents.
-    """
     client = _build_client()
     result = client.embed(
         [query_text],
