@@ -26,7 +26,7 @@ These rules override any skill or subagent instruction that says otherwise.
 
 ```text
 app/        api/ (HTTP routers) · jobs/ (queue, dedupe) · main.py (API) · worker.py · bootstrap.py
-review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · retriever.py (legacy) · agents/ (security, logic, quality + agent_runner)
+review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · retriever.py (legacy) · agents/ (agent_runner.py, prompt_assembler.py, prompts/ shared, one folder per agent: security/ logic/ quality/ with agent.py, prompts/*.md, rules.py, examples.json)
 rag/        parsing, chunking, call graph, embeddings, search, reranking
 tools/      external service clients (GitHub)       db/      postgres.py · migration_runner.py · migrations/*.sql · chroma.py (legacy)
 eval/       LLM benchmark, datasets, results         infra/   Azure setup
@@ -67,7 +67,7 @@ Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAG
 - **Comments are one short `#` line.** No `"""` header at the top of files (the file and folder names say the role), no multi-line docstrings, no Args/Returns blocks. The longer *why* goes in `docs/DECISIONS.md`. See the `clean-code` skill.
 - **API clients:** each module has a `_build_*_client()` that reads its key from the environment and raises a clear `RuntimeError` if it's missing.
 - **LLM output parsing never crashes the pipeline.** A malformed response degrades to zero findings, and invalid findings are dropped and logged (see `parse_findings` / `to_finding` in `review/agents/agent_runner.py`).
-- **Reviewers** (security, logic, quality) are a prompt + an `AgentSpec`; the Groq call, parsing and validation are in `review/agents/agent_runner.py`. The model is `REVIEW_AGENT_MODEL` (provisional default `openai/gpt-oss-120b`, to be picked with `eval/llm_benchmark.py`). The legacy decomposer and judge still name the retired `llama-3.3-70b-versatile`. Use the `add-review-agent` skill to add or change a reviewer.
+- **Review agents** (security, logic, quality) are each a folder (`agent.py`, `prompts/NN_*.md`, `rules.py`, `examples.json`); the Groq call, parsing and validation are in `review/agents/agent_runner.py`. The model is `REVIEW_AGENT_MODEL` (provisional default `openai/gpt-oss-120b`, to be picked with `eval/llm_benchmark.py`). The legacy decomposer and judge still name the retired `llama-3.3-70b-versatile`. Use the `add-review-agent` skill to add or change a reviewer.
 - **Tests:** `tests/unit/` (offline, mocked, run in CI) and `tests/integration/` (real APIs, auto-marked `integration`). Use the `write-tests` skill.
 - **Architecture decisions** go in `docs/DECISIONS.md`. Use the `log-decision` skill.
 - **Commits** are a single title line `type(scope): summary` with no Co-Authored-By or Claude attribution. Use the `commit-message` skill. A hook enforces this.

@@ -19,23 +19,33 @@ Each agent is one category of the review. Its name is its LangGraph node, the `a
 
 | Agent | Looks for | Does not report | File |
 | --- | --- | --- | --- |
-| **Security** | OWASP / CWE vulnerabilities (injection, XSS, secrets, SSRF, path traversal, weak crypto), authn / authz / IDOR on every changed endpoint, sensitive data in responses and logs, risky new dependencies | logic bugs, quality | `review/agents/security_agent.py` |
-| **Logic** | Correctness bugs: wrong conditions, off-by-one, unhandled None / empty / edge cases, unchecked results of external calls, states the code forgets (flags, roles, lifecycle), swallowed errors, broken contracts for existing callers, wrong API use, async and concurrency mistakes | security, quality | `review/agents/logic_agent.py` |
-| **Quality** | Performance (N+1, quadratic loops, blocking I/O in async, unbounded queries and caches, work repeated in loops), maintainability (duplication, functions doing too much, dead code), missing, weak or flaky tests, missing docs on public interfaces. Never what a linter catches | security, logic bugs | `review/agents/quality_agent.py` |
+| **Security** | OWASP / CWE vulnerabilities (injection, XSS, secrets, SSRF, path traversal, weak crypto), authn / authz / IDOR on every changed endpoint, sensitive data in responses and logs, risky new dependencies | logic bugs, quality | `review/agents/security/` |
+| **Logic** | Correctness bugs: wrong conditions, off-by-one, unhandled None / empty / edge cases, unchecked results of external calls, states the code forgets (flags, roles, lifecycle), swallowed errors, broken contracts for existing callers, wrong API use, async and concurrency mistakes | security, quality | `review/agents/logic/` |
+| **Quality** | Performance (N+1, quadratic loops, blocking I/O in async, unbounded queries and caches, work repeated in loops), maintainability (duplication, functions doing too much, dead code), missing, weak or flaky tests, missing docs on public interfaces. Never what a linter catches | security, logic bugs | `review/agents/quality/` |
 
 Each prompt says what the other agents cover, so the same issue isn't reported twice under two categories.
 
 ## Shared runner (`review/agents/agent_runner.py`)
 
-An agent file holds only its prompt and an `AgentSpec(name, prompt_template)`. Everything else is shared:
+Each agent is a folder with everything specific to it:
+
+```text
+review/agents/<category>/
+  agent.py         AgentSpec(name, prompt_template, rule_ids) + the LangGraph node
+  prompts/NN_*.md  the prompt, split by topic, read in number order (add a prompt = add a file)
+  rules.py         closed list of rule_id the agent may report (Security: with the CWE)
+  examples.json    few-shot: one finding to imitate, one trap that must give []
+```
+
+`review/agents/prompt_assembler.py` builds the prompt once at import: the agent's `prompts/*.md` → its rules → its examples → the shared `review/agents/prompts/*.md` (the diff and context, then the JSON output contract). Everything else is shared:
 
 - **Model:** `REVIEW_AGENT_MODEL` (default `openai/gpt-oss-120b`, provisional until the benchmark picks one), temperature 0.1.
-- **Prompt:** `{diff}` and `{context_summary}` are filled from `ReviewState`; every prompt ends with the same `FINDINGS_OUTPUT_INSTRUCTIONS` (a JSON array of findings).
+- **Prompt:** `{diff}` and `{context_summary}` are filled from `ReviewState` in one pass (`fill_prompt`), so braces in examples or in the diff never break it; every prompt ends with the same output contract (`prompts/99_output_contract.md`).
 - **Parsing:** strips code fences, falls back to the outermost `[...]`, and returns `[]` on anything unparseable. A malformed response never crashes the review.
 - **Validation:** a finding is kept only with a known severity, a positive integer line and a non-empty file, title, description and suggestion. Dropped findings are logged.
 - **Output:** `{"findings": [...]}`, merged by the `operator.add` reducer in `review/state.py`.
 
-**Finding fields:** `agent`, `severity` (CRITICAL / HIGH / MEDIUM / LOW / INFO), `file_path`, `line_number`, `title`, `description`, `evidence`, `suggestion`.
+**Finding fields:** `agent`, `severity` (CRITICAL / HIGH / MEDIUM / LOW / INFO), `rule_id` (from the agent's `rules.py`, else `other`), `confidence` (high / medium / low; a low-confidence finding never blocks), `file_path`, `line_number`, `title`, `description`, `evidence`, `suggestion`.
 
 ## Retriever (legacy, `review/retriever.py`)
 

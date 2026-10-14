@@ -15,7 +15,8 @@ description: Decide where new code, tests and docs go and how to name them, so e
 | `app/jobs/` | Background job infrastructure | Queue, dedupe, job models, backend factory |
 | `app/` (top level) | Process entry points | `main.py` (API), `worker.py` (worker), `bootstrap.py` (shared startup) |
 | `review/` | Review pipeline | `graph.py` (LangGraph orchestrator), `state.py`, `synthesizer.py`, legacy `retriever.py` |
-| `review/agents/` | The review agents | One `<category>_agent.py` per review category, plus `agent_runner.py` that executes them |
+| `review/agents/` | The review agents | `agent_runner.py` (executes any agent), `prompt_assembler.py`, shared `prompts/`, and one folder per category |
+| `review/agents/<category>/` | One review agent | `agent.py`, `prompts/NN_topic.md`, `rules.py`, `examples.json` |
 | `rag/` | Retrieval | Parsing, chunking, call graph, embeddings, search, reranking |
 | `tools/` | External service clients | One module per service: `github_tools.py` and so on |
 | `db/` | Storage adapters | `postgres.py` (connection pool), `migration_runner.py`, `migrations/NNN_description.sql`, legacy `chroma.py` |
