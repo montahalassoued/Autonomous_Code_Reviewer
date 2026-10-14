@@ -7,6 +7,8 @@ Every significant design choice, and why it was made. Add new entries with the `
 **Current:**
 
 - Groq over OpenAI: free tier, no credit card. The model is picked with `eval/llm_benchmark.py` (LLaMA 3.3 70B was retired by Groq)
+- Three review agents over five: security, logic, quality; adds the missing logic agent, 3 LLM calls instead of 5
+- One shared agent runner over a copy per agent: one place for parsing, validation and the model setting
 - Langfuse over LangSmith: open source, self-hostable, tracing + evals + prompt versioning, no per-trace cost
 - Azure Container Apps webhook server over a GitHub Action: warm worker, multi-repo later, deployment skills
 - Durable queue + separate worker over BackgroundTasks: no lost events, retries, poison queue
@@ -256,3 +258,33 @@ replicas). Trade-off: every review starts at least ~60 s after the push. How
 the worker detects and skips a superseded job is still to be designed
 (open point in `docs/ARCHITECTURE.md`); the Storage Queue cannot replace a
 queued message, so it will rely on the `reviews` table.
+
+## Why three review agents (security, logic, quality) over five
+
+The five agents (security, performance, architecture, testing, documentation)
+cost five LLM calls per review, mostly produced few findings, and had no agent
+for plain correctness bugs (wrong conditions, off-by-one, unhandled None),
+which are what a reviewer looks for first. The review now has three
+categories: Security, Logic (correctness, broken contracts for callers) and
+Quality (performance, maintainability, missing tests and docs). Each prompt
+says what the other two cover, so an issue is reported once. The PR comment
+has one section per category, always in that order and shown even when
+empty, so the reader sees that all three ran. Alternatives: keep five
+(cost, no logic agent), one agent for everything (one prompt doing three
+jobs, harder to evaluate per category). Trade-off: the quality prompt covers
+four former specialties, so each gets less prompt space; the benchmark
+measures it per category.
+
+## Why one shared agent runner over a copy per agent
+
+Each agent copied ~150 lines of client, context formatting, JSON parsing and
+validation, and fixes didn't reach every copy (none validated severity or
+logged dropped findings). `agents/agent_runner.py` now owns all of it, and an
+agent is an `AgentSpec(name, prompt_template)` plus its prompt. It also
+validates findings strictly (known severity, positive integer line, non-empty
+text), logs what it drops, and reads the model from `REVIEW_AGENT_MODEL` so a
+retired Groq model is a config change, not a code change. Each agent module
+keeps a `_build_groq_client` name so tests can fake one agent at a time.
+Alternatives: a base class per agent (inheritance for what is only data), or
+one generic node built from a list of specs (loses a named function per
+agent in traces and tests). Validated in tests/unit/test_agent_runner.py.

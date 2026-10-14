@@ -130,11 +130,9 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
   - a concurrency limit
   - **Langfuse tracing:** one trace per review, with a generation for each LLM call (prompt, output, tokens, latency). It's enabled only when `LANGFUSE_PUBLIC_KEY` is set, and it's a no-op in tests.
 - `agents/prompting.py`: `wrap_untrusted()` with nonce delimiters, so untrusted content is treated as data.
-- `agents/agent_runner.py` and `agents/agent_specs.py`: an `AgentSpec(name: security|logic|quality, system_prompt, focus, model, temperature, max_findings)`, plus `run_agent()` and `make_agent_node()`. It validates severity, the line number and a non-empty recommendation, and logs every dropped finding.
-- `Finding` gains a `category` (and optionally `end_line`).
-- The synthesizer groups findings by category.
+- **Done** (`refactor/three-review-agents`): `agents/agent_runner.py` with `AgentSpec(name, prompt_template)` and `run_agent()`, the agents `security`, `logic`, `quality`, strict validation (severity, integer line, non-empty text) with logged drops, `REVIEW_AGENT_MODEL`, and a synthesizer with one section per category. `Finding.agent` is the category, so no separate `category` field was added.
 - Embedder retries and batching, and Gemini retries on 429 too.
-- Delete the old performance, architecture, testing and documentation agents.
+- Delete the old performance, architecture, testing and documentation agents (done).
 
 **Done when:** an eval before and after, reported per category.
 

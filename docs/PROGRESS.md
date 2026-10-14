@@ -9,7 +9,7 @@
 | --- | --- | --- |
 | Legacy RAG pipeline | tree-sitter parse, Gemini context sentences, NetworkX graph, Voyage + Chroma, hybrid search, 1-hop graph expansion, local reranker, judge loop | `rag/`, `db/chroma.py`, `agents/retriever.py` |
 | Review graph (Phase 0) | Forward-only graph, real code reaches agents, `file::qualified_name` ids, None guards, reranker on context + code, offline end-to-end test | `agents/graph.py`, `tests/unit/test_pipeline_offline.py` |
-| Agents | 5 domain agents (Security, Performance, Architecture, Testing, Documentation) + synthesizer. Security checks authn/authz/IDOR on changed endpoints | `agents/` |
+| Agents (Phase 3, part) | 3 review agents (Security, Logic, Quality) on one shared runner with strict finding validation and `REVIEW_AGENT_MODEL`; synthesizer with one section per category. Security checks authn/authz/IDOR on changed endpoints | `agents/` |
 | Durable jobs (Phase 2, part) | Webhook verifies HMAC, dedupes on (repo, head_sha, PR) in Azure Table Storage, enqueues to Azure Storage Queue; worker with retries and poison queue | `app/api/webhook.py`, `app/jobs/`, `app/worker.py` |
 | GitHub output (Phase 5, part) | One summary comment per PR, upserted by the `<!-- acr:summary -->` marker | `tools/github_tools.py` |
 | Packaging and deploy | Multi-stage Docker image, compose (Azurite + API + worker), Azure setup script, GitHub Actions test → build → deploy (deploy skipped until Azure vars exist) | `Dockerfile`, `docker-compose.yml`, `infra/`, `.github/workflows/` |
@@ -18,13 +18,13 @@
 
 ## Not merged yet
 
-The durable jobs, the tests split, the decisions merge, the security authz prompt and this design update are on stacked local branches (`feat/durable-job-pipeline` → `refactor/project-structure` → `feat/security-authz-review` → `docs/structural-context-design`), not on `main` yet.
+The durable jobs, the tests split, the decisions merge, the security authz prompt, the design update and the 3 agents are on stacked local branches (`feat/durable-job-pipeline` → `refactor/project-structure` → `feat/security-authz-review` → `docs/structural-context-design` → `refactor/three-review-agents`), not on `main` yet.
 
 ## Not built yet
 
 - Phase 1: review eval harness (`eval/review_eval.py`, golden dataset, legacy vs structural).
 - Phase 2: repo guard, stale-SHA check.
-- Phase 3: shared LLM client, Langfuse tracing, 3 agents (Security, Logic, Quality), `category` on findings.
+- Phase 3: shared LLM client (timeouts, retries, concurrency limit), Langfuse tracing, nonce-wrapped prompts. (The 3 agents and the shared runner are done.)
 - Phase 4: Postgres index, initial import, symbol diff, triage, structural context, PR text as input.
 - Phase 4b: context subagent.
 - Phase 5: inline review, only-new findings by fingerprint.
@@ -34,5 +34,5 @@ The durable jobs, the tests split, the decisions merge, the security authz promp
 
 ## Known issues
 
-- Production agents still call Groq `llama-3.3-70b-versatile`, which Groq retired.
+- The review agents' model `openai/gpt-oss-120b` is a provisional default until the benchmark runs on the 3 agents. The legacy decomposer (`rag/query_decomposer.py`) and judge (`agents/retriever.py`) still call the retired `llama-3.3-70b-versatile` and don't catch API errors, so the retriever node raises and every review fails until they are switched too.
 - The latest benchmark run (2026-10-13) predates the 5 authn/authz cases and scores almost every model at 1.00, so it does not separate them.

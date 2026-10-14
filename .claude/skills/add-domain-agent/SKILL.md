@@ -1,63 +1,56 @@
 ---
 name: add-domain-agent
-description: Add a new domain analysis agent (like security, performance, architecture, testing, documentation) to the LangGraph review pipeline. Use when the user wants a new kind of code review check, e.g. "add an accessibility agent", "add a dependency/license agent".
+description: Add, change or remove a review agent (the review categories are security, logic and quality) in the LangGraph review pipeline. Use when the user wants a new kind of review check or a new category, e.g. "add an accessibility agent", or to change what an existing agent looks for.
 ---
 
-# Add a domain agent
+# Add or change a review agent
 
-Every domain agent follows the same pattern. Use `agents/security.py` as the reference implementation and copy its structure exactly. Below, `<name>` is the new agent's lowercase name, e.g. `accessibility`.
+The review has **three categories by design**: Security, Logic and Quality (see `docs/AGENTS.md`). Before adding a fourth agent, check whether the check fits one of them: a new focus bullet in an existing prompt costs no extra LLM call, while a new agent costs one call per review. Ask the user if unsure, and log a new category with the `log-decision` skill.
+
+All agents share `agents/agent_runner.py`. An agent file holds only its prompt and its `AgentSpec`. Use `agents/logic.py` as the reference. Below, `<name>` is the new agent's lowercase name.
 
 ## Step 1: Create `agents/<name>.py`
 
-Copy `agents/security.py` and change only what is domain-specific:
+Copy `agents/logic.py` and change only:
 
 | Part | What to change |
-|---|---|
-| Module docstring | What this agent looks for, Inputs/Outputs, and the "same pattern as ..." paragraph |
-| `<NAME>_MODEL` | Keep `"llama-3.3-70b-versatile"` unless there's a reason not to |
-| `<NAME>_PROMPT_TEMPLATE` | The role ("You are a senior ... engineer") and the bullet list of what to look for. **Keep** the `{diff}` and `{context_summary}` placeholders, the exact JSON field list, and the "Output ONLY a JSON array ... or []" instruction |
-| `_format_context` | Change only the docstring's example of why context helps this domain |
-| `_to_finding` | `agent="<name>"` |
-| `<name>_node` | The function name and docstring |
+| --- | --- |
+| Module docstring | What this agent looks for, Inputs/Outputs, and why it exists as its own category |
+| `<NAME>_PROMPT_TEMPLATE` | The role ("You are a senior ...") and the bullet list of what to look for, plus a line saying what the other agents cover so it doesn't report their issues. **Keep** the `{diff}` and `{context_summary}` placeholders and end with `+ FINDINGS_OUTPUT_INSTRUCTIONS` |
+| `<NAME>_AGENT` | `AgentSpec(name="<name>", prompt_template=...)` |
+| `<name>_node` | Function name and docstring; it calls `run_agent(<NAME>_AGENT, state, _build_groq_client())` |
 
-Keep these unchanged, because they make the pipeline robust:
-- `_build_groq_client()`, which fails early with a clear message if `GROQ_API_KEY` is missing
-- `_parse_findings()`, which strips code fences, falls back to the outermost `[...]`, and returns `[]` on failure
-- `_to_finding()`, which returns `None` for malformed entries instead of raising
-- `temperature=0.1`
-- returning `{"findings": findings}`, a partial update merged by the `operator.add` reducer
+Never copy parsing, validation or client code into the agent file. If the runner needs a change, change it in `agents/agent_runner.py` so all agents get it.
 
 ## Step 2: Wire it into `agents/graph.py`
 
 1. Import it: `from agents.<name> import <name>_node`
-2. Add `"<name>"` to the `DOMAIN_AGENTS` list. This alone handles the parallel fan-out from `route_after_retriever`, and the `<name> → join_agents` edge in the loop.
+2. Add `"<name>"` to `DOMAIN_AGENTS`. This handles the parallel fan-out and the `<name> → join_agents` edge.
 3. Register the node: `graph.add_node("<name>", <name>_node)`
-4. Update docstrings and comments that say "5 agents" (in `graph.py`, `agents/state.py`, `agents/synthesizer.py`).
 
-The agent must route only to `join_agents`, which goes on to `synthesizer`. Never add an edge from it back to the retriever or the other agents, because the graph must stay forward-only so that it always terminates.
+The agent must route only to `join_agents`. Never add an edge back to the retriever or the other agents: the graph must stay forward-only so it always terminates.
 
-## Step 3: Check the synthesizer
+## Step 3: The synthesizer
 
-Open `agents/synthesizer.py` and check whether it groups or labels findings by agent name. If so, add the new agent so its findings render with a proper heading.
+Add `"<name>": "<emoji> <Title>"` to `CATEGORY_TITLES` in `agents/synthesizer.py`, in the position its section should appear. Without it, its findings render under "Other".
 
-## Step 4: Add `tests/integration/test_<name>.py` (real Groq call) and offline unit tests in `tests/unit/`
+## Step 4: Tests (follow the `write-tests` skill)
 
-Mirror `tests/integration/test_security.py` (follow the `write-tests` skill):
-- `load_dotenv()`, then `build_state(diff)`
-- One test with a diff that clearly contains an issue this agent should catch. Assert at least one finding, `agent == "<name>"`, valid severity, `int` line number, and non-empty title, description and suggestion.
-- One test with a trivial safe diff. It shouldn't crash and should return a list.
+- `tests/unit/test_agent_runner.py`: add the new spec to `test_every_agent_prompt_keeps_placeholders_and_output_contract` and the node to `test_agent_nodes_use_their_own_client_seam`.
+- `tests/unit/test_synthesizer.py`: the section order.
+- `tests/integration/test_<name>.py`: mirror `tests/integration/test_logic.py`, with one diff that clearly contains an issue for this agent and one safe diff.
+- `eval/llm_benchmark.py`: add the prompt to `AGENT_PROMPTS`, and add cases with `"agent": "<name>"` to `eval/dataset/llm_benchmark_cases.json`.
 
-## Step 5: Update the docs
+## Step 5: Docs
 
-- `docs/AGENTS.md`: add a section in the same format as the others (role, inputs, outputs, tools, prompt summary).
-- `README.md`: update the agent list in the opening description.
-- If there was a real design choice, add an entry with the `log-decision` skill.
+- `docs/AGENTS.md`: a row in the agents table.
+- `CLAUDE.md`: the agent list in the pipeline block.
 
 ## Step 6: Verify
 
 ```bash
-venv/Scripts/python.exe -c "from agents.graph import build_graph; print('graph imports OK')"
+venv/Scripts/python.exe -m pytest tests/unit
 venv/Scripts/python.exe -m pytest tests/integration/test_<name>.py -s
 ```
 
-The second command makes a real Groq call, so tell the user before running it.
+The second command makes a real Groq call, so give it to the user to run.

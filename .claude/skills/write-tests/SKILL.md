@@ -55,7 +55,7 @@ if __name__ == "__main__":
   ```python
   monkeypatch.setattr("app.api.webhook.get_pr_diff", lambda repo, pr: FAKE_DIFF)
   ```
-- To test an agent without Groq, monkeypatch its `_build_groq_client` to return a fake object whose `chat.completions.create(...)` returns a canned JSON string. Then test `_parse_findings` and `_to_finding` with malformed inputs: fenced JSON, prose around the array, missing fields, a non-int `line_number`.
+- To test an agent without Groq, monkeypatch its module's `_build_groq_client` (e.g. `agents.logic._build_groq_client`) to return a fake object whose `chat.completions.create(...)` returns a canned JSON string. Parsing and validation live in `agents/agent_runner.py` (`parse_findings`, `to_finding`); test malformed inputs there: fenced JSON, prose around the array, missing fields, an invalid severity, a non-int `line_number` (see `tests/unit/test_agent_runner.py`).
 - Build FastAPI tests with a minimal app plus the router under test and `TestClient` (see `make_app()` in `tests/unit/test_webhook.py`).
 
 ## Environment isolation (an important rule)

@@ -39,7 +39,7 @@ docs/       IMPLEMENTATION_PLAN, CI, SETUP, DECISIONS, ...
 ```text
 GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storage Queue → app/worker.py → agents/graph.py (LangGraph)
   START → retriever (corrective RAG loop: retry while quality < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL_ATTEMPTS)
-        → security | performance | architecture | testing | documentation  (parallel)
+        → security | logic | quality  (parallel, one shared runner: agents/agent_runner.py)
         → join_agents (barrier) → synthesizer → END → tools/github_tools.py   (forward-only: always terminates)
 ```
 
@@ -65,8 +65,8 @@ Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAG
 
 - Every file starts with a module docstring: what it does, Inputs/Outputs, and **why** it's designed that way. Every function has a docstring with Args/Returns. See the `clean-code` skill.
 - **API clients:** each module has a `_build_*_client()` that reads its key from the environment and raises a clear `RuntimeError` if it's missing.
-- **LLM output parsing never crashes the pipeline.** A malformed response degrades to zero findings (see `_parse_findings` / `_to_finding` in `agents/security.py`).
-- **Domain agents** share one pattern (Groq, temperature 0.1, JSON array → `Finding`). The code still names `llama-3.3-70b-versatile`, which Groq retired; pick its replacement with `eval/llm_benchmark.py`. Use the `add-domain-agent` skill to add one.
+- **LLM output parsing never crashes the pipeline.** A malformed response degrades to zero findings, and invalid findings are dropped and logged (see `parse_findings` / `to_finding` in `agents/agent_runner.py`).
+- **Review agents** (security, logic, quality) are a prompt + an `AgentSpec`; the Groq call, parsing and validation are in `agents/agent_runner.py`. The model is `REVIEW_AGENT_MODEL` (provisional default `openai/gpt-oss-120b`, to be picked with `eval/llm_benchmark.py`). The legacy decomposer and judge still name the retired `llama-3.3-70b-versatile`. Use the `add-domain-agent` skill to add or change an agent.
 - **Tests:** `tests/unit/` (offline, mocked, run in CI) and `tests/integration/` (real APIs, auto-marked `integration`). Use the `write-tests` skill.
 - **Architecture decisions** go in `docs/DECISIONS.md`. Use the `log-decision` skill.
 - **Commits** are a single title line `type(scope): summary` with no Co-Authored-By or Claude attribution. Use the `commit-message` skill. A hook enforces this.

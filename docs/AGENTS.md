@@ -1,236 +1,53 @@
-# AGENTS.md
+# Agents
 
-This document describes each agent/entity used by the LangGraph pipeline.
+**File purpose:** what each node of the LangGraph review pipeline does, and how the three review agents share one runner.
+**Target design:** [ARCHITECTURE.md](ARCHITECTURE.md). Retrieval details: [RAG.md](RAG.md).
 
-Each agent:
+## Graph
 
-- reads a slice of the shared `ReviewState`
-- produces structured findings back into `ReviewState`
-- uses retrieval tools only when needed
-- keeps outputs evidence-based to make synthesis deterministic
+```text
+START → retriever ─(quality < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL_ATTEMPTS)─► retriever
+                  └─(otherwise)─► security | logic | quality  (parallel)
+      → join_agents (barrier) → synthesizer → END
+```
 
----
+The graph is forward-only, so it always terminates (`agents/graph.py`). In the target design the retriever is replaced by `build_context` and an optional context subagent; the three agents and the synthesizer stay.
 
-## 1) Supervisor
+## The three review agents
 
-**Role:**
+Each agent is one category of the review. Its name is its LangGraph node, the `agent` field of its findings, and its section in the PR comment.
 
-- Decide the next node (retrieval vs. specialist analysis vs. synthesis).
-- Determine whether the review can proceed or must loop for additional context.
+| Agent | Looks for | Does not report | File |
+| --- | --- | --- | --- |
+| **Security** | OWASP / CWE vulnerabilities (injection, XSS, secrets, SSRF, path traversal, weak crypto) and authn / authz / IDOR on every changed endpoint | logic bugs, quality | `agents/security.py` |
+| **Logic** | Correctness bugs: wrong conditions, off-by-one, unhandled None / empty / edge cases, swallowed errors, broken contracts for existing callers, wrong API use, async and concurrency mistakes | security, quality | `agents/logic.py` |
+| **Quality** | Performance (N+1, quadratic loops, blocking I/O in async), maintainability (duplication, functions doing too much, dead code), missing tests, missing docs on public interfaces | security, logic bugs | `agents/quality.py` |
 
-**Inputs from `ReviewState`:**
+Each prompt says what the other reviewers cover, so the same issue isn't reported twice under two categories.
 
-- PR diff metadata and changed files
-- any already retrieved context
-- current status/errors
-- per-agent findings if partially completed
+## Shared runner (`agents/agent_runner.py`)
 
-**Outputs to `ReviewState`:**
+An agent file holds only its prompt and an `AgentSpec(name, prompt_template)`. Everything else is shared:
 
-- routing decision / next stage
-- retrieval hints (e.g., “also search for callers of X”)
-- status updates
+- **Model:** `REVIEW_AGENT_MODEL` (default `openai/gpt-oss-120b`, provisional until the benchmark picks one), temperature 0.1.
+- **Prompt:** `{diff}` and `{context_summary}` are filled from `ReviewState`; every prompt ends with the same `FINDINGS_OUTPUT_INSTRUCTIONS` (a JSON array of findings).
+- **Parsing:** strips code fences, falls back to the outermost `[...]`, and returns `[]` on anything unparseable. A malformed response never crashes the review.
+- **Validation:** a finding is kept only with a known severity, a positive integer line and a non-empty file, title, description and suggestion. Dropped findings are logged.
+- **Output:** `{"findings": [...]}`, merged by the `operator.add` reducer in `agents/state.py`.
 
-**LangChain tools used:**
+**Finding fields:** `agent`, `severity` (CRITICAL / HIGH / MEDIUM / LOW / INFO), `file_path`, `line_number`, `title`, `description`, `evidence`, `suggestion`.
 
-- State inspection and graph routing primitives (no external retrieval required).
+## Retriever (legacy, `agents/retriever.py`)
 
-**System prompt summary:**
+Runs the semantic RAG pipeline (query decomposition, hybrid search, graph expansion, reranking) and an LLM judge that retries while the context score is below `QUALITY_THRESHOLD`, at most `MAX_RETRIEVAL_ATTEMPTS` times. Kept until the eval shows structural context is at least as good; see [RAG.md](RAG.md).
 
-- Be conservative with uncertainty.
-- Prefer evidence-based routing.
-- Never skip retrieval when context is thin.
+## Synthesizer (`agents/synthesizer.py`)
 
----
+No LLM call. It builds one Markdown comment:
 
-## 2) Retriever
+1. A heading and the total number of findings.
+2. A summary table: one row per category, one column per severity.
+3. One section per category, always in the order **Security → Logic → Code quality**, each with its count. Findings are sorted by severity inside a section. An empty category says "No issues found", so the reader can see that all three reviews ran.
+4. Findings from an unknown agent go under "Other" instead of being dropped.
 
-**Role:**
-
-- Convert the review needs into retrieval queries.
-- Run the corrective RAG loop if the initial evidence is insufficient.
-
-**Inputs from `ReviewState`:**
-
-- PR diff text
-- file paths + symbols from the PR
-- supervisor hints and retrieval gaps
-
-**Outputs to `ReviewState`:**
-
-- `retrieval_queries`
-- `retrieved_context` (ranked snippets + metadata)
-- context quality notes and confidence signals
-
-**LangChain tools used:**
-
-- Hybrid search tooling + reranking components wired into a retrieval graph.
-
-**System prompt summary:**
-
-- Search for the exact code that matters.
-- Recover from missing/ambiguous evidence.
-- Return only context that materially changes the review.
-
----
-
-## 3) Security
-
-**Role:**
-
-- Identify vulnerabilities and risky patterns.
-- Check unsafe data handling, secrets exposure, injection, and authorization flaws.
-
-**Inputs from `ReviewState`:**
-
-- diff text
-- retrieved context
-- symbol/file metadata
-
-**Outputs to `ReviewState`:**
-
-- `security_findings` (severity, confidence, evidence, remediation)
-
-**LangChain tools used:**
-
-- Code context search from retrieved evidence.
-
-**System prompt summary:**
-
-- Adversarial posture.
-- Prefer specific evidence to generic warnings.
-
----
-
-## 4) Performance
-
-**Role:**
-
-- Detect latency/cost issues and inefficient patterns.
-- Look for hot paths, repeated I/O, avoidable work, and scaling concerns.
-
-**Inputs from `ReviewState`:**
-
-- diff text
-- retrieved evidence about involved functions/modules
-
-**Outputs to `ReviewState`:**
-
-- `performance_findings` (bottleneck hypotheses, impact, suggestions)
-
-**LangChain tools used:**
-
-- Retrieval-assisted code reasoning and targeted snippet lookup.
-
-**System prompt summary:**
-
-- Look for real bottlenecks.
-- Distinguish complexity from cost.
-
----
-
-## 5) Architecture
-
-**Role:**
-
-- Evaluate modularity and design boundaries.
-- Check layering, coupling, and API shape consistency across modules.
-
-**Inputs from `ReviewState`:**
-
-- diff + retrieved architectural context
-
-**Outputs to `ReviewState`:**
-
-- `architecture_findings` (boundary violations, refactor suggestions)
-
-**LangChain tools used:**
-
-- Code search and call-path context derived from graph traversal.
-
-**System prompt summary:**
-
-- Judge fit to system design.
-- Call out hidden dependencies and cross-layer leakage.
-
----
-
-## 6) Testing
-
-**Role:**
-
-- Assess whether the change is adequately tested.
-- Identify missing regression coverage and fragile tests.
-
-**Inputs from `ReviewState`:**
-
-- diff
-- retrieved context (including relevant tests)
-
-**Outputs to `ReviewState`:**
-
-- `testing_findings` (gaps, recommendations, example tests)
-
-**LangChain tools used:**
-
-- Repository context search for existing tests.
-
-**System prompt summary:**
-
-- Verify behavior changes are exercised.
-- Prefer focused regression tests.
-
----
-
-## 7) Documentation
-
-**Role:**
-
-- Identify drift between behavior and docs.
-- Recommend updates for public APIs and operational guidance.
-
-**Inputs from `ReviewState`:**
-
-- diff
-- retrieved context about public interfaces/config
-
-**Outputs to `ReviewState`:**
-
-- `documentation_findings` (missing docs, stale references)
-
-**LangChain tools used:**
-
-- Documentation search over repository.
-
-**System prompt summary:**
-
-- Flag setup/usage/supportability changes.
-
----
-
-## 8) Synthesizer
-
-**Role:**
-
-- Merge all agent findings into a single structured GitHub Markdown review.
-- Deduplicate overlaps and order items by severity/confidence.
-
-**Inputs from `ReviewState`:**
-
-- `security_findings`, `performance_findings`, `architecture_findings`, `testing_findings`, `documentation_findings`
-- retrieved evidence snippets
-
-**Outputs to `ReviewState`:**
-
-- final review body (Markdown)
-- `comments_to_post` payload for GitHub API
-
-**LangChain tools used:**
-
-- None required beyond state inspection.
-
-**System prompt summary:**
-
-- Preserve strongest evidence.
-- Avoid redundant phrasing.
-- Produce readable, action-oriented Markdown.
+A review with no findings at all is a single "No issues found" line. The comment is posted, or edited in place, by `tools/github_tools.py`.
