@@ -15,10 +15,9 @@ Copy `review/agents/logic_agent.py` and change only:
 
 | Part | What to change |
 | --- | --- |
-| Module docstring | What this agent looks for, Inputs/Outputs, and why it is its own category |
 | `<NAME>_PROMPT_TEMPLATE` | The role ("You are a senior ...") and the bullet list of what to look for, plus a line saying what the other agents cover so it doesn't report their issues. **Keep** the `{diff}` and `{context_summary}` placeholders and end with `+ FINDINGS_OUTPUT_INSTRUCTIONS` |
 | `<NAME>_AGENT` | `AgentSpec(name="<name>", prompt_template=...)`. `name` is the category: the graph node, the findings' `agent` field and the comment section |
-| `<name>_node` | Function name and docstring; it calls `run_agent(<NAME>_AGENT, state, _build_groq_client())` |
+| `<name>_node` | Function name; it calls `run_agent(<NAME>_AGENT, state, _build_groq_client())` |
 
 Never copy parsing, validation or client code into the agent file. If the runner needs a change, change it in `review/agents/agent_runner.py` so all agents get it.
 

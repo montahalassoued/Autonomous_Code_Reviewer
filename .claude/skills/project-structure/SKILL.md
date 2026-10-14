@@ -34,7 +34,7 @@ If a new piece doesn't fit any folder, **stop and propose a new folder** (its na
 - Good: `job_queue.py`, `dedupe.py`, `diff_parser.py`, `context_builder.py`, `github_tools.py`
 - Bad: `utils.py`, `helpers.py`, `misc.py`, `stuff.py`, `new_file.py`, `v2.py`, `final.py`, `test2.py`
 - A module named `utils` is a sign that it holds several roles. Split it by role instead.
-- One main responsibility per module. If the docstring needs "and" to describe it, consider splitting.
+- One main responsibility per module. If describing it needs "and", consider splitting.
 
 **Folders** (lowercase): a plural noun or a domain name for the role: `agents/`, `jobs/`, `analysis/`.
 
@@ -56,7 +56,7 @@ If a new piece doesn't fit any folder, **stop and propose a new folder** (its na
 
 1. Put it in the right folder from the table above.
 2. Give it a role-based name.
-3. Start it with the module docstring or header comment: **File purpose / Inputs / Outputs / Why** (see the `clean-code` skill).
+3. Start it with its imports: no header comment, the name and folder say its role (see the `clean-code` skill).
 4. Add or update its test in the matching `tests/` folder.
 5. If you created a new folder or a new kind of file, update the table above and the layout section of `CLAUDE.md`.
 

@@ -63,7 +63,7 @@ Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAG
 
 ## Conventions
 
-- Every file starts with a module docstring: what it does, Inputs/Outputs, and **why** it's designed that way. Every function has a docstring with Args/Returns. See the `clean-code` skill.
+- **Comments are one short `#` line.** No `"""` header at the top of files (the file and folder names say the role), no multi-line docstrings, no Args/Returns blocks. The longer *why* goes in `docs/DECISIONS.md`. See the `clean-code` skill.
 - **API clients:** each module has a `_build_*_client()` that reads its key from the environment and raises a clear `RuntimeError` if it's missing.
 - **LLM output parsing never crashes the pipeline.** A malformed response degrades to zero findings, and invalid findings are dropped and logged (see `parse_findings` / `to_finding` in `review/agents/agent_runner.py`).
 - **Reviewers** (security, logic, quality) are a prompt + an `AgentSpec`; the Groq call, parsing and validation are in `review/agents/agent_runner.py`. The model is `REVIEW_AGENT_MODEL` (provisional default `openai/gpt-oss-120b`, to be picked with `eval/llm_benchmark.py`). The legacy decomposer and judge still name the retired `llama-3.3-70b-versatile`. Use the `add-review-agent` skill to add or change a reviewer.

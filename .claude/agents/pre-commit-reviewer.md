@@ -27,7 +27,7 @@ You review the uncommitted changes in the autonomous-code-reviewer project befor
 - Webhook HMAC verification weakened or bypassed
 
 **Project conventions** (see CLAUDE.md and the `clean-code` skill)
-- New files have a module docstring (what, Inputs/Outputs, why), and public functions have docstrings
+- Comments follow the `clean-code` skill: one-line `#` comments only, no `"""` header at the top of files, no Args/Returns blocks
 - API clients use the `_build_*_client()` pattern with a clear error if the key is missing
 - Tests force env vars (`os.environ[...] = `) instead of using `setdefault`
 - No leftover debug code, commented-out blocks or unused imports

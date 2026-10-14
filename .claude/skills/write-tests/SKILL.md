@@ -12,24 +12,17 @@ Tests live in `tests/unit/` (offline, run in CI) and `tests/integration/` (real 
 | Kind | When | Example |
 |---|---|---|
 | **Unit** (no network) | Logic you own: parsing, formatting, routing, HTTP plumbing, state reducers | `test_state.py`, `test_synthesizer.py`, `test_webhook.py`, `test_main.py` |
-| **Integration** (real API) | Checking an LLM or API actually behaves as expected | `test_security.py`, `test_hybrid_search.py`, `test_retriever_integration.py` |
+| **Integration** (real API) | Checking an LLM or API actually behaves as expected | `test_security_agent.py`, `test_hybrid_search.py`, `test_retriever_integration.py` |
 
 Prefer unit tests. They're fast, free and deterministic. Write an integration test only when the real external behavior is what you're testing. Integration tests use real Groq, Gemini and Voyage quota, so tell the user before running them.
 
 ## File structure
 
 ```python
-"""
-Unit test for review/synthesizer.py
-
-<What is being tested and why. For unit tests, say what is mocked and
-where the real behavior is covered instead.>
-"""
-
 # imports
 
+# A minimal ReviewState with every field filled in.
 def build_state(...) -> dict:
-    """Builds a minimal ReviewState-shaped dict for the node under test."""
     ...
 
 def test_<behavior_being_checked>():
@@ -43,7 +36,7 @@ if __name__ == "__main__":
 ```
 
 - Name tests after the **behavior**: `test_webhook_rejects_missing_signature`, not `test_webhook_1`.
-- Use a module docstring that explains the test's purpose. That's the `clean-code` skill, applied to tests.
+- No header comment: the file name `test_<module>.py` says what it tests. That's the `clean-code` skill, applied to tests.
 - Use a `build_state()` helper with **every** `ReviewState` field filled in (copy from `tests/integration/test_security_agent.py`).
 - Assert messages explain the expectation: `assert len(findings) > 0, "Should detect the SQL injection"`.
 - Use `print("OK - ...")` lines. The suite is often run with `-s` to read them.
