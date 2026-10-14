@@ -25,9 +25,8 @@ EMAIL_FILE = '''def send_welcome_email(user):
 '''
 
 
+# A tiny 2-file repo plus a venv folder that ingestion must skip.
 def build_test_repo(tmp_path):
-    """Writes a tiny 2-file repo layout under tmp_path, including a
-    venv-like directory that must be skipped by ingestion."""
     auth_dir = tmp_path / "auth"
     auth_dir.mkdir()
     (auth_dir / "utils.py").write_text(AUTH_FILE, encoding="utf-8")

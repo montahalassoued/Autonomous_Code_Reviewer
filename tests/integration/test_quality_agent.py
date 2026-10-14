@@ -14,8 +14,8 @@ N_PLUS_ONE_DIFF = """
 """
 
 
+# Builds a minimal ReviewState-shaped dict for the node under test.
 def build_state(diff: str) -> dict:
-    """Builds a minimal ReviewState-shaped dict for the node under test."""
     return {
         "pr_number": 1,
         "repo_full_name": "test/repo",
@@ -49,8 +49,8 @@ def test_quality_node_detects_n_plus_one():
     print("OK - quality agent detected the N+1 query")
 
 
+# A trivial diff should not crash, even if the LLM returns [].
 def test_quality_node_handles_safe_diff():
-    """A trivial diff should not crash, even if the LLM returns []."""
     result = quality_node(build_state("+ def add(a: int, b: int) -> int:\n+     return a + b\n"))
 
     assert isinstance(result["findings"], list)

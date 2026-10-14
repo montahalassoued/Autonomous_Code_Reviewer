@@ -11,8 +11,8 @@ SQL_INJECTION_DIFF = """
 """
 
 
+# Builds a minimal ReviewState-shaped dict for the node under test.
 def build_state(diff: str) -> dict:
-    """Builds a minimal ReviewState-shaped dict for the node under test."""
     return {
         "pr_number": 1,
         "repo_full_name": "test/repo",
@@ -63,9 +63,8 @@ IDOR_DIFF = """
 """
 
 
+# An authenticated endpoint with no ownership check (IDOR) must be reported.
 def test_security_node_detects_missing_authorization():
-    """An authenticated endpoint that loads a resource by id with no
-    ownership check (IDOR / missing authorization) must be reported."""
     state = build_state(IDOR_DIFF)
 
     result = security_node(state)
@@ -82,9 +81,8 @@ def test_security_node_detects_missing_authorization():
     print("OK - security agent detected the missing authorization check")
 
 
+# A safe diff must not crash, even if the LLM returns [].
 def test_security_node_handles_empty_context():
-    """A trivial, safe diff should not crash, even if the LLM returns
-    an empty findings array."""
     state = build_state("+ def add(a, b):\n+     return a + b\n")
 
     result = security_node(state)

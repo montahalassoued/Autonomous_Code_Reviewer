@@ -48,8 +48,8 @@ PROPERTY_CODE = '''class Account:
 '''
 
 
+# Parses SAMPLE_CODE and returns its functions keyed by qualified_name.
 def parse_sample() -> dict:
-    """Parses SAMPLE_CODE and returns its functions keyed by qualified_name."""
     return {fn.qualified_name: fn for fn in parse_file(FILE_PATH, SAMPLE_CODE)}
 
 

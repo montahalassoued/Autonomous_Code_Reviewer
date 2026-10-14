@@ -30,12 +30,8 @@ def create_session(user):
 '''
 
 
+# Run parse -> contextualize -> embed -> store once for these tests.
 def setup_collection():
-    """
-    Runs the Step 3-6 ingestion pipeline ONCE: parse, contextualize
-    (Gemini), embed (Voyage), store. Called exactly once per test run -
-    both search queries below reuse this same populated collection.
-    """
     functions = parse_file("auth/utils.py", SAMPLE_CODE)
     chunks = contextualize_functions(functions)
     embeddings = embed_chunks(chunks)

@@ -44,12 +44,8 @@ NEW_PR_DIFF = """
 """
 
 
+# Index EXISTING_REPO_CODE as if the repo was ingested before the PR.
 def setup_repo_index():
-    """
-    Runs the full Step 3-6 ingestion pipeline on EXISTING_REPO_CODE,
-    simulating a repo that was already indexed before this new PR
-    (with reset_password) was opened.
-    """
     print("Parsing existing repo...")
     functions = parse_file("auth/utils.py", EXISTING_REPO_CODE)
 

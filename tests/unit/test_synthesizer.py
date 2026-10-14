@@ -1,8 +1,8 @@
 from review.synthesizer import synthesizer_node
 
 
+# Builds a minimal valid Finding dict for testing.
 def make_finding(agent: str, severity: str, title: str = "Issue", evidence: str = "some_code_here()") -> dict:
-    """Builds a minimal valid Finding dict for testing."""
     return {
         "agent": agent,
         "severity": severity,
@@ -15,8 +15,8 @@ def make_finding(agent: str, severity: str, title: str = "Issue", evidence: str 
     }
 
 
+# Builds a minimal ReviewState-shaped dict for the node under test.
 def build_state(findings: list[dict]) -> dict:
-    """Builds a minimal ReviewState-shaped dict for the node under test."""
     return {
         "pr_number": 1,
         "repo_full_name": "test/repo",
@@ -31,8 +31,8 @@ def build_state(findings: list[dict]) -> dict:
     }
 
 
+# Runs the synthesizer and returns the Markdown comment.
 def render(findings: list[dict]) -> str:
-    """Runs the synthesizer and returns the Markdown comment."""
     return synthesizer_node(build_state(findings))["final_review_markdown"]
 
 

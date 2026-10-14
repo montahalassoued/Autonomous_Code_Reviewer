@@ -10,8 +10,8 @@ from tools.github_tools import SUMMARY_MARKER, upsert_summary_comment
 VISIBILITY_S = 60
 
 
+# A controllable clock for the in-memory queue.
 class FakeClock:
-    """A controllable clock for the in-memory queue."""
 
     def __init__(self) -> None:
         self.now = 0.0
@@ -20,8 +20,8 @@ class FakeClock:
         return self.now
 
 
+# Returns a queue holding exactly one job, plus its clock and the job.
 def make_queue_with_job() -> tuple[InMemoryJobQueue, FakeClock, ReviewJob]:
-    """Returns a queue holding exactly one job, plus its clock and the job."""
     clock = FakeClock()
     queue = InMemoryJobQueue(clock=clock)
     job = ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123", delivery_id="d1")
@@ -109,16 +109,16 @@ def test_review_pull_request_runs_graph_and_upserts(monkeypatch):
     print("OK - review_pull_request invokes the graph and upserts the comment")
 
 
+# Builds a fake issue comment with a body and an author.
 def make_comment(body: str, login: str) -> MagicMock:
-    """Builds a fake issue comment with a body and an author."""
     comment = MagicMock()
     comment.body = body
     comment.user.login = login
     return comment
 
 
+# Patches the GitHub client; returns the fake pull request.
 def fake_github(monkeypatch, comments: list) -> MagicMock:
-    """Patches the GitHub client; returns the fake pull request."""
     client = MagicMock()
     client.get_user.return_value.login = "review-bot"
     pull_request = client.get_repo.return_value.get_pull.return_value

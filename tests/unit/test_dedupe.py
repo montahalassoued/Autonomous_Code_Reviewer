@@ -52,8 +52,8 @@ def test_table_key_encoding_does_not_collide():
     print("OK - key encoding is collision free")
 
 
+# Mimics the TableClient methods the store uses, with real Azure exceptions.
 class FakeTableClient:
-    """Mimics the TableClient methods the store uses, with real Azure exceptions."""
 
     def __init__(self) -> None:
         self.rows: dict[tuple[str, str], dict] = {}

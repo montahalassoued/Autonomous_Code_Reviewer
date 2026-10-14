@@ -2,8 +2,8 @@ import operator
 from review.state import ReviewState, Finding
 
 
+# A well-formed Finding must match the expected structure exactly.
 def test_finding_structure():
-    """A well-formed Finding must match the expected structure exactly."""
     finding: Finding = {
         "agent": "security",
         "severity": "CRITICAL",
@@ -18,11 +18,8 @@ def test_finding_structure():
     print("OK - Finding structure is valid")
 
 
+# operator.add must keep findings from two agents writing in parallel.
 def test_operator_add_merge_findings():
-    """
-    Simulates what LangGraph does when 2 agents write to findings
-    in parallel: it applies operator.add on both updates.
-    """
     security_findings: list[Finding] = [
         {
             "agent": "security", "severity": "CRITICAL", "file_path": "auth/login.py",
@@ -48,8 +45,8 @@ def test_operator_add_merge_findings():
     print(f"OK - operator.add merges correctly: {len(merged)} findings kept")
 
 
+# Verify that a complete, consistent ReviewState can be initialized.
 def test_full_state_initialization():
-    """Verify that a complete, consistent ReviewState can be initialized."""
     state: ReviewState = {
         "pr_number": 42,
         "repo_full_name": "Montaha/test-repo",

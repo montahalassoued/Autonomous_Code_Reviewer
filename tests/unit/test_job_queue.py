@@ -4,8 +4,8 @@ from app.jobs.models import ReviewJob
 from app.jobs.queue import AzureStorageJobQueue, InMemoryJobQueue
 
 
+# A controllable clock: tests move time forward with advance().
 class FakeClock:
-    """A controllable clock: tests move time forward with advance()."""
 
     def __init__(self) -> None:
         self.now = 1000.0
@@ -17,8 +17,8 @@ class FakeClock:
         self.now += seconds
 
 
+# Builds a job with fixed values (job_id and enqueued_at are generated).
 def make_job(sha: str = "abc123") -> ReviewJob:
-    """Builds a job with fixed values (job_id and enqueued_at are generated)."""
     return ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha=sha, delivery_id="delivery-1")
 
 
@@ -99,8 +99,8 @@ def test_dead_letter_moves_message_to_poison():
     print("OK - dead_letter moves the job to the poison list")
 
 
+# Mimics the QueueClient methods AzureStorageJobQueue uses.
 class FakeAzureQueueClient:
-    """Mimics the QueueClient methods AzureStorageJobQueue uses."""
 
     def __init__(self, contents: list[str] | None = None) -> None:
         self.sent: list[str] = []

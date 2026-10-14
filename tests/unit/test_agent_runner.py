@@ -23,8 +23,8 @@ VALID_RAW = {
 }
 
 
+# Stand-in for a Groq client: returns `content` and records each request.
 class FakeGroq:
-    """Stand-in for a Groq client: returns `content` and records each request."""
 
     def __init__(self, content: str | None) -> None:
         self.content = content
@@ -37,8 +37,8 @@ class FakeGroq:
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
+# Builds a minimal ReviewState-shaped dict for the node under test.
 def build_state(diff: str = "+ def f():\n+     return 1\n", context: list | None = None) -> dict:
-    """Builds a minimal ReviewState-shaped dict for the node under test."""
     return {
         "pr_number": 1,
         "repo_full_name": "test/repo",

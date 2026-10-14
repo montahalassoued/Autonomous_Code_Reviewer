@@ -25,8 +25,8 @@ SQL_CASE = {
 CLEAN_CASE = {"id": "clean", "agent": "security", "diff": "+ x = 1", "expected_issues": []}
 
 
+# Builds a complete finding dict, with any field overridden.
 def make_finding(**overrides) -> dict:
-    """Builds a complete finding dict, with any field overridden."""
     finding = {
         "severity": "HIGH",
         "file_path": "app/users.py",
@@ -109,8 +109,8 @@ def test_chunker_scoring_parts():
     assert score_chunker(case, "<think>hmm</think>  ")["valid"] is False
 
 
+# A fake model: one model answers well, one always errors.
 def fake_call(model, prompt, temperature):
-    """A fake model: one model answers well, one always errors."""
     if model == "groq:broken":
         return CallResult("", 0.1, error="NotFoundError: model not found")
     return CallResult('{"score": 0.9}', 0.5, input_tokens=100, output_tokens=5)

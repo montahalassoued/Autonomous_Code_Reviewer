@@ -16,8 +16,8 @@ from app.jobs.dedupe import InMemoryDedupeStore
 from app.jobs.queue import InMemoryJobQueue
 
 
+# Builds a minimal FastAPI app with the webhook router and in-memory job backends.
 def make_app(job_queue=None, dedupe=None):
-    """Builds a minimal FastAPI app with the webhook router and in-memory job backends."""
     app = FastAPI()
     app.include_router(router)
     app.state.job_queue = job_queue or InMemoryJobQueue()
@@ -25,14 +25,14 @@ def make_app(job_queue=None, dedupe=None):
     return app
 
 
+# Computes the X-Hub-Signature-256 header value GitHub would send.
 def sign(body: bytes, secret: str = "test-secret") -> str:
-    """Computes the X-Hub-Signature-256 header value GitHub would send."""
     digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return f"sha256={digest}"
 
 
+# Builds a minimal pull_request payload for the given head sha.
 def make_payload(sha: str = "sha-one", action: str = "opened") -> dict:
-    """Builds a minimal pull_request payload for the given head sha."""
     return {
         "action": action,
         "pull_request": {"number": 42, "head": {"sha": sha}},
@@ -43,8 +43,8 @@ def make_payload(sha: str = "sha-one", action: str = "opened") -> dict:
 PR_OPENED_PAYLOAD = make_payload()
 
 
+# Posts a correctly signed webhook delivery.
 def post_event(client, payload: dict, event: str = "pull_request", delivery: str = "delivery-1"):
-    """Posts a correctly signed webhook delivery."""
     body = json.dumps(payload).encode()
     return client.post(
         "/webhook/github",
@@ -58,8 +58,8 @@ def post_event(client, payload: dict, event: str = "pull_request", delivery: str
     )
 
 
+# Receives every visible job from the in-memory queue.
 def drain(job_queue: InMemoryJobQueue) -> list:
-    """Receives every visible job from the in-memory queue."""
     return job_queue.receive(max_messages=100, visibility_timeout_s=60)
 
 
@@ -164,8 +164,8 @@ def test_webhook_same_sha_new_delivery_is_duplicate_but_new_sha_is_queued():
     print("OK - dedupe is per commit: same sha skipped, new sha queued")
 
 
+# A queue whose enqueue always fails, like a storage outage.
 class FailingQueue:
-    """A queue whose enqueue always fails, like a storage outage."""
 
     def enqueue(self, job) -> None:
         raise ConnectionError("storage unavailable")

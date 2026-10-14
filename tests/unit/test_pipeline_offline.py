@@ -81,17 +81,13 @@ EMBEDDING_DIMENSION = 64
 RECURSION_LIMIT = 15
 
 
+# Lowercase identifier-ish tokens, shared by the fake embedder and reranker.
 def _tokens(text: str) -> list[str]:
-    """Lowercase identifier-ish tokens, shared by the fake embedder and reranker."""
     return re.findall(r"[a-z0-9_]+", text.lower())
 
 
+# Deterministic stand-in for Voyage: a hashed bag-of-words vector, normalized.
 def fake_embed(text: str) -> list[float]:
-    """
-    Deterministic stand-in for Voyage: a hashed bag-of-words vector,
-    normalized. crc32 is used instead of hash() because Python's str
-    hash changes between processes.
-    """
     vector = [0.0] * EMBEDDING_DIMENSION
     for token in _tokens(text):
         vector[zlib.crc32(token.encode()) % EMBEDDING_DIMENSION] += 1.0
@@ -100,24 +96,20 @@ def fake_embed(text: str) -> list[float]:
     return [value / norm for value in vector]
 
 
+# Fake reranker: scores a pair by shared tokens and records the pairs.
 class FakeCrossEncoder:
-    """Stand-in for the bge reranker: scores a pair by shared tokens and records pairs."""
 
     def __init__(self) -> None:
         self.pairs: list[tuple[str, str]] = []
 
+    # Returns one overlap score per (query, document) pair.
     def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
-        """Returns one overlap score per (query, document) pair."""
         self.pairs.extend(pairs)
         return [float(len(set(_tokens(query)) & set(_tokens(document)))) for query, document in pairs]
 
 
+# Stand-in for a Groq client.
 class FakeLLM:
-    """
-    Stand-in for a Groq client. chat.completions.create() records
-    (role, prompt) into the shared calls list and returns the canned
-    content for this role (None is allowed, to test the None guard).
-    """
 
     def __init__(self, role: str, calls: list, replies: dict) -> None:
         self.role = role
@@ -133,23 +125,13 @@ class FakeLLM:
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
+# Real hybrid_search with top_k=1, so a caller can only arrive via the graph.
 def narrow_hybrid_search(query, collection, all_documents, all_ids, top_k=10):
-    """Runs the real hybrid_search with top_k=1 (see the module docstring for why)."""
     return hybrid_search_module.hybrid_search(query, collection, all_documents, all_ids, top_k=1)
 
 
+# Fake every external dependency where it's used; returns the recorded LLM calls.
 def install_fakes(monkeypatch, replies: dict) -> list:
-    """
-    Replaces every external dependency where it is USED, and returns
-    the shared list that collects (role, prompt) for every LLM call.
-
-    Args:
-        monkeypatch: pytest's monkeypatch fixture
-        replies: canned content for "decomposer", "judge" and "agent"
-
-    Returns:
-        the list of recorded (role, prompt) tuples
-    """
     calls: list = []
     # Other tests load the real .env; make sure no tracing call goes out.
     monkeypatch.setenv("LANGSMITH_TRACING", "false")
@@ -168,21 +150,16 @@ def install_fakes(monkeypatch, replies: dict) -> list:
     return calls
 
 
+# Creates an empty, uniquely named collection in an in-memory Chroma.
 def new_collection():
-    """Creates an empty, uniquely named collection in an in-memory Chroma."""
     client = chromadb.EphemeralClient(settings=Settings(anonymized_telemetry=False))
     # EphemeralClient instances share one in-memory store per process,
     # so a unique name keeps tests from seeing each other's chunks.
     return client.get_or_create_collection(name=f"offline_{uuid.uuid4().hex}", embedding_function=None)
 
 
+# Builds the same four objects rag/ingestion.py returns, offline.
 def build_index() -> tuple:
-    """
-    Builds the same four objects rag/ingestion.py returns, offline.
-
-    Returns:
-        (collection, all_documents, all_ids, graph, functions_by_qualified_name)
-    """
     functions = parse_file(AUTH_PATH, AUTH_SOURCE) + parse_file(BILLING_PATH, BILLING_SOURCE)
     chunks = [ContextualChunk(function=fn, context=CONTEXTS[fn.qualified_name]) for fn in functions]
 
@@ -195,8 +172,8 @@ def build_index() -> tuple:
     return collection, all_documents, all_ids, graph, {fn.qualified_name: fn for fn in functions}
 
 
+# Builds the same initial ReviewState app/worker.py passes to the graph.
 def build_state() -> dict:
-    """Builds the same initial ReviewState app/worker.py passes to the graph."""
     return {
         "pr_number": 7,
         "repo_full_name": "test-owner/test-repo",
@@ -211,21 +188,16 @@ def build_state() -> dict:
     }
 
 
+# Compiles the real graph over a fresh offline index and runs one review.
 def run_review() -> tuple[dict, dict]:
-    """
-    Compiles the real graph over a fresh offline index and runs one review.
-
-    Returns:
-        (final_state, functions_by_qualified_name)
-    """
     collection, all_documents, all_ids, graph, functions = build_index()
     compiled = build_graph(collection, all_documents, all_ids, graph)
     final_state = compiled.invoke(build_state(), config={"recursion_limit": RECURSION_LIMIT})
     return final_state, functions
 
 
+# Returns just the role of every recorded LLM call.
 def roles_of(calls: list) -> list[str]:
-    """Returns just the role of every recorded LLM call."""
     return [role for role, _prompt in calls]
 
 

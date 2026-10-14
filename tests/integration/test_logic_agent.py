@@ -14,8 +14,8 @@ OFF_BY_ONE_DIFF = """
 """
 
 
+# Builds a minimal ReviewState-shaped dict for the node under test.
 def build_state(diff: str) -> dict:
-    """Builds a minimal ReviewState-shaped dict for the node under test."""
     return {
         "pr_number": 1,
         "repo_full_name": "test/repo",
@@ -50,8 +50,8 @@ def test_logic_node_detects_off_by_one():
     print("OK - logic agent detected the off-by-one bug")
 
 
+# A trivial, correct diff should not crash, even if the LLM returns [].
 def test_logic_node_handles_safe_diff():
-    """A trivial, correct diff should not crash, even if the LLM returns []."""
     result = logic_node(build_state("+ def add(a, b):\n+     return a + b\n"))
 
     assert isinstance(result["findings"], list)

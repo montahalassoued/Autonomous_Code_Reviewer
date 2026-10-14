@@ -25,8 +25,8 @@ def create_session(user):
 '''
 
 
+# Builds a minimal SearchResult without needing real search/embedding calls.
 def _fake_search_result(file_path: str, function_name: str, score: float) -> SearchResult:
-    """Builds a minimal SearchResult without needing real search/embedding calls."""
     return SearchResult(
         chunk_id=f"{file_path}::{function_name}",
         rrf_score=score,
