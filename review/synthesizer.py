@@ -72,8 +72,12 @@ def _format_summary_table(groups: dict[str, list[Finding]]) -> str:
     return "\n".join(rows)
 
 
+# A low-confidence finding depends on code the agent could not see, so it never blocks a merge.
 def _label(finding: Finding) -> str:
-    return SEVERITY_LABEL.get(finding["severity"], "nit")
+    label = SEVERITY_LABEL.get(finding["severity"], "nit")
+    if label == "blocking" and finding.get("confidence") == "low":
+        return "suggestion"
+    return label
 
 
 # Added + removed lines in a unified diff (file headers excluded).
@@ -106,7 +110,7 @@ def _format_finding(finding: Finding) -> str:
     emoji = SEVERITY_EMOJI.get(finding["severity"], "⚪")
     lines = [
         f"#### {emoji} [{_label(finding)}] {finding['severity']} - {finding['title']}",
-        f"**Location:** `{finding['file_path']}:{finding['line_number']}`",
+        f"**Location:** `{finding['file_path']}:{finding['line_number']}` · **Confidence:** {finding.get('confidence', 'medium')}",
         "",
         finding["description"],
     ]

@@ -126,6 +126,16 @@ def test_synthesizer_labels_each_severity():
     print("OK - CRITICAL/HIGH are blocking, MEDIUM a suggestion, LOW/INFO nits")
 
 
+def test_synthesizer_low_confidence_never_blocks():
+    finding = {**make_finding("security", "CRITICAL", "Maybe unprotected"), "confidence": "low"}
+    markdown = render([finding])
+
+    assert "[suggestion] CRITICAL - Maybe unprotected" in markdown
+    assert "**Confidence:** low" in markdown
+    assert "Nothing blocking" in markdown
+    print("OK - a low-confidence CRITICAL is a suggestion, not a blocker")
+
+
 def test_synthesizer_verdict_when_nothing_blocks():
     markdown = render([make_finding("quality", "MEDIUM"), make_finding("quality", "LOW")])
 
@@ -170,6 +180,7 @@ if __name__ == "__main__":
     test_synthesizer_skips_empty_evidence_block()
     test_synthesizer_keeps_unknown_agent_findings()
     test_synthesizer_labels_each_severity()
+    test_synthesizer_low_confidence_never_blocks()
     test_synthesizer_verdict_when_nothing_blocks()
     test_synthesizer_folds_nits_under_details()
     test_synthesizer_flags_large_prs_only()
