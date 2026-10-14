@@ -3,13 +3,15 @@ Unit test for agents/synthesizer.py
 
 No LLM calls needed - synthesizer_node is pure formatting logic over
 findings already present in state, so this test is fast and fully
-deterministic.
+deterministic. It checks the layout the PR comment relies on: one
+section per category in a fixed order, severity order inside each
+section, a summary table, and empty categories still shown.
 """
 
 from agents.synthesizer import synthesizer_node
 
 
-def make_finding(agent: str, severity: str, title: str = "Issue") -> dict:
+def make_finding(agent: str, severity: str, title: str = "Issue", evidence: str = "some_code_here()") -> dict:
     """Builds a minimal valid Finding dict for testing."""
     return {
         "agent": agent,
@@ -18,7 +20,7 @@ def make_finding(agent: str, severity: str, title: str = "Issue") -> dict:
         "line_number": 10,
         "title": title,
         "description": "Some description.",
-        "evidence": "some_code_here()",
+        "evidence": evidence,
         "suggestion": "Do this instead.",
     }
 
@@ -39,75 +41,102 @@ def build_state(findings: list[dict]) -> dict:
     }
 
 
-def test_synthesizer_sorts_by_severity():
-    findings = [
-        make_finding("documentation", "LOW", "Missing docstring"),
-        make_finding("security", "CRITICAL", "SQL Injection"),
-        make_finding("performance", "MEDIUM", "N+1 query"),
-        make_finding("architecture", "HIGH", "God class"),
-    ]
-    state = build_state(findings)
-
-    result = synthesizer_node(state)
-    markdown = result["final_review_markdown"]
-
-    # CRITICAL must appear before HIGH, HIGH before MEDIUM, MEDIUM before LOW
-    critical_pos = markdown.find("SQL Injection")
-    high_pos = markdown.find("God class")
-    medium_pos = markdown.find("N+1 query")
-    low_pos = markdown.find("Missing docstring")
-
-    assert critical_pos < high_pos < medium_pos < low_pos
-    print("OK - findings sorted CRITICAL > HIGH > MEDIUM > LOW")
+def render(findings: list[dict]) -> str:
+    """Runs the synthesizer and returns the Markdown comment."""
+    return synthesizer_node(build_state(findings))["final_review_markdown"]
 
 
-def test_synthesizer_includes_all_findings():
-    findings = [
-        make_finding("security", "CRITICAL", "Issue A"),
-        make_finding("performance", "LOW", "Issue B"),
-    ]
-    state = build_state(findings)
+def test_synthesizer_renders_categories_in_fixed_order():
+    markdown = render([
+        make_finding("quality", "CRITICAL", "Quality issue"),
+        make_finding("logic", "HIGH", "Logic issue"),
+        make_finding("security", "LOW", "Security issue"),
+    ])
 
-    result = synthesizer_node(state)
-    markdown = result["final_review_markdown"]
+    security_pos = markdown.find("### 🔒 Security")
+    logic_pos = markdown.find("### 🧠 Logic")
+    quality_pos = markdown.find("### ✨ Code quality")
 
-    assert "Issue A" in markdown
-    assert "Issue B" in markdown
-    assert "some/file.py:10" in markdown
-    assert "Do this instead." in markdown
-    print("OK - all findings and their fields present in output")
+    assert -1 < security_pos < logic_pos < quality_pos, "sections must be Security, Logic, Quality"
+    assert security_pos < markdown.find("Security issue") < logic_pos
+    assert logic_pos < markdown.find("Logic issue") < quality_pos
+    assert quality_pos < markdown.find("Quality issue")
+    print("OK - findings rendered under their category, in the fixed order")
+
+
+def test_synthesizer_sorts_by_severity_inside_a_category():
+    markdown = render([
+        make_finding("security", "LOW", "Low one"),
+        make_finding("security", "CRITICAL", "Critical one"),
+        make_finding("security", "MEDIUM", "Medium one"),
+    ])
+
+    assert markdown.find("Critical one") < markdown.find("Medium one") < markdown.find("Low one")
+    print("OK - CRITICAL > MEDIUM > LOW inside the security section")
+
+
+def test_synthesizer_shows_empty_categories():
+    markdown = render([make_finding("security", "HIGH", "Only finding")])
+
+    assert "### 🧠 Logic (0)" in markdown
+    assert "### ✨ Code quality (0)" in markdown
+    assert markdown.count("No issues found. ✅") == 2, "logic and quality must each say they found nothing"
+    print("OK - empty categories are still shown")
+
+
+def test_synthesizer_summary_table_counts_per_category():
+    markdown = render([
+        make_finding("security", "CRITICAL"),
+        make_finding("security", "CRITICAL"),
+        make_finding("quality", "MEDIUM"),
+    ])
+
+    assert "Found **3** issue(s)." in markdown
+    assert "| 🔒 Security | 2 | - | - | - | - | 2 |" in markdown
+    assert "| 🧠 Logic | - | - | - | - | - | 0 |" in markdown
+    assert "| ✨ Code quality | - | - | 1 | - | - | 1 |" in markdown
+    print("OK - summary table counts findings per category and severity")
+
+
+def test_synthesizer_includes_finding_fields():
+    markdown = render([make_finding("logic", "HIGH", "Off by one")])
+
+    assert "#### 🟠 HIGH - Off by one" in markdown
+    assert "`some/file.py:10`" in markdown
+    assert "some_code_here()" in markdown
+    assert "**Suggestion:** Do this instead." in markdown
+    print("OK - title, location, evidence and suggestion are rendered")
+
+
+def test_synthesizer_skips_empty_evidence_block():
+    markdown = render([make_finding("quality", "LOW", "No snippet", evidence="")])
+
+    assert "```" not in markdown, "an empty evidence field must not render an empty code block"
+    print("OK - no empty code block for missing evidence")
+
+
+def test_synthesizer_keeps_unknown_agent_findings():
+    markdown = render([make_finding("performance", "MEDIUM", "Legacy agent finding")])
+
+    assert "### 📎 Other (1)" in markdown
+    assert "Legacy agent finding" in markdown
+    print("OK - a finding from an unknown agent is shown under Other, not dropped")
 
 
 def test_synthesizer_handles_no_findings():
-    state = build_state([])
-
-    result = synthesizer_node(state)
-    markdown = result["final_review_markdown"]
+    markdown = render([])
 
     assert "No issues found" in markdown
     print("OK - empty findings list produces a clean 'no issues' message")
 
 
-def test_synthesizer_summary_counts():
-    findings = [
-        make_finding("security", "CRITICAL"),
-        make_finding("security", "CRITICAL"),
-        make_finding("performance", "MEDIUM"),
-    ]
-    state = build_state(findings)
-
-    result = synthesizer_node(state)
-    markdown = result["final_review_markdown"]
-
-    assert "**CRITICAL:** 2" in markdown
-    assert "**MEDIUM:** 1" in markdown
-    assert "**HIGH:**" not in markdown  # zero-count severities omitted
-    print("OK - summary counts correct and zero-count severities omitted")
-
-
 if __name__ == "__main__":
-    test_synthesizer_sorts_by_severity()
-    test_synthesizer_includes_all_findings()
+    test_synthesizer_renders_categories_in_fixed_order()
+    test_synthesizer_sorts_by_severity_inside_a_category()
+    test_synthesizer_shows_empty_categories()
+    test_synthesizer_summary_table_counts_per_category()
+    test_synthesizer_includes_finding_fields()
+    test_synthesizer_skips_empty_evidence_block()
+    test_synthesizer_keeps_unknown_agent_findings()
     test_synthesizer_handles_no_findings()
-    test_synthesizer_summary_counts()
     print("\nAll synthesizer tests passed.")

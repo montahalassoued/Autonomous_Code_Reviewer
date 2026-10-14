@@ -1,18 +1,23 @@
 """
-synthesizer.py - the LangGraph node that combines all domain agent
+synthesizer.py - the LangGraph node that turns the three review agents'
 findings into the final GitHub review comment.
 
-Inputs: ReviewState.findings (populated by agents/security.py,
-agents/performance.py, agents/architecture.py, agents/testing.py,
-agents/documentation.py, merged via the operator.add reducer in
+Inputs: ReviewState.findings (from agents/security.py, agents/logic.py
+and agents/quality.py, merged by the operator.add reducer in
 agents/state.py after join_agents_node).
 Outputs: a partial state update setting ReviewState.final_review_markdown
-to a single Markdown string ready to post as a GitHub PR comment via
-tools/github_tools.py.
+to one Markdown comment, posted by tools/github_tools.py.
 
-Purely a formatting step - no LLM call needed, since every finding
-already contains everything the comment needs (severity, location,
-description, suggestion). Deterministic and instant.
+Layout: a summary table (findings per category and severity), then one
+section per category in a fixed order - Security, Logic, Quality - with
+findings sorted by severity inside each section. Every category is
+always shown, even when empty ("No issues found"), so the reader can
+see that all three reviews ran instead of guessing whether one was
+skipped. Findings from an unknown agent are rendered last under "Other"
+rather than dropped.
+
+Purely a formatting step - no LLM call, since every finding already
+carries everything the comment needs. Deterministic and instant.
 """
 
 from agents.state import ReviewState, Finding
@@ -34,22 +39,84 @@ SEVERITY_EMOJI = {
     "INFO": "⚪",
 }
 
+# Render order and headings of the review categories. The keys are the
+# agent names in agents/graph.py's DOMAIN_AGENTS.
+CATEGORY_TITLES = {
+    "security": "🔒 Security",
+    "logic": "🧠 Logic",
+    "quality": "✨ Code quality",
+}
+OTHER_CATEGORY_TITLE = "📎 Other"
+
+REVIEW_HEADING = "## 🤖 Autonomous Code Review"
+
 
 def _sort_findings(findings: list[Finding]) -> list[Finding]:
     """
-    Sorts findings by severity (CRITICAL first, INFO last), so the
-    most important issues appear at the top of the review comment.
+    Sorts findings by severity, CRITICAL first and INFO last.
 
     Args:
-        findings: the raw, unordered findings from all domain agents
+        findings: findings in any order
 
     Returns:
-        findings sorted by severity, most severe first. Ties keep
-        their original relative order (Python's sort is stable), which
-        naturally groups findings from the same agent together when
-        agents are appended in a consistent order upstream.
+        a new list sorted by severity; ties keep their original order
+        (Python's sort is stable)
     """
     return sorted(findings, key=lambda f: SEVERITY_ORDER.get(f["severity"], len(SEVERITY_ORDER)))
+
+
+def _group_by_category(findings: list[Finding]) -> dict[str, list[Finding]]:
+    """
+    Groups findings by agent, in CATEGORY_TITLES order, with any unknown
+    agent's findings collected under "other".
+
+    Args:
+        findings: all findings from every agent
+
+    Returns:
+        {category: findings sorted by severity}, with every known
+        category present (possibly empty) and "other" only if needed
+    """
+    groups: dict[str, list[Finding]] = {category: [] for category in CATEGORY_TITLES}
+    for finding in findings:
+        category = finding["agent"] if finding["agent"] in CATEGORY_TITLES else "other"
+        groups.setdefault(category, []).append(finding)
+    return {category: _sort_findings(group) for category, group in groups.items()}
+
+
+def _category_title(category: str) -> str:
+    """
+    Returns the section heading text for a category.
+
+    Args:
+        category: a category key ("security", "logic", "quality" or "other")
+
+    Returns:
+        the heading from CATEGORY_TITLES, or the "Other" heading for an unknown key
+    """
+    return CATEGORY_TITLES.get(category, OTHER_CATEGORY_TITLE)
+
+
+def _format_summary_table(groups: dict[str, list[Finding]]) -> str:
+    """
+    Builds the at-a-glance table: one row per category, one column per
+    severity, plus a total.
+
+    Args:
+        groups: the output of _group_by_category
+
+    Returns:
+        a Markdown table; zero counts are shown as "-" so the real
+        numbers stand out
+    """
+    header = "| Category | " + " | ".join(f"{SEVERITY_EMOJI[s]} {s.title()}" for s in SEVERITY_ORDER) + " | Total |"
+    separator = "| --- |" + " --- |" * (len(SEVERITY_ORDER) + 1)
+    rows = [header, separator]
+    for category, group in groups.items():
+        counts = [sum(1 for f in group if f["severity"] == severity) for severity in SEVERITY_ORDER]
+        cells = [str(count) if count else "-" for count in counts]
+        rows.append(f"| {_category_title(category)} | " + " | ".join(cells) + f" | {len(group)} |")
+    return "\n".join(rows)
 
 
 def _format_finding(finding: Finding) -> str:
@@ -60,89 +127,67 @@ def _format_finding(finding: Finding) -> str:
         finding: a single Finding to render
 
     Returns:
-        a Markdown string for this finding, including severity emoji,
-        file:line reference, description, evidence, and suggestion
+        the finding's heading (severity + title), location, description,
+        evidence (if any) and suggestion
     """
     emoji = SEVERITY_EMOJI.get(finding["severity"], "⚪")
-    location = f"`{finding['file_path']}:{finding['line_number']}`"
-
     lines = [
-        f"### {emoji} {finding['severity']} - {finding['title']}",
-        f"**Location:** {location}  ",
-        f"**Agent:** {finding['agent']}",
+        f"#### {emoji} {finding['severity']} - {finding['title']}",
+        f"**Location:** `{finding['file_path']}:{finding['line_number']}`",
         "",
         finding["description"],
-        "",
-        "```",
-        finding["evidence"],
-        "```",
-        "",
-        f"**Suggestion:** {finding['suggestion']}",
     ]
+    if finding["evidence"].strip():
+        lines += ["", "```", finding["evidence"], "```"]
+    lines += ["", f"**Suggestion:** {finding['suggestion']}"]
     return "\n".join(lines)
 
 
-def _format_summary(findings: list[Finding]) -> str:
+def _format_category_section(category: str, findings: list[Finding]) -> str:
     """
-    Builds a one-line-per-severity summary count, so reviewers can
-    gauge PR health at a glance before reading individual findings.
+    Renders one category's section: its heading with a count, then its
+    findings, or a "No issues found" line when it has none.
 
     Args:
-        findings: all findings (any order)
+        category: the category key ("security", "logic", "quality", "other")
+        findings: that category's findings, already sorted by severity
 
     Returns:
-        a Markdown bullet list summarizing counts per severity level,
-        omitting severities with zero findings
+        the section's Markdown
     """
-    counts = {severity: 0 for severity in SEVERITY_ORDER}
-    for finding in findings:
-        if finding["severity"] in counts:
-            counts[finding["severity"]] += 1
-
-    lines = []
-    for severity in SEVERITY_ORDER:
-        if counts[severity] > 0:
-            emoji = SEVERITY_EMOJI[severity]
-            lines.append(f"- {emoji} **{severity}:** {counts[severity]}")
-    return "\n".join(lines)
+    heading = f"### {_category_title(category)} ({len(findings)})"
+    if not findings:
+        return f"{heading}\n\nNo issues found. ✅"
+    blocks = "\n\n---\n\n".join(_format_finding(finding) for finding in findings)
+    return f"{heading}\n\n{blocks}"
 
 
 def synthesizer_node(state: ReviewState) -> dict:
     """
-    The LangGraph node function for the "synthesizer" node defined in
-    agents/graph.py. Replaces that file's synthesizer_node STUB.
+    The LangGraph node for the "synthesizer" (see agents/graph.py).
 
     Args:
-        state: the current ReviewState, reads findings (all 5 domain
-               agents' output, merged)
+        state: the current ReviewState, reads findings (all agents' output, merged)
 
     Returns:
-        a partial state update: {"final_review_markdown": "..."} - the
-        complete Markdown comment ready to post to the PR
+        {"final_review_markdown": "..."}: the complete comment for the PR
     """
     findings = state["findings"]
 
     if not findings:
         return {
             "final_review_markdown": (
-                "## 🤖 Autonomous Code Review\n\n"
-                "No issues found. Nice work! ✅"
+                f"{REVIEW_HEADING}\n\n"
+                "No issues found by the security, logic and code quality reviews. Nice work! ✅\n"
             )
         }
 
-    sorted_findings = _sort_findings(findings)
-
+    groups = _group_by_category(findings)
     sections = [
-        "## 🤖 Autonomous Code Review",
-        "",
-        f"Found **{len(findings)}** issue(s) across security, performance, "
-        "architecture, testing, and documentation.",
-        "",
-        _format_summary(sorted_findings),
-        "",
-        "---",
-        "",
+        REVIEW_HEADING,
+        f"Found **{len(findings)}** issue(s).",
+        _format_summary_table(groups),
     ]
-    sections.extend(_format_finding(f) + "\n\n---\n" for f in sorted_findings)
+    sections += [_format_category_section(category, group) for category, group in groups.items()]
 
-    return {"final_review_markdown": "\n".join(sections).rstrip() + "\n"}
+    return {"final_review_markdown": "\n\n".join(sections) + "\n"}
