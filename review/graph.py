@@ -1,5 +1,5 @@
 """
-graph.py - builds and compiles the LangGraph StateGraph.
+graph.py - the orchestrator of the review: builds and compiles the LangGraph StateGraph.
 
 This module defines the TOPOLOGY of the review pipeline: which nodes
 exist, how they connect, and the routing logic that decides what runs
@@ -28,21 +28,21 @@ bound in via closure.
 """
 
 from langgraph.graph import StateGraph, START, END
-from agents.state import ReviewState
-from agents.retriever import (
+from review.state import ReviewState
+from review.retriever import (
     retriever_node as _run_retriever_node,
     QUALITY_THRESHOLD,
     MAX_RETRIEVAL_ATTEMPTS,
 )
-from agents.security import security_node
-from agents.logic import logic_node
-from agents.quality import quality_node
-from agents.synthesizer import synthesizer_node
+from review.agents.security_agent import security_node
+from review.agents.logic_agent import logic_node
+from review.agents.quality_agent import quality_node
+from review.synthesizer import synthesizer_node
 
 
 # The review categories: each is a node name, an agent module and the
-# `agent` field of its findings. agents/synthesizer.py renders them in this order.
-DOMAIN_AGENTS = ["security", "logic", "quality"]
+# `agent` field of its findings. review/synthesizer.py renders them in this order.
+REVIEW_AGENTS = ["security", "logic", "quality"]
 
 
 def join_agents_node(state: ReviewState) -> dict:
@@ -72,7 +72,7 @@ def route_after_retriever(state: ReviewState) -> list[str] | str:
     IMPORTANT: when fanning out to multiple parallel nodes, LangGraph
     requires the routing function to return the ACTUAL node names
     directly (not abstract keys mapped through a dict) - that's why
-    this returns "retriever" / DOMAIN_AGENTS as literal node names, and
+    this returns "retriever" / REVIEW_AGENTS as literal node names, and
     build_graph() below calls add_conditional_edges WITHOUT a mapping
     dict.
 
@@ -80,13 +80,13 @@ def route_after_retriever(state: ReviewState) -> list[str] | str:
         state: the ReviewState right after a retrieval attempt
 
     Returns:
-        "retriever" to retry, or DOMAIN_AGENTS to fan out to all agents
+        "retriever" to retry, or REVIEW_AGENTS to fan out to all agents
     """
     quality_ok = state["retrieval_quality_score"] >= QUALITY_THRESHOLD
     attempts_exhausted = state["retrieval_attempts"] >= MAX_RETRIEVAL_ATTEMPTS
 
     if quality_ok or attempts_exhausted:
-        return DOMAIN_AGENTS
+        return REVIEW_AGENTS
     return "retriever"
 
 
@@ -96,7 +96,7 @@ def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_
 
     Args:
         collection: a populated Chroma collection (db/chroma.py),
-                    passed straight through to agents/retriever.py
+                    passed straight through to review/retriever.py
         all_documents: full corpus text list backing hybrid_search.py's
                         BM25 index (same order as all_ids)
         all_ids: full corpus id list (same order as all_documents)
@@ -110,7 +110,7 @@ def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_
     def retriever_node(state: ReviewState) -> dict:
         """
         Binds the RAG pipeline's repo-wide objects (collection,
-        all_documents, all_ids, graph_index) into agents/retriever.py's
+        all_documents, all_ids, graph_index) into review/retriever.py's
         real retriever_node via closure, since those objects are too
         large and too repo-wide to belong in per-review ReviewState.
         """
@@ -138,7 +138,7 @@ def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_
     # for all active parallel branches to finish before running a node
     # that they all share as their only target - this is what guarantees
     # join_agents (and therefore synthesizer) runs exactly once per review.
-    for agent in DOMAIN_AGENTS:
+    for agent in REVIEW_AGENTS:
         graph.add_edge(agent, "join_agents")
 
     graph.add_edge("join_agents", "synthesizer")

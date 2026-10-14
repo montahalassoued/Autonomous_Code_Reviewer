@@ -3,9 +3,9 @@ llm_benchmark.py - compares free LLMs on the four LLM jobs in this
 project, so we can pick the right model for each one.
 
 The four jobs, and the production code each one benchmarks:
-  agents      -> the 3 review agents (agents/security.py, agents/logic.py, agents/quality.py)
+  agents      -> the 3 review agents (review/agents/security_agent.py, review/agents/logic_agent.py, review/agents/quality_agent.py)
   decomposer  -> diff -> search queries (rag/query_decomposer.py)
-  judge       -> retrieval quality score 0-1 (agents/retriever.py)
+  judge       -> retrieval quality score 0-1 (review/retriever.py)
   chunker     -> one context sentence per function (rag/contextual_chunker.py)
 
 Inputs:
@@ -56,11 +56,11 @@ from typing import Callable
 from dotenv import load_dotenv
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from agents.agent_runner import EMPTY_CONTEXT_SUMMARY
-from agents.security import SECURITY_PROMPT_TEMPLATE
-from agents.logic import LOGIC_PROMPT_TEMPLATE
-from agents.quality import QUALITY_PROMPT_TEMPLATE
-from agents.retriever import JUDGE_PROMPT_TEMPLATE, QUALITY_THRESHOLD
+from review.agents.agent_runner import EMPTY_CONTEXT_SUMMARY
+from review.agents.security_agent import SECURITY_PROMPT_TEMPLATE
+from review.agents.logic_agent import LOGIC_PROMPT_TEMPLATE
+from review.agents.quality_agent import QUALITY_PROMPT_TEMPLATE
+from review.retriever import JUDGE_PROMPT_TEMPLATE, QUALITY_THRESHOLD
 from rag.query_decomposer import DECOMPOSE_PROMPT_TEMPLATE
 from rag.contextual_chunker import CONTEXT_PROMPT_TEMPLATE
 
@@ -75,7 +75,7 @@ ALL_TASKS = ["agents", "decomposer", "judge", "chunker"]
 # --list-models to see what your keys can call today, and pass --models
 # to override this list. (Groq retired llama-3.3-70b-versatile and
 # llama-3.1-8b-instant, which the legacy decomposer and judge still use;
-# the review agents read REVIEW_AGENT_MODEL - see agents/agent_runner.py.)
+# the review agents read REVIEW_AGENT_MODEL - see review/agents/agent_runner.py.)
 DEFAULT_MODELS = [
     "groq:openai/gpt-oss-120b",
     "groq:openai/gpt-oss-20b",
@@ -356,7 +356,7 @@ def _extract_json(text: str, opener: str, closer: str):
     """
     Parses a JSON value from model output, first as-is, then from the
     outermost opener..closer span (for output wrapped in prose). Same
-    two-step approach as agents/agent_runner.py's parse_findings, but it
+    two-step approach as review/agents/agent_runner.py's parse_findings, but it
     reports failure instead of hiding it, because the valid-output rate
     is one of the things we're measuring.
 
@@ -447,7 +447,7 @@ def build_judge_prompt(case: dict) -> str:
 
     Returns:
         the production retrieval-judge prompt, with the context rendered
-        the way agents/retriever.py renders it
+        the way review/retriever.py renders it
     """
     context_summary = "\n".join(f"- {c['name']} ({c['file']})" for c in case["context"])
     return JUDGE_PROMPT_TEMPLATE.format(diff=_join_lines(case["diff"]), context_summary=context_summary)

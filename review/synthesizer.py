@@ -2,9 +2,9 @@
 synthesizer.py - the LangGraph node that turns the three review agents'
 findings into the final GitHub review comment.
 
-Inputs: ReviewState.findings (from agents/security.py, agents/logic.py
-and agents/quality.py, merged by the operator.add reducer in
-agents/state.py after join_agents_node).
+Inputs: ReviewState.findings (from review/agents/security_agent.py, review/agents/logic_agent.py
+and review/agents/quality_agent.py, merged by the operator.add reducer in
+review/state.py after join_agents_node).
 Outputs: a partial state update setting ReviewState.final_review_markdown
 to one Markdown comment, posted by tools/github_tools.py.
 
@@ -20,7 +20,7 @@ Purely a formatting step - no LLM call, since every finding already
 carries everything the comment needs. Deterministic and instant.
 """
 
-from agents.state import ReviewState, Finding
+from review.state import ReviewState, Finding
 
 
 SEVERITY_ORDER = {
@@ -40,7 +40,7 @@ SEVERITY_EMOJI = {
 }
 
 # Render order and headings of the review categories. The keys are the
-# agent names in agents/graph.py's DOMAIN_AGENTS.
+# agent names in review/graph.py's REVIEW_AGENTS.
 CATEGORY_TITLES = {
     "security": "🔒 Security",
     "logic": "🧠 Logic",
@@ -164,7 +164,7 @@ def _format_category_section(category: str, findings: list[Finding]) -> str:
 
 def synthesizer_node(state: ReviewState) -> dict:
     """
-    The LangGraph node for the "synthesizer" (see agents/graph.py).
+    The LangGraph node for the "synthesizer" (see review/graph.py).
 
     Args:
         state: the current ReviewState, reads findings (all agents' output, merged)

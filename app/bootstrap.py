@@ -53,9 +53,9 @@ def build_review_graph():
     Clones/locates the repo, ingests it, and compiles the review graph.
 
     Returns:
-        the compiled LangGraph from agents/graph.py's build_graph()
+        the compiled LangGraph from review/graph.py's build_graph()
     """
-    from agents.graph import build_graph
+    from review.graph import build_graph
     from rag.ingestion import ingest_repository
 
     repo_path = resolve_repo_path()

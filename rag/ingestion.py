@@ -7,11 +7,11 @@ Inputs: either a local filesystem path to an existing repository
 checkout, or a remote Git URL to clone first (clone_repository()).
 Outputs: a populated Chroma collection, the parallel (all_documents,
 all_ids) lists hybrid_search.py's BM25 index needs, and the NetworkX
-knowledge graph - exactly the four values agents/graph.py's
+knowledge graph - exactly the four values review/graph.py's
 build_graph() needs to wire up the real retriever node.
 
 This is the one-time (or per-deploy-startup) batch job that makes the
-rest of the RAG pipeline possible: agents/retriever.py assumes a
+rest of the RAG pipeline possible: review/retriever.py assumes a
 Chroma collection is already populated and a graph is already built -
 this module is what populates them.
 """
@@ -148,7 +148,7 @@ def ingest_repository(repo_path: str, persist_directory: str = "./chroma_data"):
 
     Returns:
         (collection, all_documents, all_ids, graph) - exactly the four
-        values agents/graph.py's build_graph() needs:
+        values review/graph.py's build_graph() needs:
           - collection: the populated Chroma collection
           - all_documents: chunk texts, for hybrid_search.py's BM25 index
           - all_ids: chunk ids, same order as all_documents

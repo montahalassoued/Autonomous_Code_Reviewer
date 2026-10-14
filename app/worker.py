@@ -40,7 +40,7 @@ def review_pull_request(compiled_graph, job: ReviewJob) -> None:
     Runs the full review for one job and posts the result to GitHub.
 
     Args:
-        compiled_graph: the LangGraph from agents/graph.py's build_graph()
+        compiled_graph: the LangGraph from review/graph.py's build_graph()
         job: the review job (repo, PR number, head sha)
     """
     diff = get_pr_diff(job.repo_full_name, job.pr_number)

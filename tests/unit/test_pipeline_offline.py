@@ -1,5 +1,5 @@
 """
-Offline end-to-end test for the review pipeline (agents/graph.py).
+Offline end-to-end test for the review pipeline (review/graph.py).
 
 Runs the REAL compiled LangGraph - retriever (decompose -> hybrid
 search -> graph expansion -> rerank -> judge), the 3 review agents,
@@ -23,7 +23,7 @@ What is faked (no network, no API keys):
 - The cross-encoder: rag.reranker._get_model returns a fake whose
   predict() scores (query, document) pairs by token overlap.
 
-agents.retriever.hybrid_search is wrapped to search with top_k=1
+review.retriever.hybrid_search is wrapped to search with top_k=1
 (still the real hybrid_search). With 7 functions in the index, the
 default top_k=10 would return every function as a direct hit, and no
 chunk would ever arrive through graph expansion - the path we need to
@@ -41,8 +41,8 @@ import chromadb
 from chromadb.config import Settings
 
 import rag.hybrid_search as hybrid_search_module
-from agents.graph import build_graph, DOMAIN_AGENTS
-from agents.retriever import MAX_RETRIEVAL_ATTEMPTS
+from review.graph import build_graph, REVIEW_AGENTS
+from review.retriever import MAX_RETRIEVAL_ATTEMPTS
 from db.chroma import store_chunks, make_chunk_id
 from rag.ast_parser import parse_file
 from rag.contextual_chunker import ContextualChunk
@@ -161,7 +161,7 @@ class FakeLLM:
     def _create(self, model: str, messages: list[dict], temperature: float, **kwargs) -> SimpleNamespace:
         prompt = messages[0]["content"]
         self.calls.append((self.role, prompt))
-        reply_key = "agent" if self.role in DOMAIN_AGENTS else self.role
+        reply_key = "agent" if self.role in REVIEW_AGENTS else self.role
         message = SimpleNamespace(content=self.replies[reply_key])
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
@@ -188,16 +188,16 @@ def install_fakes(monkeypatch, replies: dict) -> list:
     monkeypatch.setenv("LANGSMITH_TRACING", "false")
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
 
-    for agent in DOMAIN_AGENTS:
+    for agent in REVIEW_AGENTS:
         monkeypatch.setattr(
-            f"agents.{agent}._build_groq_client",
+            f"review.agents.{agent}_agent._build_groq_client",
             lambda role=agent: FakeLLM(role, calls, replies),
         )
-    monkeypatch.setattr("agents.retriever._build_groq_client", lambda: FakeLLM("judge", calls, replies))
+    monkeypatch.setattr("review.retriever._build_groq_client", lambda: FakeLLM("judge", calls, replies))
     monkeypatch.setattr("rag.query_decomposer._build_client", lambda: FakeLLM("decomposer", calls, replies))
     monkeypatch.setattr("rag.hybrid_search.embed_query", fake_embed)
     monkeypatch.setattr("rag.reranker._get_model", lambda: FakeCrossEncoder())
-    monkeypatch.setattr("agents.retriever.hybrid_search", narrow_hybrid_search)
+    monkeypatch.setattr("review.retriever.hybrid_search", narrow_hybrid_search)
     return calls
 
 
@@ -271,7 +271,7 @@ def test_clean_pr_terminates_and_calls_each_agent_once(monkeypatch):
     final_state, _functions = run_review()
     roles = roles_of(calls)
 
-    for agent in DOMAIN_AGENTS:
+    for agent in REVIEW_AGENTS:
         assert roles.count(agent) == 1, f"{agent} should run exactly once, ran {roles.count(agent)} times"
     assert roles.count("decomposer") == 1, "good retrieval on the first try needs no retry"
     assert roles.count("judge") == 1
@@ -296,9 +296,9 @@ def test_pr_with_findings_reaches_the_synthesizer(monkeypatch):
     final_state, _functions = run_review()
     roles = roles_of(calls)
 
-    for agent in DOMAIN_AGENTS:
+    for agent in REVIEW_AGENTS:
         assert roles.count(agent) == 1, f"{agent} should run exactly once"
-    assert len(final_state["findings"]) == len(DOMAIN_AGENTS), "one finding per agent, merged"
+    assert len(final_state["findings"]) == len(REVIEW_AGENTS), "one finding per agent, merged"
     assert "Empty hash accepted" in final_state["final_review_markdown"]
     print("OK - findings from all review agents merged and rendered once")
 
@@ -315,7 +315,7 @@ def test_low_judge_score_stops_after_max_attempts(monkeypatch):
     assert final_state["retrieval_attempts"] == MAX_RETRIEVAL_ATTEMPTS
     assert roles.count("decomposer") == MAX_RETRIEVAL_ATTEMPTS
     assert roles.count("judge") == MAX_RETRIEVAL_ATTEMPTS
-    for agent in DOMAIN_AGENTS:
+    for agent in REVIEW_AGENTS:
         assert roles.count(agent) == 1, f"{agent} should still run once after retries give up"
     assert "No issues found" in final_state["final_review_markdown"]
     print(f"OK - retrieval retried {MAX_RETRIEVAL_ATTEMPTS} times, then the review finished")
@@ -334,8 +334,8 @@ def test_agent_prompts_contain_code_of_hits_and_graph_neighbours(monkeypatch):
     hit_block = f"- verify_password ({AUTH_PATH}):\n{functions['verify_password'].code}"
     neighbour_block = f"- AuthService.login ({AUTH_PATH}):\n{functions['AuthService.login'].code}"
 
-    agent_prompts = [prompt for role, prompt in calls if role in DOMAIN_AGENTS]
-    assert len(agent_prompts) == len(DOMAIN_AGENTS)
+    agent_prompts = [prompt for role, prompt in calls if role in REVIEW_AGENTS]
+    assert len(agent_prompts) == len(REVIEW_AGENTS)
     for prompt in agent_prompts:
         assert hit_block in prompt, "agent prompt is missing the search hit's code"
         assert neighbour_block in prompt, "agent prompt is missing the graph neighbour's code"
@@ -368,7 +368,7 @@ def test_none_llm_content_does_not_crash(monkeypatch):
     # decomposer falls back to a diff-based query, the judge scores
     # 0.0 (so retrieval retries to the cap), agents yield no findings
     assert final_state["retrieval_attempts"] == MAX_RETRIEVAL_ATTEMPTS
-    for agent in DOMAIN_AGENTS:
+    for agent in REVIEW_AGENTS:
         assert roles.count(agent) == 1
     assert final_state["findings"] == []
     assert "No issues found" in final_state["final_review_markdown"]

@@ -1,5 +1,5 @@
 """
-Manual test for agents/state.py
+Manual test for review/state.py
 
 Goal: verify that operator.add correctly merges findings from multiple
 agents instead of overwriting them. This is the critical behavior that
@@ -7,7 +7,7 @@ the whole parallel execution of the project depends on.
 """
 
 import operator
-from agents.state import ReviewState, Finding
+from review.state import ReviewState, Finding
 
 
 def test_finding_structure():

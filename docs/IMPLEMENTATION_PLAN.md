@@ -30,14 +30,14 @@ Full description: [ARCHITECTURE.md](ARCHITECTURE.md). In short:
 
 | # | Problem | Where |
 |---|---|---|
-| V1 | A clean PR (no findings) loops back to the agents until the recursion limit, and no comment is posted | `agents/graph.py:79-80`, `:161` |
-| V2 | Empty retrieval after 3 attempts loops back to the retriever the same way | `agents/graph.py:77-78`, `:90-95` |
-| V3 | Agents get no code: Chroma stores code only in `documents`, and `retriever.py` reads `metadata["code"]` | `db/chroma.py:78-92`, `rag/hybrid_search.py:173-174`, `agents/retriever.py:80` |
-| V4 | The reranker and the judge see only names, and the reranker duplicates the best chunk | `rag/reranker.py:86`, `:151`; `agents/retriever.py:100-103` |
+| V1 | A clean PR (no findings) loops back to the agents until the recursion limit, and no comment is posted | `review/graph.py:79-80`, `:161` |
+| V2 | Empty retrieval after 3 attempts loops back to the retriever the same way | `review/graph.py:77-78`, `:90-95` |
+| V3 | Agents get no code: Chroma stores code only in `documents`, and `retriever.py` reads `metadata["code"]` | `db/chroma.py:78-92`, `rag/hybrid_search.py:173-174`, `review/retriever.py:80` |
+| V4 | The reranker and the judge see only names, and the reranker duplicates the best chunk | `rag/reranker.py:86`, `:151`; `review/retriever.py:100-103` |
 | V5 | Parser: decorators are excluded, nested defs are double-counted, methods aren't class-qualified, `self.x()` calls are ignored | `rag/ast_parser.py:61-122` |
 | V6 | Call resolution by bare name creates false edges | `rag/knowledge_graph.py:70-86` |
 | V7 | Full re-ingest on every startup, with no deletes, no 429 retry and one unbatched Voyage call | `rag/ingestion.py`, `app/main.py:70-72`, `rag/contextual_chunker.py:79-84`, `rag/embedder.py:64` |
-| V8 | `message.content` can be None, which crashes `.strip()`, and the decomposer accepts `[]` | `rag/query_decomposer.py:84,91`, `agents/retriever.py:112`, `agents/security.py:119,199` |
+| V8 | `message.content` can be None, which crashes `.strip()`, and the decomposer accepts `[]` | `rag/query_decomposer.py:84,91`, `review/retriever.py:112`, `review/agents/security_agent.py:119,199` |
 | V10 | Webhook: no dedupe, no head SHA, no error handling, no repo guard, PR only, a new comment each time | `app/api/webhook.py:98-171`, `tools/github_tools.py:88` |
 | V12 | No test of the graph routing or of what the agents actually receive. Most tests make real API calls | `tests/` |
 
@@ -48,9 +48,9 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
 ### Phase 0: Make the current pipeline correct (S)
 
 **Changes:**
-- **Graph routing** (`agents/graph.py`)
+- **Graph routing** (`review/graph.py`)
   - Remove the no-op supervisor, so the flow is `START → retriever (loop while score < threshold and attempts < 3) → agents → join_agents → synthesizer → END`.
-  - Use `QUALITY_THRESHOLD` and `MAX_RETRIEVAL_ATTEMPTS` from `agents/retriever.py` instead of the hardcoded values.
+  - Use `QUALITY_THRESHOLD` and `MAX_RETRIEVAL_ATTEMPTS` from `review/retriever.py` instead of the hardcoded values.
   - Delete the empty stub `agents/supervisor.py`.
 - **Real code reaches the agents**
   - `db/chroma.py`: store `code` and `qualified_name` in the metadata.
@@ -121,7 +121,7 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
 ### Phase 3: Robust LLM layer, shared runner, 3 agents (M)
 
 **Files:**
-- `agents/llm_client.py`:
+- `review/llm_client.py`:
   - timeout
   - retries on 429, 5xx, connection and timeout errors only
   - `content or ""`
@@ -129,8 +129,8 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
   - call counters
   - a concurrency limit
   - **Langfuse tracing:** one trace per review, with a generation for each LLM call (prompt, output, tokens, latency). It's enabled only when `LANGFUSE_PUBLIC_KEY` is set, and it's a no-op in tests.
-- `agents/prompting.py`: `wrap_untrusted()` with nonce delimiters, so untrusted content is treated as data.
-- **Done** (`refactor/three-review-agents`): `agents/agent_runner.py` with `AgentSpec(name, prompt_template)` and `run_agent()`, the agents `security`, `logic`, `quality`, strict validation (severity, integer line, non-empty text) with logged drops, `REVIEW_AGENT_MODEL`, and a synthesizer with one section per category. `Finding.agent` is the category, so no separate `category` field was added.
+- `review/prompting.py`: `wrap_untrusted()` with nonce delimiters, so untrusted content is treated as data.
+- **Done** (`refactor/three-review-agents`): `review/agents/agent_runner.py` with `AgentSpec(name, prompt_template)` and `run_agent()`, the agents `security`, `logic`, `quality`, strict validation (severity, integer line, non-empty text) with logged drops, `REVIEW_AGENT_MODEL`, and a synthesizer with one section per category. `Finding.agent` is the category, so no separate `category` field was added.
 - Embedder retries and batching, and Gemini retries on 429 too.
 - Delete the old performance, architecture, testing and documentation agents (done).
 

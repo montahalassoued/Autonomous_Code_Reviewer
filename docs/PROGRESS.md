@@ -7,9 +7,9 @@
 
 | Area | What exists | Where |
 | --- | --- | --- |
-| Legacy RAG pipeline | tree-sitter parse, Gemini context sentences, NetworkX graph, Voyage + Chroma, hybrid search, 1-hop graph expansion, local reranker, judge loop | `rag/`, `db/chroma.py`, `agents/retriever.py` |
-| Review graph (Phase 0) | Forward-only graph, real code reaches agents, `file::qualified_name` ids, None guards, reranker on context + code, offline end-to-end test | `agents/graph.py`, `tests/unit/test_pipeline_offline.py` |
-| Agents (Phase 3, part) | 3 review agents (Security, Logic, Quality) on one shared runner with strict finding validation and `REVIEW_AGENT_MODEL`; synthesizer with one section per category. Security checks authn/authz/IDOR on changed endpoints | `agents/` |
+| Legacy RAG pipeline | tree-sitter parse, Gemini context sentences, NetworkX graph, Voyage + Chroma, hybrid search, 1-hop graph expansion, local reranker, judge loop | `rag/`, `db/chroma.py`, `review/retriever.py` |
+| Review graph (Phase 0) | Forward-only graph, real code reaches agents, `file::qualified_name` ids, None guards, reranker on context + code, offline end-to-end test | `review/graph.py`, `tests/unit/test_pipeline_offline.py` |
+| Agents (Phase 3, part) | 3 review agents (Security, Logic, Quality) on one shared runner with strict finding validation and `REVIEW_AGENT_MODEL`; synthesizer with one section per category. Security checks authn/authz/IDOR on changed endpoints | `review/`, `review/agents/` |
 | Durable jobs (Phase 2, part) | Webhook verifies HMAC, dedupes on (repo, head_sha, PR) in Azure Table Storage, enqueues to Azure Storage Queue; worker with retries and poison queue | `app/api/webhook.py`, `app/jobs/`, `app/worker.py` |
 | GitHub output (Phase 5, part) | One summary comment per PR, upserted by the `<!-- acr:summary -->` marker | `tools/github_tools.py` |
 | Packaging and deploy | Multi-stage Docker image, compose (Azurite + API + worker), Azure setup script, GitHub Actions test → build → deploy (deploy skipped until Azure vars exist) | `Dockerfile`, `docker-compose.yml`, `infra/`, `.github/workflows/` |
@@ -34,5 +34,5 @@ The durable jobs, the tests split, the decisions merge, the security authz promp
 
 ## Known issues
 
-- The review agents' model `openai/gpt-oss-120b` is a provisional default until the benchmark runs on the 3 agents. The legacy decomposer (`rag/query_decomposer.py`) and judge (`agents/retriever.py`) still call the retired `llama-3.3-70b-versatile` and don't catch API errors, so the retriever node raises and every review fails until they are switched too.
+- The review agents' model `openai/gpt-oss-120b` is a provisional default until the benchmark runs on the 3 agents. The legacy decomposer (`rag/query_decomposer.py`) and judge (`review/retriever.py`) still call the retired `llama-3.3-70b-versatile` and don't catch API errors, so the retriever node raises and every review fails until they are switched too.
 - The latest benchmark run (2026-10-13) predates the 5 authn/authz cases and scores almost every model at 1.00, so it does not separate them.

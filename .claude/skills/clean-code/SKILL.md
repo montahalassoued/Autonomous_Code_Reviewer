@@ -1,6 +1,6 @@
 ---
 name: clean-code
-description: Write clear, readable Python code with comments that anyone can understand. Use whenever writing new code, editing existing code, or refactoring in this project (agents/, rag/, tools/, app/, tests/, eval/).
+description: Write clear, readable Python code with comments that anyone can understand. Use whenever writing new code, editing existing code, or refactoring in this project (review/, rag/, tools/, app/, tests/, eval/).
 ---
 
 # Clean, readable code
@@ -9,7 +9,7 @@ The goal: someone who has never seen this project, even a beginner, can open any
 
 ## 1. Every file starts with a module docstring
 
-Follow the style already used in the repo (see `rag/reranker.py` and `agents/security.py`):
+Follow the style already used in the repo (see `rag/reranker.py` and `review/agents/security_agent.py`):
 
 ```python
 """
@@ -17,7 +17,7 @@ reranker.py - re-scores search results with a local cross-encoder
 and keeps only the top-K chunks.
 
 Inputs: the enriched results from rag/graph_retriever.py.
-Outputs: a list of RankedChunk objects that feed agents/retriever.py.
+Outputs: a list of RankedChunk objects that feed review/retriever.py.
 
 Why this step exists: <one short paragraph explaining the reason,
 the alternative that was rejected, and the trade-off>.

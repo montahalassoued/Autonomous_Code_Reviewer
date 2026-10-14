@@ -11,7 +11,7 @@ START → retriever ─(quality < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL
       → join_agents (barrier) → synthesizer → END
 ```
 
-The graph is forward-only, so it always terminates (`agents/graph.py`). In the target design the retriever is replaced by `build_context` and an optional context subagent; the three agents and the synthesizer stay.
+The graph is forward-only, so it always terminates (`review/graph.py`). In the target design the retriever is replaced by `build_context` and an optional context subagent; the three agents and the synthesizer stay.
 
 ## The three review agents
 
@@ -19,13 +19,13 @@ Each agent is one category of the review. Its name is its LangGraph node, the `a
 
 | Agent | Looks for | Does not report | File |
 | --- | --- | --- | --- |
-| **Security** | OWASP / CWE vulnerabilities (injection, XSS, secrets, SSRF, path traversal, weak crypto) and authn / authz / IDOR on every changed endpoint | logic bugs, quality | `agents/security.py` |
-| **Logic** | Correctness bugs: wrong conditions, off-by-one, unhandled None / empty / edge cases, swallowed errors, broken contracts for existing callers, wrong API use, async and concurrency mistakes | security, quality | `agents/logic.py` |
-| **Quality** | Performance (N+1, quadratic loops, blocking I/O in async), maintainability (duplication, functions doing too much, dead code), missing tests, missing docs on public interfaces | security, logic bugs | `agents/quality.py` |
+| **Security** | OWASP / CWE vulnerabilities (injection, XSS, secrets, SSRF, path traversal, weak crypto) and authn / authz / IDOR on every changed endpoint | logic bugs, quality | `review/agents/security_agent.py` |
+| **Logic** | Correctness bugs: wrong conditions, off-by-one, unhandled None / empty / edge cases, swallowed errors, broken contracts for existing callers, wrong API use, async and concurrency mistakes | security, quality | `review/agents/logic_agent.py` |
+| **Quality** | Performance (N+1, quadratic loops, blocking I/O in async), maintainability (duplication, functions doing too much, dead code), missing tests, missing docs on public interfaces | security, logic bugs | `review/agents/quality_agent.py` |
 
-Each prompt says what the other reviewers cover, so the same issue isn't reported twice under two categories.
+Each prompt says what the other agents cover, so the same issue isn't reported twice under two categories.
 
-## Shared runner (`agents/agent_runner.py`)
+## Shared runner (`review/agents/agent_runner.py`)
 
 An agent file holds only its prompt and an `AgentSpec(name, prompt_template)`. Everything else is shared:
 
@@ -33,15 +33,15 @@ An agent file holds only its prompt and an `AgentSpec(name, prompt_template)`. E
 - **Prompt:** `{diff}` and `{context_summary}` are filled from `ReviewState`; every prompt ends with the same `FINDINGS_OUTPUT_INSTRUCTIONS` (a JSON array of findings).
 - **Parsing:** strips code fences, falls back to the outermost `[...]`, and returns `[]` on anything unparseable. A malformed response never crashes the review.
 - **Validation:** a finding is kept only with a known severity, a positive integer line and a non-empty file, title, description and suggestion. Dropped findings are logged.
-- **Output:** `{"findings": [...]}`, merged by the `operator.add` reducer in `agents/state.py`.
+- **Output:** `{"findings": [...]}`, merged by the `operator.add` reducer in `review/state.py`.
 
 **Finding fields:** `agent`, `severity` (CRITICAL / HIGH / MEDIUM / LOW / INFO), `file_path`, `line_number`, `title`, `description`, `evidence`, `suggestion`.
 
-## Retriever (legacy, `agents/retriever.py`)
+## Retriever (legacy, `review/retriever.py`)
 
 Runs the semantic RAG pipeline (query decomposition, hybrid search, graph expansion, reranking) and an LLM judge that retries while the context score is below `QUALITY_THRESHOLD`, at most `MAX_RETRIEVAL_ATTEMPTS` times. Kept until the eval shows structural context is at least as good; see [RAG.md](RAG.md).
 
-## Synthesizer (`agents/synthesizer.py`)
+## Synthesizer (`review/synthesizer.py`)
 
 No LLM call. It builds one Markdown comment:
 

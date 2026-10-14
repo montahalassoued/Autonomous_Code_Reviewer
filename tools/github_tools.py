@@ -3,7 +3,7 @@ github_tools.py - PyGithub wrapper for reading PR diffs and posting
 review comments.
 
 Inputs: repo_full_name ("owner/repo"), pr_number, and (for posting) the
-final review markdown produced by agents/synthesizer.py.
+final review markdown produced by review/synthesizer.py.
 Outputs: the raw PR diff text (for get_pr_diff) or a created/updated issue
 comment on the PR (for upsert_summary_comment).
 
@@ -83,7 +83,7 @@ def upsert_summary_comment(repo_full_name: str, pr_number: int, markdown: str) -
     Args:
         repo_full_name: the repository in "owner/repo" form
         pr_number: the pull request number
-        markdown: the final review markdown produced by agents/synthesizer.py
+        markdown: the final review markdown produced by review/synthesizer.py
 
     Returns:
         None - this is a side-effecting call against the GitHub API.

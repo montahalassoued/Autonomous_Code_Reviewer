@@ -1,7 +1,7 @@
 """
-Integration test for agents/logic.py
+Integration test for review/agents/logic_agent.py
 
-Makes a REAL call to Groq (REVIEW_AGENT_MODEL, see agents/agent_runner.py)
+Makes a REAL call to Groq (REVIEW_AGENT_MODEL, see review/agents/agent_runner.py)
 against a diff with a classic off-by-one bug, to check the agent actually
 detects logic bugs rather than just returning valid-but-empty output.
 Uses Groq quota: run it by hand, not in CI.
@@ -10,7 +10,7 @@ Uses Groq quota: run it by hand, not in CI.
 from dotenv import load_dotenv
 load_dotenv()
 
-from agents.logic import logic_node  # noqa: E402 - must load .env before the agent reads its keys
+from review.agents.logic_agent import logic_node  # noqa: E402 - must load .env before the agent reads its keys
 
 
 OFF_BY_ONE_DIFF = """

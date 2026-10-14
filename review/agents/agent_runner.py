@@ -1,11 +1,13 @@
 """
-agent_runner.py - the shared engine behind the three review agents
-(agents/security.py, agents/logic.py, agents/quality.py).
+agent_runner.py - the executor shared by the three review agents
+(security_agent.py, logic_agent.py and quality_agent.py, in this
+folder). It runs ONE agent at a time and knows nothing about the others:
+the order and parallelism are decided by review/graph.py, the orchestrator.
 
-Inputs: an AgentSpec (the agent's name and prompt template), the
+Inputs: an AgentSpec (the agent's category and prompt template), the
 current ReviewState (pr_diff + retrieved_context) and a Groq client.
 Outputs: a list of validated Finding objects tagged with the agent's
-name, which agents/synthesizer.py groups by category.
+name, which review/synthesizer.py groups by category.
 
 Why one shared runner: the old five agents each copied the same ~150
 lines (client, context formatting, JSON parsing, validation). A fix in
@@ -30,7 +32,7 @@ from dataclasses import dataclass
 
 from groq import Groq
 
-from agents.state import ReviewState, Finding, RetrievedChunk
+from review.state import ReviewState, Finding, RetrievedChunk
 
 
 logger = logging.getLogger(__name__)
@@ -110,7 +112,7 @@ def format_context(retrieved_context: list[RetrievedChunk]) -> str:
     (e.g. an existing caller that breaks when a signature changes).
 
     Args:
-        retrieved_context: chunks produced by agents/retriever.py
+        retrieved_context: chunks produced by review/retriever.py
 
     Returns:
         one "- name (file):\\ncode" block per chunk, or a placeholder line

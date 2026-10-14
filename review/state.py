@@ -17,8 +17,8 @@ class Finding(TypedDict):
     """
     A single issue detected by an agent in the analyzed code.
 
-    This is the atomic unit produced by agents/security.py, logic.py and
-    quality.py (through agents/agent_runner.py). The synthesizer groups a
+    This is the atomic unit produced by review/agents/security_agent.py, logic.py and
+    quality.py (through review/agents/agent_runner.py). The synthesizer groups a
     list of Finding by `agent` to produce the final review comment.
     """
     agent: str  # the review category: "security", "logic" or "quality"
@@ -62,7 +62,7 @@ class ReviewState(TypedDict):
     pr_diff: str
     changed_files: list[str]
 
-    # Retrieval - populated by agents/retriever.py
+    # Retrieval - populated by review/retriever.py
     retrieved_context: list[RetrievedChunk]
     retrieval_quality_score: float
     retrieval_attempts: int
@@ -71,10 +71,10 @@ class ReviewState(TypedDict):
     # operator.add concatenates lists instead of overwriting them
     findings: Annotated[list[Finding], operator.add]
 
-    # Final output - populated by agents/synthesizer.py
+    # Final output - populated by review/synthesizer.py
     final_review_markdown: str
 
-    # Legacy routing hint. No node reads it any more (agents/graph.py
+    # Legacy routing hint. No node reads it any more (review/graph.py
     # routes on retrieval_quality_score and retrieval_attempts), but
     # app/api/webhook.py still sets it in the initial state.
     next_step: Literal["retriever", "parallel_agents", "synthesizer", "end"]

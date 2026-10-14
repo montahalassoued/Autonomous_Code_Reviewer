@@ -1,11 +1,11 @@
 """
-security.py - the review agent that looks for security vulnerabilities
+security_agent.py - the review agent that looks for security vulnerabilities
 in a PR diff.
 
 Inputs: ReviewState (pr_diff + retrieved_context).
 Outputs: a partial state update adding this agent's findings (agent =
 "security") to ReviewState.findings, merged with the logic and quality
-agents' findings by the operator.add reducer in agents/state.py.
+agents' findings by the operator.add reducer in review/state.py.
 
 Focus areas: OWASP Top 10 and CWE-classified vulnerabilities - SQL
 injection, XSS, command injection, insecure deserialization, hardcoded
@@ -17,18 +17,18 @@ authorization on internal endpoints is one of the most common real
 findings in code review, and a one-line "broken access control" bullet
 was too vague for the model to apply consistently.
 
-The model call, JSON parsing and validation live in agents/agent_runner.py,
-shared with agents/logic.py and agents/quality.py. This file owns only
+The model call, JSON parsing and validation live in review/agents/agent_runner.py,
+shared with review/agents/logic_agent.py and review/agents/quality_agent.py. This file owns only
 what is security-specific: the prompt.
 """
 
-from agents.agent_runner import (
+from review.agents.agent_runner import (
     AgentSpec,
     FINDINGS_OUTPUT_INSTRUCTIONS,
     build_groq_client as _build_groq_client,
     run_agent,
 )
-from agents.state import ReviewState
+from review.state import ReviewState
 
 
 SECURITY_PROMPT_TEMPLATE = """You are a senior application security engineer reviewing a pull
@@ -81,7 +81,7 @@ SECURITY_AGENT = AgentSpec(name="security", prompt_template=SECURITY_PROMPT_TEMP
 
 def security_node(state: ReviewState) -> dict:
     """
-    The LangGraph node for the "security" agent (see agents/graph.py).
+    The LangGraph node for the "security" agent (see review/graph.py).
 
     Args:
         state: the current ReviewState, reads pr_diff and retrieved_context

@@ -13,7 +13,7 @@ On top of chaining these together, this module adds the one piece the
 RAG pipeline never had: an LLM-as-judge that scores whether the
 retrieved context is actually good enough, and triggers a retry with
 reformulated queries if not - bounded by ReviewState.retrieval_attempts
-to guarantee termination (agents/graph.py's route_after_retriever
+to guarantee termination (review/graph.py's route_after_retriever
 implements the bounded-retry routing using QUALITY_THRESHOLD and
 MAX_RETRIEVAL_ATTEMPTS from this module; this module is what actually
 DOES the retrieval work that routing function inspects).
@@ -23,7 +23,7 @@ import os
 import json
 from groq import Groq
 
-from agents.state import ReviewState, RetrievedChunk
+from review.state import ReviewState, RetrievedChunk
 from rag.query_decomposer import decompose_diff
 from rag.hybrid_search import hybrid_search
 from rag.graph_retriever import enrich_with_graph_context
@@ -32,7 +32,7 @@ from rag.reranker import rerank, RankedChunk
 
 JUDGE_MODEL = "llama-3.3-70b-versatile"
 
-# Corrective-RAG loop bounds, read by agents/graph.py's routing: retry
+# Corrective-RAG loop bounds, read by review/graph.py's routing: retry
 # retrieval while the judge scores below QUALITY_THRESHOLD, but never
 # more than MAX_RETRIEVAL_ATTEMPTS times in total, so a review always
 # reaches the agents even when retrieval stays poor.
@@ -85,7 +85,7 @@ def _qualified_name(metadata: dict) -> str:
 def _ranked_chunk_to_retrieved_chunk(chunk: RankedChunk, graph) -> RetrievedChunk:
     """
     Converts a reranker.py RankedChunk (chunk_id + metadata dict) into
-    the flatter RetrievedChunk shape agents/state.py expects, since
+    the flatter RetrievedChunk shape review/state.py expects, since
     that's the contract every domain agent (security.py, etc.) will
     read from. Pulls caller info from the graph directly rather than
     re-deriving it, since we already have the graph loaded here.
@@ -225,7 +225,7 @@ def run_retrieval(
 def retriever_node(state: ReviewState, collection, all_documents, all_ids, graph) -> dict:
     """
     The actual LangGraph node function for the "retriever" node defined
-    in agents/graph.py. Replaces that file's retriever_node STUB.
+    in review/graph.py. Replaces that file's retriever_node STUB.
 
     Note the extra parameters beyond `state`: collection/all_documents/
     all_ids/graph are NOT part of ReviewState (they're large, repo-wide
@@ -233,7 +233,7 @@ def retriever_node(state: ReviewState, collection, all_documents, all_ids, graph
     to be bound via a closure or partial application when this node is
     registered in the graph, e.g.:
         graph.add_node("retriever", lambda s: retriever_node(s, collection, all_documents, all_ids, graph))
-    This wiring happens when agents/graph.py is updated to use the real
+    This wiring happens when review/graph.py is updated to use the real
     retriever instead of its current stub.
     """
     retrieved_chunks, quality_score = run_retrieval(

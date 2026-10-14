@@ -83,7 +83,7 @@ def store_chunks(
     Each chunk's metadata (file_path, function_name, qualified_name,
     line numbers, context, code) is stored alongside its vector, so a
     search result can be turned directly into a RetrievedChunk
-    (agents/state.py) without a second lookup anywhere else. The code
+    (review/state.py) without a second lookup anywhere else. The code
     is stored in metadata (not only in `documents`) because every
     downstream consumer (graph_retriever, reranker, retriever) reads
     chunk metadata, and documents also carry the context sentence.

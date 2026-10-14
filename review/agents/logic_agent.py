@@ -1,11 +1,11 @@
 """
-logic.py - the review agent that looks for correctness bugs in a PR diff:
+logic_agent.py - the review agent that looks for correctness bugs in a PR diff:
 code that runs but does the wrong thing.
 
 Inputs: ReviewState (pr_diff + retrieved_context).
 Outputs: a partial state update adding this agent's findings (agent =
 "logic") to ReviewState.findings, merged with the security and quality
-agents' findings by the operator.add reducer in agents/state.py.
+agents' findings by the operator.add reducer in review/state.py.
 
 Focus areas: wrong conditions and off-by-one errors, unhandled None and
 empty inputs, broken error handling, callers that break when a signature
@@ -14,18 +14,18 @@ The retrieved context matters most for this agent: a changed function is
 often correct on its own and wrong only for the callers that rely on its
 old behavior.
 
-The model call, JSON parsing and validation live in agents/agent_runner.py,
-shared with agents/security.py and agents/quality.py. This file owns only
+The model call, JSON parsing and validation live in review/agents/agent_runner.py,
+shared with review/agents/security_agent.py and review/agents/quality_agent.py. This file owns only
 what is logic-specific: the prompt.
 """
 
-from agents.agent_runner import (
+from review.agents.agent_runner import (
     AgentSpec,
     FINDINGS_OUTPUT_INSTRUCTIONS,
     build_groq_client as _build_groq_client,
     run_agent,
 )
-from agents.state import ReviewState
+from review.state import ReviewState
 
 
 LOGIC_PROMPT_TEMPLATE = """You are a senior software engineer reviewing a pull request diff for
@@ -65,7 +65,7 @@ LOGIC_AGENT = AgentSpec(name="logic", prompt_template=LOGIC_PROMPT_TEMPLATE)
 
 def logic_node(state: ReviewState) -> dict:
     """
-    The LangGraph node for the "logic" agent (see agents/graph.py).
+    The LangGraph node for the "logic" agent (see review/graph.py).
 
     Args:
         state: the current ReviewState, reads pr_diff and retrieved_context

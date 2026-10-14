@@ -101,7 +101,7 @@ until LangGraph's recursion limit (re-calling all 5 agents each time)
 and no review was posted. The graph is now `START -> retriever (retry
 while score < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL_ATTEMPTS)
 -> 5 agents -> join_agents -> synthesizer -> END`, with both limits
-read from `agents/retriever.py` instead of being hardcoded. A fixed
+read from `review/retriever.py` instead of being hardcoded. A fixed
 supervisor was the alternative, but it had no real decision to make.
 Validated in tests/unit/test_pipeline_offline.py.
 
@@ -136,7 +136,7 @@ a paid SaaS beyond its free tier and is closed source. Langfuse is open source
 via its managed cloud, and it covers tracing, prompt versioning, datasets and
 scores in one tool. LangSmith was only declared in requirements and config, with
 no tracing code yet, so switching costs nothing. Integration point: the shared
-LLM client planned in Phase 3 (agents/llm_client.py), so all LLM calls get
+LLM client planned in Phase 3 (review/llm_client.py), so all LLM calls get
 traced in one place. The eval harness (Phase 1) can push its scores to Langfuse.
 Trade-off: self-hosting adds infrastructure to run, so start on Langfuse Cloud
 and self-host later if needed.
@@ -279,7 +279,7 @@ measures it per category.
 
 Each agent copied ~150 lines of client, context formatting, JSON parsing and
 validation, and fixes didn't reach every copy (none validated severity or
-logged dropped findings). `agents/agent_runner.py` now owns all of it, and an
+logged dropped findings). `review/agents/agent_runner.py` now owns all of it, and an
 agent is an `AgentSpec(name, prompt_template)` plus its prompt. It also
 validates findings strictly (known severity, positive integer line, non-empty
 text), logs what it drops, and reads the model from `REVIEW_AGENT_MODEL` so a

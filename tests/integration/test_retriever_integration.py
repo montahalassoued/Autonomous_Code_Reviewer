@@ -1,5 +1,5 @@
 """
-Full end-to-end integration test for agents/retriever.py
+Full end-to-end integration test for review/retriever.py
 
 IMPORTANT: this is the heaviest test in the project so far. It makes
 REAL calls to:
@@ -26,7 +26,7 @@ from rag.contextual_chunker import contextualize_functions
 from rag.embedder import embed_chunks
 from db.chroma import get_client, get_collection, store_chunks
 from rag.knowledge_graph import build_knowledge_graph
-from agents.retriever import run_retrieval
+from review.retriever import run_retrieval
 
 
 EXISTING_REPO_CODE = '''def hash_password(password):

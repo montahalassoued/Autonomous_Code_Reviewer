@@ -54,8 +54,8 @@ _model_cache: "CrossEncoder | None" = None
 class RankedChunk:
     """
     A final, reranked piece of context - this is the shape that feeds
-    directly into agents/state.py's RetrievedChunk once Step 10
-    (agents/retriever.py) wires this whole pipeline into the graph.
+    directly into review/state.py's RetrievedChunk once Step 10
+    (review/retriever.py) wires this whole pipeline into the graph.
     """
     chunk_id: str
     metadata: dict

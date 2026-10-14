@@ -1,19 +1,18 @@
 """
-Unit test for agents/agent_runner.py
+Unit test for review/agents/agent_runner.py
 
 Offline: the Groq client is a fake that returns canned content and
 records the request, so these tests check what the runner owns - JSON
 parsing of messy LLM output, finding validation, the model setting and
 the prompt it sends - without any API call. Real model behavior is
-covered by tests/integration/test_security.py, test_logic.py and
-test_quality.py.
+covered by tests/integration/test_security_agent.py,
+test_logic_agent.py and test_quality_agent.py.
 """
 
 import json
 from types import SimpleNamespace
 
-from agents import logic, quality, security
-from agents.agent_runner import (
+from review.agents.agent_runner import (
     DEFAULT_REVIEW_AGENT_MODEL,
     EMPTY_CONTEXT_SUMMARY,
     parse_findings,
@@ -21,6 +20,7 @@ from agents.agent_runner import (
     run_agent,
     to_finding,
 )
+from review.agents import logic_agent, quality_agent, security_agent
 
 
 VALID_RAW = {
@@ -125,7 +125,7 @@ def test_to_finding_allows_missing_evidence():
 def test_run_agent_keeps_valid_findings_and_drops_bad_ones():
     content = json.dumps([VALID_RAW, {**VALID_RAW, "severity": "nope"}])
 
-    result = run_agent(security.SECURITY_AGENT, build_state(), FakeGroq(content))
+    result = run_agent(security_agent.SECURITY_AGENT, build_state(), FakeGroq(content))
 
     assert len(result["findings"]) == 1
     assert result["findings"][0]["agent"] == "security"
@@ -133,7 +133,7 @@ def test_run_agent_keeps_valid_findings_and_drops_bad_ones():
 
 
 def test_run_agent_treats_none_content_as_no_findings():
-    result = run_agent(logic.LOGIC_AGENT, build_state(), FakeGroq(None))
+    result = run_agent(logic_agent.LOGIC_AGENT, build_state(), FakeGroq(None))
 
     assert result == {"findings": []}
     print("OK - None content yields no findings")
@@ -145,7 +145,7 @@ def test_run_agent_sends_diff_context_model_and_temperature(monkeypatch):
                 "context": "", "relevance_score": 1.0, "callers": []}]
     client = FakeGroq("[]")
 
-    run_agent(quality.QUALITY_AGENT, build_state(diff="+ x = compute()\n", context=context), client)
+    run_agent(quality_agent.QUALITY_AGENT, build_state(diff="+ x = compute()\n", context=context), client)
 
     request = client.requests[0]
     prompt = request["messages"][0]["content"]
@@ -159,7 +159,7 @@ def test_run_agent_sends_diff_context_model_and_temperature(monkeypatch):
 def test_empty_context_uses_placeholder():
     client = FakeGroq("[]")
 
-    run_agent(logic.LOGIC_AGENT, build_state(), client)
+    run_agent(logic_agent.LOGIC_AGENT, build_state(), client)
 
     assert EMPTY_CONTEXT_SUMMARY in client.requests[0]["messages"][0]["content"]
     print("OK - no retrieved context renders the placeholder line")
@@ -174,7 +174,7 @@ def test_review_agent_model_falls_back_to_default(monkeypatch):
 
 
 def test_every_agent_prompt_keeps_placeholders_and_output_contract():
-    for spec in (security.SECURITY_AGENT, logic.LOGIC_AGENT, quality.QUALITY_AGENT):
+    for spec in (security_agent.SECURITY_AGENT, logic_agent.LOGIC_AGENT, quality_agent.QUALITY_AGENT):
         prompt = spec.prompt_template
         assert "{diff}" in prompt and "{context_summary}" in prompt, f"{spec.name} lost a placeholder"
         assert '"line_number"' in prompt and "JSON array" in prompt, f"{spec.name} lost the output contract"
@@ -184,10 +184,15 @@ def test_every_agent_prompt_keeps_placeholders_and_output_contract():
 
 def test_agent_nodes_use_their_own_client_seam(monkeypatch):
     client = FakeGroq(json.dumps([VALID_RAW]))
-    for module, node in ((security, security.security_node), (logic, logic.logic_node), (quality, quality.quality_node)):
+    reviewers = (
+        (security_agent, security_agent.security_node, "security"),
+        (logic_agent, logic_agent.logic_node, "logic"),
+        (quality_agent, quality_agent.quality_node, "quality"),
+    )
+    for module, node, category in reviewers:
         monkeypatch.setattr(module, "_build_groq_client", lambda: client)
         findings = node(build_state())["findings"]
-        assert findings[0]["agent"] == module.__name__.split(".")[-1]
+        assert findings[0]["agent"] == category, f"{module.__name__} must tag its findings {category!r}"
     print("OK - each node calls its module's _build_groq_client and tags its own name")
 
 

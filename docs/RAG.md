@@ -30,7 +30,7 @@ Until the Phase 4 eval shows structural context doing at least as well, the work
 6. hybrid BM25 + dense search fused with RRF (`rag/hybrid_search.py`)
 7. 1-hop caller/callee expansion (`rag/graph_retriever.py`)
 8. cross-encoder reranking (`rag/reranker.py`)
-9. an LLM judge that retries retrieval while quality < `QUALITY_THRESHOLD` (`agents/retriever.py`)
+9. an LLM judge that retries retrieval while quality < `QUALITY_THRESHOLD` (`review/retriever.py`)
 
 **Why it is being replaced:** similarity is the wrong signal for review context. A caller that breaks when a signature changes is rarely textually similar to the change. Module-level code (router dependencies, middleware) is not indexed at all, so the security agent can't see whether an endpoint is protected. The worker also re-ingests the whole repo at every startup, with one Gemini call per function.
 

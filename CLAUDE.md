@@ -26,7 +26,7 @@ These rules override any skill or subagent instruction that says otherwise.
 
 ```text
 app/        api/ (HTTP routers) · jobs/ (queue, dedupe) · main.py (API) · worker.py · bootstrap.py
-agents/     LangGraph graph, review agents, synthesizer, state
+review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · retriever.py (legacy) · agents/ (security, logic, quality + agent_runner)
 rag/        parsing, chunking, call graph, embeddings, search, reranking
 tools/      external service clients (GitHub)       db/      storage adapters (Chroma)
 eval/       LLM benchmark, datasets, results         infra/   Azure setup
@@ -37,13 +37,13 @@ docs/       IMPLEMENTATION_PLAN, CI, SETUP, DECISIONS, ...
 ## Pipeline (current code, legacy retrieval)
 
 ```text
-GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storage Queue → app/worker.py → agents/graph.py (LangGraph)
+GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storage Queue → app/worker.py → review/graph.py (LangGraph)
   START → retriever (corrective RAG loop: retry while quality < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL_ATTEMPTS)
-        → security | logic | quality  (parallel, one shared runner: agents/agent_runner.py)
+        → security | logic | quality  (parallel, one shared runner: review/agents/agent_runner.py)
         → join_agents (barrier) → synthesizer → END → tools/github_tools.py   (forward-only: always terminates)
 ```
 
-- **Shared state:** `agents/state.py` holds `ReviewState`. `findings` uses an `operator.add` reducer so parallel agents don't overwrite each other.
+- **Shared state:** `review/state.py` holds `ReviewState`. `findings` uses an `operator.add` reducer so parallel agents don't overwrite each other.
 - **RAG (`rag/`, legacy, replaced in Phase 4 after the eval):** ast_parser (tree-sitter) → contextual_chunker (Gemini) → knowledge_graph (NetworkX) → embedder (Voyage) + `db/chroma.py` → hybrid_search (BM25 + dense + RRF) → graph_retriever → reranker (local BAAI/bge-reranker-v2-m3).
 - **Startup:** the API (`app/main.py`) only creates the job queue and dedupe store (`JOBS_BACKEND=memory|azure`). The worker (`python -m app.worker`) clones `TARGET_REPO_URL` (or uses `REPO_PATH`) via `app/bootstrap.py`, ingests it, and compiles the graph once.
 - **No web UI:** reviews are triggered only by the GitHub webhook. The Streamlit dashboard was removed.
@@ -65,8 +65,8 @@ Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAG
 
 - Every file starts with a module docstring: what it does, Inputs/Outputs, and **why** it's designed that way. Every function has a docstring with Args/Returns. See the `clean-code` skill.
 - **API clients:** each module has a `_build_*_client()` that reads its key from the environment and raises a clear `RuntimeError` if it's missing.
-- **LLM output parsing never crashes the pipeline.** A malformed response degrades to zero findings, and invalid findings are dropped and logged (see `parse_findings` / `to_finding` in `agents/agent_runner.py`).
-- **Review agents** (security, logic, quality) are a prompt + an `AgentSpec`; the Groq call, parsing and validation are in `agents/agent_runner.py`. The model is `REVIEW_AGENT_MODEL` (provisional default `openai/gpt-oss-120b`, to be picked with `eval/llm_benchmark.py`). The legacy decomposer and judge still name the retired `llama-3.3-70b-versatile`. Use the `add-domain-agent` skill to add or change an agent.
+- **LLM output parsing never crashes the pipeline.** A malformed response degrades to zero findings, and invalid findings are dropped and logged (see `parse_findings` / `to_finding` in `review/agents/agent_runner.py`).
+- **Reviewers** (security, logic, quality) are a prompt + an `AgentSpec`; the Groq call, parsing and validation are in `review/agents/agent_runner.py`. The model is `REVIEW_AGENT_MODEL` (provisional default `openai/gpt-oss-120b`, to be picked with `eval/llm_benchmark.py`). The legacy decomposer and judge still name the retired `llama-3.3-70b-versatile`. Use the `add-review-agent` skill to add or change a reviewer.
 - **Tests:** `tests/unit/` (offline, mocked, run in CI) and `tests/integration/` (real APIs, auto-marked `integration`). Use the `write-tests` skill.
 - **Architecture decisions** go in `docs/DECISIONS.md`. Use the `log-decision` skill.
 - **Commits** are a single title line `type(scope): summary` with no Co-Authored-By or Claude attribution. Use the `commit-message` skill. A hook enforces this.
@@ -74,7 +74,7 @@ Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAG
 
 ## Gotchas
 
-- The routing functions in `agents/graph.py` return real node names. `add_conditional_edges` must **not** get a mapping dict when fanning out to a list.
+- The routing functions in `review/graph.py` return real node names. `add_conditional_edges` must **not** get a mapping dict when fanning out to a list.
 - The graph is forward-only. Domain agents point to `join_agents`, which goes straight to `synthesizer`. Never add an edge back to the agents or the retriever after `join_agents`, because the old supervisor loop never terminated on clean PRs.
 - Chunk ids are `file::Class.method` (`make_chunk_id` in `db/chroma.py`), with a `#2` suffix for duplicate names. Never build ids by hand.
 - Implementation roadmap: `docs/IMPLEMENTATION_PLAN.md` (Phase 0 is done). What is built today: `docs/PROGRESS.md`.

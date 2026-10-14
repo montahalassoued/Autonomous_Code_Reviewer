@@ -1,5 +1,5 @@
 """
-Unit test for agents/synthesizer.py
+Unit test for review/synthesizer.py
 
 No LLM calls needed - synthesizer_node is pure formatting logic over
 findings already present in state, so this test is fast and fully
@@ -8,7 +8,7 @@ section per category in a fixed order, severity order inside each
 section, a summary table, and empty categories still shown.
 """
 
-from agents.synthesizer import synthesizer_node
+from review.synthesizer import synthesizer_node
 
 
 def make_finding(agent: str, severity: str, title: str = "Issue", evidence: str = "some_code_here()") -> dict:
