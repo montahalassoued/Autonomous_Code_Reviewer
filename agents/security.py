@@ -9,7 +9,13 @@ the operator.add reducer defined in agents/state.py).
 
 Focus areas: OWASP Top 10 and CWE-classified vulnerabilities - SQL
 injection, XSS, command injection, insecure deserialization, hardcoded
-secrets, broken access control, SSRF, path traversal, and similar.
+secrets, SSRF, path traversal, and similar - plus an explicit
+authentication/authorization check on every endpoint the PR adds or
+modifies (missing authentication CWE-306, missing authorization CWE-862,
+IDOR CWE-639). That check gets its own prompt section because missing
+authorization on internal endpoints is one of the most common real
+findings in code review, and a one-line "broken access control" bullet
+was too vague for the model to apply consistently.
 
 Same pattern as agents/performance.py, agents/architecture.py,
 agents/testing.py, and agents/documentation.py: Groq call, low
@@ -37,10 +43,28 @@ CWE where applicable, such as:
 - Command injection (unsanitized input passed to a shell/subprocess)
 - Insecure deserialization (pickle, yaml.load, unsafe unmarshalling)
 - Hardcoded secrets, API keys, or credentials
-- Broken access control (missing authorization checks)
 - Server-side request forgery (SSRF)
 - Path traversal (unsanitized file paths from user input)
 - Insecure cryptography (weak hashing, hardcoded salts/IVs, ECB mode)
+
+Authentication and authorization (check this for EVERY API endpoint the
+diff adds or modifies - route handlers such as @app.get / @router.post,
+Flask @app.route, Django views, webhook handlers):
+- Missing authentication (CWE-306): the endpoint never establishes who
+  the caller is - no auth dependency (e.g. Depends(get_current_user)),
+  no @login_required, no token or signature verification.
+- Missing authorization (CWE-862): the caller is authenticated, but the
+  endpoint never checks they are allowed to perform this action - e.g.
+  an admin or staff-only operation (refunds, deleting users, changing
+  roles) with no role or permission check.
+- Insecure direct object reference / IDOR (CWE-639): the endpoint loads
+  or changes a resource by an id taken from the request without checking
+  that the resource belongs to the caller (no owner or tenant check).
+Internal or "admin" endpoints are NOT exempt: missing checks there are
+among the most common real vulnerabilities. Do NOT report an endpoint
+as unprotected when the protection is visible in the diff or the
+context - a router-level dependency (APIRouter(dependencies=[...])),
+middleware, a decorator, or an explicit owner/role check in the body.
 
 Diff:
 {diff}
