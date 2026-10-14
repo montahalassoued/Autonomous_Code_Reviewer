@@ -3,7 +3,7 @@ llm_benchmark.py - compares free LLMs on the four LLM jobs in this
 project, so we can pick the right model for each one.
 
 The four jobs, and the production code each one benchmarks:
-  agents      -> the domain review agents (agents/security.py, agents/performance.py, ...)
+  agents      -> the 3 review agents (agents/security.py, agents/logic.py, agents/quality.py)
   decomposer  -> diff -> search queries (rag/query_decomposer.py)
   judge       -> retrieval quality score 0-1 (agents/retriever.py)
   chunker     -> one context sentence per function (rag/contextual_chunker.py)
@@ -37,7 +37,7 @@ Usage:
   venv/Scripts/python.exe -m eval.llm_benchmark --list-models
   venv/Scripts/python.exe -m eval.llm_benchmark
   venv/Scripts/python.exe -m eval.llm_benchmark --tasks agents,judge \\
-      --models groq:llama-3.3-70b-versatile,gemini:gemini-2.5-flash --runs 3
+      --models groq:openai/gpt-oss-120b,gemini:gemini-2.5-flash --runs 3
 
 Every run makes REAL API calls and uses free-tier quota.
 """
@@ -56,11 +56,10 @@ from typing import Callable
 from dotenv import load_dotenv
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from agents.agent_runner import EMPTY_CONTEXT_SUMMARY
 from agents.security import SECURITY_PROMPT_TEMPLATE
-from agents.performance import PERFORMANCE_PROMPT_TEMPLATE
-from agents.architecture import ARCHITECTURE_PROMPT_TEMPLATE
-from agents.testing import TESTING_PROMPT_TEMPLATE
-from agents.documentation import DOCUMENTATION_PROMPT_TEMPLATE
+from agents.logic import LOGIC_PROMPT_TEMPLATE
+from agents.quality import QUALITY_PROMPT_TEMPLATE
 from agents.retriever import JUDGE_PROMPT_TEMPLATE, QUALITY_THRESHOLD
 from rag.query_decomposer import DECOMPOSE_PROMPT_TEMPLATE
 from rag.contextual_chunker import CONTEXT_PROMPT_TEMPLATE
@@ -75,7 +74,8 @@ ALL_TASKS = ["agents", "decomposer", "judge", "chunker"]
 # Free-tier candidates. Provider model lists change over time; run with
 # --list-models to see what your keys can call today, and pass --models
 # to override this list. (Groq retired llama-3.3-70b-versatile and
-# llama-3.1-8b-instant, which production still uses - see --list-models.)
+# llama-3.1-8b-instant, which the legacy decomposer and judge still use;
+# the review agents read REVIEW_AGENT_MODEL - see agents/agent_runner.py.)
 DEFAULT_MODELS = [
     "groq:openai/gpt-oss-120b",
     "groq:openai/gpt-oss-20b",
@@ -86,10 +86,8 @@ DEFAULT_MODELS = [
 
 AGENT_PROMPTS = {
     "security": SECURITY_PROMPT_TEMPLATE,
-    "performance": PERFORMANCE_PROMPT_TEMPLATE,
-    "architecture": ARCHITECTURE_PROMPT_TEMPLATE,
-    "testing": TESTING_PROMPT_TEMPLATE,
-    "documentation": DOCUMENTATION_PROMPT_TEMPLATE,
+    "logic": LOGIC_PROMPT_TEMPLATE,
+    "quality": QUALITY_PROMPT_TEMPLATE,
 }
 
 # Same temperatures production uses for each job, so the benchmark
@@ -106,7 +104,6 @@ FALSE_POSITIVE_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM"}
 LINE_TOLERANCE = 3
 
 MAX_CONTEXT_WORDS = 30  # the chunker prompt asks for "max 30 words"
-EMPTY_CONTEXT_SUMMARY = "(no related context retrieved)"
 
 
 @dataclass
@@ -359,7 +356,7 @@ def _extract_json(text: str, opener: str, closer: str):
     """
     Parses a JSON value from model output, first as-is, then from the
     outermost opener..closer span (for output wrapped in prose). Same
-    two-step approach as agents/security.py's _parse_findings, but it
+    two-step approach as agents/agent_runner.py's parse_findings, but it
     reports failure instead of hiding it, because the valid-output rate
     is one of the things we're measuring.
 

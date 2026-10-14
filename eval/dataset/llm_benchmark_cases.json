@@ -210,7 +210,7 @@
     },
     {
       "id": "perf_n_plus_one",
-      "agent": "performance",
+      "agent": "quality",
       "diff": [
         "diff --git a/shop/reports.py b/shop/reports.py",
         "--- a/shop/reports.py",
@@ -231,7 +231,7 @@
     },
     {
       "id": "perf_quadratic_membership",
-      "agent": "performance",
+      "agent": "quality",
       "diff": [
         "diff --git a/analytics/dedupe.py b/analytics/dedupe.py",
         "--- a/analytics/dedupe.py",
@@ -252,7 +252,7 @@
     },
     {
       "id": "perf_clean",
-      "agent": "performance",
+      "agent": "quality",
       "diff": [
         "diff --git a/analytics/dedupe.py b/analytics/dedupe.py",
         "--- a/analytics/dedupe.py",
