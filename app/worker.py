@@ -18,14 +18,8 @@ MIN_POLL_S = 1.0
 MAX_POLL_S = 10.0
 
 
+# Runs the full review for one job and posts the result to GitHub.
 def review_pull_request(compiled_graph, job: ReviewJob) -> None:
-    """
-    Runs the full review for one job and posts the result to GitHub.
-
-    Args:
-        compiled_graph: the LangGraph from review/graph.py's build_graph()
-        job: the review job (repo, PR number, head sha)
-    """
     diff = get_pr_diff(job.repo_full_name, job.pr_number)
 
     initial_state = {
@@ -45,26 +39,13 @@ def review_pull_request(compiled_graph, job: ReviewJob) -> None:
     upsert_summary_comment(job.repo_full_name, job.pr_number, final_state["final_review_markdown"])
 
 
+# Receives at most one message and handles it.
 def process_one(
     queue: JobQueue,
     review_fn: Callable[[ReviewJob], None],
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     visibility_timeout_s: int = DEFAULT_VISIBILITY_TIMEOUT_S,
 ) -> bool:
-    """
-    Receives at most one message and handles it.
-
-    Args:
-        queue: the job queue.
-        review_fn: runs the review for one job; raises on failure.
-        max_attempts: once a message has been received this many times and
-                      fails again, it is dead-lettered instead of retried.
-        visibility_timeout_s: how long the message stays hidden while we work.
-                              Must exceed the longest review.
-
-    Returns:
-        True if a message was handled (success or failure), False if the queue was empty.
-    """
     messages = queue.receive(max_messages=1, visibility_timeout_s=visibility_timeout_s)
     if not messages:
         return False
@@ -89,6 +70,7 @@ def process_one(
     return True
 
 
+# Polls the queue until stop_event is set.
 def run_forever(
     queue: JobQueue,
     review_fn: Callable[[ReviewJob], None],
@@ -98,22 +80,6 @@ def run_forever(
     min_poll_s: float = MIN_POLL_S,
     max_poll_s: float = MAX_POLL_S,
 ) -> None:
-    """
-    Polls the queue until stop_event is set.
-
-    The stop flag is checked only between jobs, so a job in progress always
-    finishes (graceful shutdown). While the queue is empty the wait doubles
-    from min_poll_s up to max_poll_s to avoid hammering the storage account.
-
-    Args:
-        queue: the job queue.
-        review_fn: runs one review.
-        stop_event: set by the signal handler to request shutdown.
-        max_attempts: see process_one().
-        visibility_timeout_s: see process_one().
-        min_poll_s: first wait after an empty poll.
-        max_poll_s: longest wait between polls.
-    """
     delay = min_poll_s
     while not stop_event.is_set():
         try:
@@ -128,8 +94,8 @@ def run_forever(
         delay = min(delay * 2, max_poll_s)
 
 
+# Reads a positive integer from the environment, falling back to default if unset.
 def _read_int_env(name: str, default: int) -> int:
-    """Reads a positive integer from the environment, falling back to default if unset."""
     raw = os.environ.get(name)
     if not raw:
         return default
@@ -139,8 +105,8 @@ def _read_int_env(name: str, default: int) -> int:
     return value
 
 
+# Worker entrypoint: ingest once, build the graph once, then process jobs until SIGTERM/SIGINT.
 def main() -> None:
-    """Worker entrypoint: ingest once, build the graph once, then process jobs until SIGTERM/SIGINT."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
     from app.bootstrap import build_review_graph  # heavy imports stay out of module import time

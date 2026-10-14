@@ -6,15 +6,8 @@ from github import Github, Auth
 SUMMARY_MARKER = "<!-- acr:summary -->"
 
 
+# Reads GITHUB_TOKEN from the environment.
 def _build_github_client() -> Github:
-    """
-    Reads GITHUB_TOKEN from the environment. Same defensive pattern
-    used across the project's LLM clients: fail early with a clear
-    message instead of a cryptic error mid-call.
-
-    Returns:
-        an authenticated PyGithub client
-    """
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         raise RuntimeError(
@@ -26,22 +19,8 @@ def _build_github_client() -> Github:
     return Github(auth=Auth.Token(token))
 
 
+# Fetches the unified diff for a pull request.
 def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
-    """
-    Fetches the unified diff for a pull request.
-
-    Args:
-        repo_full_name: the repository in "owner/repo" form
-        pr_number: the pull request number
-
-    Returns:
-        the PR's diff as a single string, built by concatenating each
-        changed file's patch (the same unified-diff hunk format GitHub
-        shows in its own UI), prefixed with a file header so the
-        diff's file boundaries stay readable downstream (query
-        decomposition, domain agents, etc. all parse this text as one
-        blob, not as separate per-file inputs).
-    """
     client = _build_github_client()
     repo = client.get_repo(repo_full_name)
     pull_request = repo.get_pull(pr_number)
@@ -54,29 +33,8 @@ def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
     return "\n\n".join(diff_parts)
 
 
+# Creates the review summary comment, or edits it if one already exists.
 def upsert_summary_comment(repo_full_name: str, pr_number: int, markdown: str) -> None:
-    """
-    Creates the review summary comment, or edits it if one already exists.
-
-    Why: the review job is retried (at-least-once delivery), so posting must
-    be idempotent. The body starts with a hidden marker; an existing issue
-    comment containing the marker AND written by the authenticated user is
-    edited in place. Comments with the marker from other users are ignored,
-    so nobody can hijack the slot by pasting the marker.
-
-    Args:
-        repo_full_name: the repository in "owner/repo" form
-        pr_number: the pull request number
-        markdown: the final review markdown produced by review/synthesizer.py
-
-    Returns:
-        None - this is a side-effecting call against the GitHub API.
-        A plain issue comment is used (not a formal PR review) since the
-        synthesizer produces one consolidated comment.
-
-    TODO (Phase 5): inline review comments will need a per-comment
-    fingerprint marker for the same idempotency.
-    """
     body = markdown if markdown.startswith(SUMMARY_MARKER) else f"{SUMMARY_MARKER}\n{markdown}"
 
     client = _build_github_client()
@@ -92,6 +50,6 @@ def upsert_summary_comment(repo_full_name: str, pr_number: int, markdown: str) -
     pull_request.create_issue_comment(body)
 
 
+# Thin alias for upsert_summary_comment(), kept for older callers.
 def post_review_comment(repo_full_name: str, pr_number: int, markdown: str) -> None:
-    """Thin alias for upsert_summary_comment(), kept for older callers."""
     upsert_summary_comment(repo_full_name, pr_number, markdown)

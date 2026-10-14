@@ -15,23 +15,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# Reject the request unless its HMAC signature proves it came from GitHub.
 def _verify_signature(payload_body: bytes, signature_header: str | None) -> None:
-    """
-    Validates the X-Hub-Signature-256 header GitHub attaches to every
-    webhook delivery, proving the request actually came from GitHub
-    (or whoever holds GITHUB_WEBHOOK_SECRET) and wasn't forged or
-    tampered with in transit.
-
-    Args:
-        payload_body: the raw, unparsed request body bytes - the
-                       signature is computed over these exact bytes,
-                       so it must never be reserialized JSON
-        signature_header: the value of the X-Hub-Signature-256 header,
-                           or None if missing
-
-    Raises:
-        HTTPException: 401 if the header is missing or doesn't match
-    """
     secret = os.environ.get("GITHUB_WEBHOOK_SECRET")
     if not secret:
         raise RuntimeError(
@@ -53,23 +38,8 @@ def _verify_signature(payload_body: bytes, signature_header: str | None) -> None
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
 
+# (pr_number, repo, head_sha) from a pull_request payload; 400 if missing.
 def _extract_pr_fields(payload: dict) -> tuple[int, str, str]:
-    """
-    Pulls the fields the review job needs out of a GitHub
-    pull_request webhook payload.
-
-    Args:
-        payload: the parsed JSON webhook body
-
-    Returns:
-        (pr_number, repo_full_name, head_sha) - the list of changed
-        files is NOT in the payload; the worker fetches it via
-        get_pr_diff()
-
-    Raises:
-        HTTPException: 400 if required fields are missing, so a
-        malformed or unexpected payload doesn't crash the server
-    """
     try:
         pr_number = payload["pull_request"]["number"]
         repo_full_name = payload["repository"]["full_name"]
@@ -83,6 +53,7 @@ def _extract_pr_fields(payload: dict) -> tuple[int, str, str]:
     return pr_number, repo_full_name, head_sha
 
 
+# Verify, dedupe and queue a review for PR opened/synchronize events.
 @router.post("/webhook/github")
 async def github_webhook(
     request: Request,
@@ -90,28 +61,6 @@ async def github_webhook(
     x_github_event: str | None = Header(default=None),
     x_github_delivery: str | None = Header(default=None),
 ):
-    """
-    Receives a GitHub webhook delivery, validates it, and queues a
-    review job for "opened" or "synchronize" pull_request events.
-
-    Args:
-        request: the raw FastAPI request, used to read the exact body
-                 bytes needed for signature verification
-        x_hub_signature_256: GitHub's HMAC signature header
-        x_github_event: GitHub's event-type header (e.g. "pull_request")
-        x_github_delivery: GitHub's unique delivery id (logging only;
-                           dedupe uses the commit, which also catches
-                           separate deliveries of the same commit)
-
-    Returns:
-        200 {"status": "ignored"} for events/actions not acted on,
-        200 {"status": "duplicate"} if the commit was already queued,
-        202 {"status": "queued", "job_id": ...} once the job is stored.
-
-    Raises:
-        HTTPException: 401 bad signature, 400 malformed payload,
-        503 if the dedupe store or queue is unavailable
-    """
     payload_body = await request.body()
     _verify_signature(payload_body, x_hub_signature_256)
 

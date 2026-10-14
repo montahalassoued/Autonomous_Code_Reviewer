@@ -12,17 +12,9 @@ from app.jobs.models import ReviewJob
 logger = logging.getLogger(__name__)
 
 
+# A leased queue message.
 @dataclass
 class ReceivedMessage:
-    """
-    A leased queue message.
-
-    Attributes:
-        job: the parsed review job.
-        message_id: queue-assigned id.
-        pop_receipt: lease token, required to delete the message.
-        dequeue_count: how many times the message has been received (1 on first try).
-    """
 
     job: ReviewJob
     message_id: str
@@ -30,25 +22,29 @@ class ReceivedMessage:
     dequeue_count: int
 
 
+# What the webhook and the worker need from a queue.
 class JobQueue(Protocol):
-    """What the webhook and the worker need from a queue."""
 
+    # Adds a job to the queue.
     def enqueue(self, job: ReviewJob) -> None:
-        """Adds a job to the queue. Raises on failure."""
+        ...
 
+    # Leases up to max_messages visible messages, hiding them for visibility_timeout_s.
     def receive(self, max_messages: int, visibility_timeout_s: int) -> list[ReceivedMessage]:
-        """Leases up to max_messages visible messages, hiding them for visibility_timeout_s."""
+        ...
 
+    # Permanently removes a leased message (the job succeeded).
     def delete(self, message: ReceivedMessage) -> None:
-        """Permanently removes a leased message (the job succeeded)."""
+        ...
 
+    # Copies the message to the poison queue and removes the original.
     def dead_letter(self, message: ReceivedMessage) -> None:
-        """Copies the message to the poison queue and removes the original."""
+        ...
 
 
+# Internal bookkeeping for one in-memory message.
 @dataclass
 class _Entry:
-    """Internal bookkeeping for one in-memory message."""
 
     message_id: str
     job: ReviewJob
@@ -57,15 +53,8 @@ class _Entry:
     pop_receipt: str = ""
 
 
+# Thread-safe queue for local development and tests.
 class InMemoryJobQueue:
-    """
-    Thread-safe queue for local development and tests. NOT shared between
-    processes, so the API and worker only see each other's jobs in one process.
-
-    Args:
-        clock: returns "now" in seconds; tests inject a fake clock to
-               move time forward without sleeping.
-    """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
@@ -73,13 +62,13 @@ class InMemoryJobQueue:
         self._entries: list[_Entry] = []
         self.poison: list[ReviewJob] = []
 
+    # Adds a job, immediately visible.
     def enqueue(self, job: ReviewJob) -> None:
-        """Adds a job, immediately visible."""
         with self._lock:
             self._entries.append(_Entry(uuid.uuid4().hex, job, visible_at=self._clock()))
 
+    # Leases visible messages and increments their dequeue_count.
     def receive(self, max_messages: int, visibility_timeout_s: int) -> list[ReceivedMessage]:
-        """Leases visible messages and increments their dequeue_count."""
         received: list[ReceivedMessage] = []
         with self._lock:
             now = self._clock()
@@ -96,19 +85,19 @@ class InMemoryJobQueue:
                 )
         return received
 
+    # Removes the message if the lease token is still current; otherwise a no-op.
     def delete(self, message: ReceivedMessage) -> None:
-        """Removes the message if the lease token is still current; otherwise a no-op."""
         with self._lock:
             self._remove_if_leased(message)
 
+    # Move the message to the poison list if its lease is still current.
     def dead_letter(self, message: ReceivedMessage) -> None:
-        """Moves the message to the poison list if the lease token is still current."""
         with self._lock:
             if self._remove_if_leased(message):
                 self.poison.append(message.job)
 
+    # Removes the entry matching id + pop_receipt.
     def _remove_if_leased(self, message: ReceivedMessage) -> bool:
-        """Removes the entry matching id + pop_receipt. Returns True if one was removed."""
         for entry in self._entries:
             if entry.message_id == message.message_id and entry.pop_receipt == message.pop_receipt:
                 self._entries.remove(entry)
@@ -116,32 +105,19 @@ class InMemoryJobQueue:
         return False
 
 
+# Azure Storage Queue backend.
 class AzureStorageJobQueue:
-    """
-    Azure Storage Queue backend.
-
-    Takes already-built QueueClients (see app/jobs/factory.py) so this class
-    has no Azure imports and can be tested with fakes.
-
-    Args:
-        queue_client: client for the main queue.
-        poison_client: client for the poison queue.
-    """
 
     def __init__(self, queue_client, poison_client) -> None:
         self._queue = queue_client
         self._poison = poison_client
 
+    # Sends the job as plain JSON text.
     def enqueue(self, job: ReviewJob) -> None:
-        """Sends the job as plain JSON text."""
         self._queue.send_message(job.to_json())
 
+    # Leases up to max_messages messages.
     def receive(self, max_messages: int, visibility_timeout_s: int) -> list[ReceivedMessage]:
-        """
-        Leases up to max_messages messages. A message whose body is not a
-        valid job is moved to the poison queue right away, because retrying
-        it could never succeed.
-        """
         raw_messages = self._queue.receive_messages(
             messages_per_page=max_messages, visibility_timeout=visibility_timeout_s
         )
@@ -158,11 +134,11 @@ class AzureStorageJobQueue:
             received.append(ReceivedMessage(job, raw.id, raw.pop_receipt, raw.dequeue_count))
         return received
 
+    # Deletes the message using its pop receipt.
     def delete(self, message: ReceivedMessage) -> None:
-        """Deletes the message using its pop receipt."""
         self._queue.delete_message(message.message_id, message.pop_receipt)
 
+    # Copy the job to the poison queue, then delete the original.
     def dead_letter(self, message: ReceivedMessage) -> None:
-        """Copies the job to the poison queue, then deletes the original (copy first so nothing is lost)."""
         self._poison.send_message(message.job.to_json())
         self._queue.delete_message(message.message_id, message.pop_receipt)

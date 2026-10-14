@@ -8,16 +8,16 @@ DEFAULT_QUEUE_NAME = "review-jobs"
 DEFAULT_DEDUPE_TABLE = "reviewdedupe"
 
 
+# Reads JOBS_BACKEND and validates it.
 def _backend() -> str:
-    """Reads JOBS_BACKEND and validates it."""
     backend = os.environ.get("JOBS_BACKEND", "memory").strip().lower()
     if backend not in {"memory", "azure"}:
         raise ValueError(f"JOBS_BACKEND must be 'memory' or 'azure', got '{backend}'")
     return backend
 
 
+# Returns AZURE_STORAGE_ACCOUNT_NAME or fails with a clear message.
 def _account_name() -> str:
-    """Returns AZURE_STORAGE_ACCOUNT_NAME or fails with a clear message."""
     name = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME")
     if not name:
         raise RuntimeError(
@@ -27,8 +27,8 @@ def _account_name() -> str:
     return name
 
 
+# Builds a QueueClient and creates the queue if it does not exist.
 def _make_queue_client(queue_name: str):
-    """Builds a QueueClient and creates the queue if it does not exist."""
     from azure.core.exceptions import ResourceExistsError
     from azure.storage.queue import QueueClient
 
@@ -50,8 +50,8 @@ def _make_queue_client(queue_name: str):
     return client
 
 
+# Returns the job queue for the configured backend.
 def build_queue() -> JobQueue:
-    """Returns the job queue for the configured backend."""
     if _backend() == "memory":
         return InMemoryJobQueue()
     queue_name = os.environ.get("REVIEW_QUEUE_NAME", DEFAULT_QUEUE_NAME)
@@ -61,8 +61,8 @@ def build_queue() -> JobQueue:
     )
 
 
+# Returns the dedupe store for the configured backend.
 def build_dedupe() -> DedupeStore:
-    """Returns the dedupe store for the configured backend."""
     if _backend() == "memory":
         return InMemoryDedupeStore()
 
