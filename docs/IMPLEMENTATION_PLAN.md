@@ -145,7 +145,7 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
 - Indexer (no LLM): tree-sitter symbols (functions, `Class.method` with decorators, class headers without bodies, a `<module>` pseudo-symbol), `content_hash` and `norm_hash`, call resolution `self`/`cls` (incl. bases) → import → same file → unique name → `unresolved_calls`, and `tested_by` edges.
 - Full index build on first install or `schema_version` change (incremental sync is Phase 6).
 - **Initial import:** a first push or an empty repo (`before` = `000…`) indexes everything and records the review as `skipped` (`initial_import`), with zero LLM calls.
-- The `reviews` table replaces the Azure Table dedupe (unique `(repo_id, target, head_sha)`).
+- The `reviews` table replaces the Azure Table dedupe (unique `(repo_id, target, head_sha)`). **Done** (`feat/postgres-reviews-store`), together with the compose service, `db/migrations/001_initial_schema.sql` and `db/migration_runner.py`.
 
 **Analysis:**
 - `analysis/diff_parser.py`: name-status + hunks.

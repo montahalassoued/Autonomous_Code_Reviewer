@@ -19,6 +19,7 @@ Every significant design choice, and why it was made. Add new entries with the `
 - Review before index update: the review sees the true "before", a failed review never corrupts the index
 - Push coalescing over one review per push: fewer LLM calls, one review of the whole range
 - `reviews` table over Azure Table dedupe: dedupe, status and metrics in one row (supersedes the Table claim)
+- psycopg 3 + numbered SQL migrations over SQLAlchemy + Alembic: graph joins read best as SQL; seven tables need no ORM
 - BAAI/bge-reranker-v2-m3: CPU-only, no API cost (legacy path; kept only while the legacy mode exists)
 
 **Superseded by the structural-context design (kept for history):**
@@ -288,3 +289,33 @@ keeps a `_build_groq_client` name so tests can fake one agent at a time.
 Alternatives: a base class per agent (inheritance for what is only data), or
 one generic node built from a list of specs (loses a named function per
 agent in traces and tests). Validated in tests/unit/test_agent_runner.py.
+
+## Why psycopg 3 with plain SQL migrations over SQLAlchemy and Alembic
+
+The code index is queried with graph-style joins (callers, callees, tests of a
+symbol) that read most clearly as SQL, and the schema is small and fixed
+(`db/migrations/001_initial_schema.sql`). The Postgres layer is psycopg 3 with
+its connection pool (`db/postgres.py`), and migrations are numbered `.sql`
+files applied in order by `db/migration_runner.py`, which records them in
+`schema_migrations` and holds a Postgres advisory lock so two API replicas
+starting together never migrate twice. The API applies them at startup.
+Alternatives: SQLAlchemy 2.0 (typed models and a query builder, but more code
+and concepts than seven tables need) with Alembic (its main gain, generating
+migrations from models, only applies with SQLAlchemy models). The unused
+`sqlalchemy`, `asyncpg`, `psycopg2-binary` and `alembic` requirements were
+removed. Trade-off: no ORM, so every query is hand-written SQL, kept next to the
+code that uses it and covered by tests/integration/test_postgres_dedupe.py.
+
+## Why the reviews table over Azure Table Storage for webhook dedupe
+
+The webhook claimed (repo, head sha, PR) in Azure Table Storage. The target
+design already needs a `reviews` row per review (status, cost, context), with
+the unique key (repo_id, target, head_sha), so a second store only for dedupe
+was redundant. `PostgresDedupeStore` (app/jobs/dedupe.py) inserts a `queued`
+review and treats a unique-key conflict as a duplicate; releasing it after a
+failed enqueue deletes the row only while it is still `queued`, so a running
+or posted review is never forgotten. `DEDUPE_BACKEND` defaults to postgres when
+`JOBS_BACKEND=azure`, so a deployed API without `DATABASE_URL` fails at startup
+instead of silently deduping in memory per replica. Trade-off: the API now
+depends on Postgres being up, and Azure has no Postgres server provisioned yet.
+Supersedes the Table Storage part of "Why a durable queue + separate worker".

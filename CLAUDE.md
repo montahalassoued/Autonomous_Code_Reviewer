@@ -28,7 +28,7 @@ These rules override any skill or subagent instruction that says otherwise.
 app/        api/ (HTTP routers) · jobs/ (queue, dedupe) · main.py (API) · worker.py · bootstrap.py
 review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · retriever.py (legacy) · agents/ (security, logic, quality + agent_runner)
 rag/        parsing, chunking, call graph, embeddings, search, reranking
-tools/      external service clients (GitHub)       db/      storage adapters (Chroma)
+tools/      external service clients (GitHub)       db/      postgres.py · migration_runner.py · migrations/*.sql · chroma.py (legacy)
 eval/       LLM benchmark, datasets, results         infra/   Azure setup
 tests/      unit/ (offline, CI) · integration/ (real APIs, manual) · conftest.py
 docs/       IMPLEMENTATION_PLAN, CI, SETUP, DECISIONS, ...
@@ -45,7 +45,7 @@ GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storag
 
 - **Shared state:** `review/state.py` holds `ReviewState`. `findings` uses an `operator.add` reducer so parallel agents don't overwrite each other.
 - **RAG (`rag/`, legacy, replaced in Phase 4 after the eval):** ast_parser (tree-sitter) → contextual_chunker (Gemini) → knowledge_graph (NetworkX) → embedder (Voyage) + `db/chroma.py` → hybrid_search (BM25 + dense + RRF) → graph_retriever → reranker (local BAAI/bge-reranker-v2-m3).
-- **Startup:** the API (`app/main.py`) only creates the job queue and dedupe store (`JOBS_BACKEND=memory|azure`). The worker (`python -m app.worker`) clones `TARGET_REPO_URL` (or uses `REPO_PATH`) via `app/bootstrap.py`, ingests it, and compiles the graph once.
+- **Startup:** the API (`app/main.py`) only creates the job queue (`JOBS_BACKEND=memory|azure`) and the dedupe store (`DEDUPE_BACKEND=memory|postgres`; postgres applies the SQL migrations in `db/migrations/` first and dedupes on the `reviews` table). The worker (`python -m app.worker`) clones `TARGET_REPO_URL` (or uses `REPO_PATH`) via `app/bootstrap.py`, ingests it, and compiles the graph once.
 - **No web UI:** reviews are triggered only by the GitHub webhook. The Streamlit dashboard was removed.
 
 ## Commands
@@ -54,12 +54,13 @@ GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storag
 venv/Scripts/python.exe -m pytest tests/unit   # fast, no API calls
 venv/Scripts/python.exe -m pytest tests/integration    # REAL Groq/Gemini/Voyage/GitHub calls - uses quota, user runs it
 uvicorn app.main:app --host 0.0.0.0 --port 8000         # API
-docker-compose up --build                               # full stack
+docker-compose up --build                               # full stack (azurite + postgres + api + worker)
+venv/Scripts/python.exe -m db.migration_runner           # apply SQL migrations to DATABASE_URL
 ```
 
 ## Environment
 
-Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, and `TARGET_REPO_URL` or `REPO_PATH`. Never commit `.env`.
+Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, and `TARGET_REPO_URL` or `REPO_PATH`. `DATABASE_URL` is set by docker compose; set it yourself only to reach Postgres from your machine. Never commit `.env`.
 
 ## Conventions
 

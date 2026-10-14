@@ -43,7 +43,7 @@ An AI code reviewer that runs entirely through GitHub. You push code or open a p
 
 ```bash
 cp .env.example .env          # fill in the API keys and TARGET_REPO_URL
-docker compose up --build     # API on http://localhost:8000 (GET /health)
+docker compose up --build     # API on http://localhost:8000 (GET /health), Postgres on localhost:5432
 ```
 
 Then point a GitHub webhook (pull request and push events) at `https://<your-server>/webhook/github`, with the same secret as `GITHUB_WEBHOOK_SECRET`.

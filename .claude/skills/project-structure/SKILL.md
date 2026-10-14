@@ -18,7 +18,7 @@ description: Decide where new code, tests and docs go and how to name them, so e
 | `review/agents/` | The review agents | One `<category>_agent.py` per review category, plus `agent_runner.py` that executes them |
 | `rag/` | Retrieval | Parsing, chunking, call graph, embeddings, search, reranking |
 | `tools/` | External service clients | One module per service: `github_tools.py` and so on |
-| `db/` | Storage adapters | One module per store: `chroma.py` and so on |
+| `db/` | Storage adapters | `postgres.py` (connection pool), `migration_runner.py`, `migrations/NNN_description.sql`, legacy `chroma.py` |
 | `eval/` | Quality measurement | Benchmarks and harnesses. Data goes in `eval/dataset/`, outputs in `eval/results/` |
 | `tests/unit/` | Offline tests | No network, no API keys. CI runs this whole folder |
 | `tests/integration/` | Real-API tests | Auto-marked `integration`, run manually |
@@ -38,7 +38,7 @@ If a new piece doesn't fit any folder, **stop and propose a new folder** (its na
 
 **Folders** (lowercase): a plural noun or a domain name for the role: `agents/`, `jobs/`, `analysis/`.
 
-**Classes** (PascalCase), named after what they are: `ReviewJob`, `InMemoryJobQueue`, `AzureTableDedupeStore`. Use the pattern `<Backend><Role>` for implementations of one interface, and `<Role>` for the protocol.
+**Classes** (PascalCase), named after what they are: `ReviewJob`, `InMemoryJobQueue`, `PostgresDedupeStore`. Use the pattern `<Backend><Role>` for implementations of one interface, and `<Role>` for the protocol.
 
 **Functions** (snake_case verbs) say what they do: `enqueue`, `claim`, `parse_patch`, `upsert_summary_comment`. True/false values read as questions: `is_latest`, `has_secret`.
 
