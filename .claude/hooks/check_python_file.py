@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 
+# Print the problem and exit 2 so it gets fixed.
 def fail(message: str) -> None:
-    """Print the problem for Claude and exit with code 2 so it gets fixed."""
     print(message, file=sys.stderr)
     sys.exit(2)
 

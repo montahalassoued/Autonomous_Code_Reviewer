@@ -7,8 +7,8 @@ RED_BOLD = "\033[1;31m"
 RESET = "\033[0m"
 
 
+# Return context usage percent (float) or None if unavailable.
 def ctx_percent(data):
-    """Return context usage percent (float) or None if unavailable."""
     cw = data.get("context_window") or {}
     pct = cw.get("used_percentage")
     if isinstance(pct, (int, float)):
@@ -19,8 +19,8 @@ def ctx_percent(data):
     return None
 
 
+# Read the branch from .git/HEAD (no subprocess, no git locks).
 def git_branch(start):
-    """Read the branch from .git/HEAD (no subprocess, no git locks)."""
     d = os.path.abspath(start)
     while True:
         git = os.path.join(d, ".git")
