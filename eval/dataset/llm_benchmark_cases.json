@@ -82,6 +82,133 @@
       "expected_issues": []
     },
     {
+      "id": "sec_authn_missing",
+      "agent": "security",
+      "_about": "New endpoint with no authentication at all: anyone can delete any user (CWE-306).",
+      "diff": [
+        "diff --git a/app/api/users.py b/app/api/users.py",
+        "--- a/app/api/users.py",
+        "+++ b/app/api/users.py",
+        "@@ -1,4 +1,10 @@",
+        " from fastapi import APIRouter",
+        " from app.db import db",
+        " ",
+        " router = APIRouter(prefix=\"/users\")",
+        "+",
+        "+",
+        "+@router.delete(\"/{user_id}\")",
+        "+def delete_user(user_id: int):",
+        "+    db.execute(\"DELETE FROM users WHERE id = ?\", (user_id,))",
+        "+    return {\"deleted\": user_id}"
+      ],
+      "expected_issues": [
+        {"file": "app/api/users.py", "line": 8, "lines": [7, 9], "keywords": ["authenticat", "unauthenticated", "cwe-306", "anyone can", "no auth", "missing auth"]}
+      ]
+    },
+    {
+      "id": "sec_authz_idor",
+      "agent": "security",
+      "_about": "Caller is authenticated, but any user can read any other user's invoice by changing the id (IDOR, CWE-639).",
+      "diff": [
+        "diff --git a/app/api/invoices.py b/app/api/invoices.py",
+        "--- a/app/api/invoices.py",
+        "+++ b/app/api/invoices.py",
+        "@@ -1,6 +1,13 @@",
+        " from fastapi import APIRouter, Depends, HTTPException",
+        " from app.auth import get_current_user",
+        " from app.db import Invoice, session",
+        " ",
+        " router = APIRouter(prefix=\"/invoices\")",
+        " ",
+        "+",
+        "+@router.get(\"/{invoice_id}\")",
+        "+def get_invoice(invoice_id: int, current_user=Depends(get_current_user)):",
+        "+    invoice = session.get(Invoice, invoice_id)",
+        "+    if invoice is None:",
+        "+        raise HTTPException(status_code=404)",
+        "+    return invoice"
+      ],
+      "expected_issues": [
+        {"file": "app/api/invoices.py", "line": 10, "lines": [8, 13], "keywords": ["idor", "insecure direct object", "cwe-639", "cwe-862", "owner", "belongs to", "authoriz", "other user"]}
+      ]
+    },
+    {
+      "id": "sec_authz_missing_role",
+      "agent": "security",
+      "_about": "Staff-only refund endpoint checks login but not role: any logged-in customer can refund any order (CWE-862). The comment is a realistic 'internal endpoint' trap.",
+      "diff": [
+        "diff --git a/app/api/admin.py b/app/api/admin.py",
+        "--- a/app/api/admin.py",
+        "+++ b/app/api/admin.py",
+        "@@ -1,6 +1,12 @@",
+        " from fastapi import APIRouter, Depends",
+        " from app.auth import get_current_user",
+        " from app.billing import issue_refund",
+        " ",
+        " router = APIRouter(prefix=\"/admin\")",
+        " ",
+        "+",
+        "+@router.post(\"/refunds/{order_id}\")",
+        "+def refund_order(order_id: int, amount: float, current_user=Depends(get_current_user)):",
+        "+    # Internal endpoint: only support staff use this page.",
+        "+    issue_refund(order_id, amount)",
+        "+    return {\"refunded\": order_id, \"amount\": amount}"
+      ],
+      "expected_issues": [
+        {"file": "app/api/admin.py", "line": 11, "lines": [8, 11], "keywords": ["authoriz", "cwe-862", "role", "permission", "staff", "admin check", "privilege"]}
+      ]
+    },
+    {
+      "id": "sec_authz_clean_owner_check",
+      "agent": "security",
+      "_about": "Trap: same endpoint as sec_authz_idor, but with a correct ownership check. Must NOT be flagged.",
+      "diff": [
+        "diff --git a/app/api/invoices.py b/app/api/invoices.py",
+        "--- a/app/api/invoices.py",
+        "+++ b/app/api/invoices.py",
+        "@@ -1,6 +1,14 @@",
+        " from fastapi import APIRouter, Depends, HTTPException",
+        " from app.auth import get_current_user",
+        " from app.db import Invoice, session",
+        " ",
+        " router = APIRouter(prefix=\"/invoices\")",
+        " ",
+        "+",
+        "+@router.get(\"/{invoice_id}\")",
+        "+def get_invoice(invoice_id: int, current_user=Depends(get_current_user)):",
+        "+    invoice = session.get(Invoice, invoice_id)",
+        "+    if invoice is None or invoice.owner_id != current_user.id:",
+        "+        # 404 rather than 403, so other users' invoice ids are not revealed",
+        "+        raise HTTPException(status_code=404)",
+        "+    return invoice"
+      ],
+      "expected_issues": []
+    },
+    {
+      "id": "sec_authz_clean_router_level",
+      "agent": "security",
+      "_about": "Trap: the new route has no per-route auth, but the router itself requires an admin (visible in the context lines). Must NOT be flagged.",
+      "diff": [
+        "diff --git a/app/api/admin.py b/app/api/admin.py",
+        "--- a/app/api/admin.py",
+        "+++ b/app/api/admin.py",
+        "@@ -1,7 +1,12 @@",
+        " from fastapi import APIRouter, Depends",
+        " from app.auth import require_admin",
+        " from app.billing import issue_refund",
+        " ",
+        " # Every route on this router requires an admin user.",
+        " router = APIRouter(prefix=\"/admin\", dependencies=[Depends(require_admin)])",
+        " ",
+        "+",
+        "+@router.post(\"/refunds/{order_id}\")",
+        "+def refund_order(order_id: int, amount: float):",
+        "+    issue_refund(order_id, amount)",
+        "+    return {\"refunded\": order_id, \"amount\": amount}"
+      ],
+      "expected_issues": []
+    },
+    {
       "id": "perf_n_plus_one",
       "agent": "performance",
       "diff": [
