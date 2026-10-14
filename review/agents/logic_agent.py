@@ -24,6 +24,12 @@ or fails on inputs it should handle, such as:
   that existing callers in the context don't handle
 - Wrong use of a library or API (wrong argument order, units, time
   zones, integer vs float division)
+- Results of external calls used without a check: an HTTP response
+  used without checking its status, a database lookup that can return
+  None or no rows, a file or key that may not exist
+- Logic that is only right for some states: feature flags, user roles,
+  lifecycle states (e.g. a cancelled or refunded order) the code doesn't
+  handle
 - Async and concurrency mistakes: a missing await, shared state
   modified without a lock, check-then-act races
 

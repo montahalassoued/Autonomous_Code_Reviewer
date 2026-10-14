@@ -23,9 +23,10 @@ FINDINGS_OUTPUT_INSTRUCTIONS = """For each issue found, output one JSON object w
 - "file_path": the file the issue is in
 - "line_number": the line number (integer) the issue occurs at, from the diff
 - "title": a short title for the issue
-- "description": a clear explanation of the issue and its impact
+- "description": what goes wrong, for which input or scenario, and its impact
 - "evidence": the specific code snippet that shows the issue
-- "suggestion": a concrete fix
+- "suggestion": a concrete fix and why it helps, with a short code example
+  when that makes it clearer
 
 Output ONLY a JSON array of these objects, nothing else - no markdown,
 no explanation, no preamble. If there are no issues, output an empty

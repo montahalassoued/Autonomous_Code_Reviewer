@@ -18,11 +18,20 @@ run, read, test or change, such as:
 - Maintainability: duplicated logic that already exists in the context,
   a function or class doing several unrelated things, deep nesting,
   magic numbers, misleading names, dead or commented-out code
-- Tests: new behavior or a fixed bug with no test in the diff
+- Unbounded work: a query or endpoint that returns every row with no
+  limit or pagination, a cache, list or listener registry that only grows
+- Work repeated inside a loop that could be done once outside it
+  (compiling a regex, opening a connection, reading config)
+- Tests: new behavior or a fixed bug with no test in the diff; tests
+  that assert almost nothing (only "is not None"); flaky tests that use
+  the real network, sleep/timing or depend on test order; changed
+  behavior whose existing tests were not updated
 - Documentation: a new public function, class or endpoint with no
   docstring, or a docstring that no longer matches the code
 
-Report only issues that matter for this codebase, with a concrete fix.
+Do NOT report formatting, import order, line length, unused imports or
+other issues a linter or formatter catches. Report only issues that
+matter for this codebase, with a concrete fix.
 Use LOW or INFO for minor issues, and MEDIUM or above only when the
 issue has a real cost (a slow path, a likely future bug). Do NOT report
 security vulnerabilities or logic bugs: other reviewers cover them.
