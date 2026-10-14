@@ -1,24 +1,3 @@
-"""
-logic_agent.py - the review agent that looks for correctness bugs in a PR diff:
-code that runs but does the wrong thing.
-
-Inputs: ReviewState (pr_diff + retrieved_context).
-Outputs: a partial state update adding this agent's findings (agent =
-"logic") to ReviewState.findings, merged with the security and quality
-agents' findings by the operator.add reducer in review/state.py.
-
-Focus areas: wrong conditions and off-by-one errors, unhandled None and
-empty inputs, broken error handling, callers that break when a signature
-or return value changes, wrong API usage, async and concurrency mistakes.
-The retrieved context matters most for this agent: a changed function is
-often correct on its own and wrong only for the callers that rely on its
-old behavior.
-
-The model call, JSON parsing and validation live in review/agents/agent_runner.py,
-shared with review/agents/security_agent.py and review/agents/quality_agent.py. This file owns only
-what is logic-specific: the prompt.
-"""
-
 from review.agents.agent_runner import (
     AgentSpec,
     FINDINGS_OUTPUT_INSTRUCTIONS,

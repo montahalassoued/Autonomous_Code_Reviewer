@@ -1,25 +1,3 @@
-"""
-quality_agent.py - the review agent that looks for code quality issues in a PR
-diff: code that works but is costly to run, read, test or change.
-
-Inputs: ReviewState (pr_diff + retrieved_context).
-Outputs: a partial state update adding this agent's findings (agent =
-"quality") to ReviewState.findings, merged with the security and logic
-agents' findings by the operator.add reducer in review/state.py.
-
-Focus areas: performance (N+1 queries, quadratic loops, blocking calls
-in async code), maintainability (duplication, functions doing too much,
-unclear names, dead code), missing tests for new behavior, and missing
-documentation on public interfaces. This one agent replaces the old
-performance, architecture, testing and documentation agents: each of
-them produced few findings, and splitting them cost four LLM calls per
-review instead of one.
-
-The model call, JSON parsing and validation live in review/agents/agent_runner.py,
-shared with review/agents/security_agent.py and review/agents/logic_agent.py. This file owns only
-what is quality-specific: the prompt.
-"""
-
 from review.agents.agent_runner import (
     AgentSpec,
     FINDINGS_OUTPUT_INSTRUCTIONS,

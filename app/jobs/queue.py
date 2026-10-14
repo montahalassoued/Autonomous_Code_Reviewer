@@ -1,19 +1,3 @@
-"""
-queue.py - the durable job queue: an in-memory backend and an Azure Storage Queue backend.
-
-Inputs: ReviewJob objects (app/jobs/models.py) from the webhook.
-Outputs: ReceivedMessage objects handed to the worker (app/worker.py).
-
-Why a queue with a visibility timeout: a received message is only hidden, not
-deleted. If the worker crashes, the message reappears after the timeout and is
-retried (at-least-once delivery). dequeue_count tells the worker when to give
-up and move the message to the poison queue.
-
-Message encoding: the Azure backend sends the JSON as plain text. The Azure
-SDK v12 default is no base64 on both send and receive, so the portal shows
-readable JSON. Do not mix this with clients that base64-encode.
-"""
-
 import logging
 import threading
 import time

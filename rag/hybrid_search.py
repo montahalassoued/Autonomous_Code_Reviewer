@@ -1,30 +1,3 @@
-"""
-hybrid_search.py - combines BM25 keyword search with dense vector search.
-
-Why neither alone is enough:
-- Dense search (Voyage embeddings via Chroma) finds SEMANTIC matches -
-  it can find verify_password() for a query about "checking credentials"
-  even with zero exact word overlap. But it can also be fooled: a
-  function whose generated context happens to share vocabulary with
-  the query (like login() mentioning "verifies") can outrank the
-  function an exact keyword search would obviously surface.
-- BM25 finds EXACT matches - if the query or diff literally contains
-  the string "verify_password", BM25 will rank that function very
-  highly based on the exact token match, regardless of how the
-  semantic embedding happens to score it.
-
-Combining both and fusing with Reciprocal Rank Fusion (RRF) gives a
-result that is robust to either method's individual blind spots: a
-document that ranks well in BOTH methods consistently outscores one
-that only does well in a single method.
-
-Why RRF instead of a weighted sum of raw scores: BM25 scores and
-cosine similarity scores live on completely different, incomparable
-scales (BM25 can be negative; cosine similarity is roughly -1 to 1
-with very different distributions). RRF sidesteps this entirely by
-only looking at RANK POSITION in each result list, not raw scores.
-"""
-
 import re
 from dataclasses import dataclass
 from rank_bm25 import BM25Okapi

@@ -1,25 +1,3 @@
-"""
-synthesizer.py - the LangGraph node that turns the three review agents'
-findings into the final GitHub review comment.
-
-Inputs: ReviewState.findings (from review/agents/security_agent.py, review/agents/logic_agent.py
-and review/agents/quality_agent.py, merged by the operator.add reducer in
-review/state.py after join_agents_node).
-Outputs: a partial state update setting ReviewState.final_review_markdown
-to one Markdown comment, posted by tools/github_tools.py.
-
-Layout: a summary table (findings per category and severity), then one
-section per category in a fixed order - Security, Logic, Quality - with
-findings sorted by severity inside each section. Every category is
-always shown, even when empty ("No issues found"), so the reader can
-see that all three reviews ran instead of guessing whether one was
-skipped. Findings from an unknown agent are rendered last under "Other"
-rather than dropped.
-
-Purely a formatting step - no LLM call, since every finding already
-carries everything the comment needs. Deterministic and instant.
-"""
-
 from review.state import ReviewState, Finding
 
 

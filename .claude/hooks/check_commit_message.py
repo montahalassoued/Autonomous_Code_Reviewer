@@ -1,17 +1,3 @@
-"""
-check_commit_message.py - Claude Code PreToolUse hook that blocks git
-commits that break this project's commit rule.
-
-Inputs: the hook payload as JSON on stdin (tool_name + tool_input.command).
-Outputs: exit code 0 to allow the command, or exit code 2 with a reason
-on stderr to block it (Claude Code shows the reason to Claude).
-
-Why a hook and not just the commit-message skill: a skill is guidance
-that can be missed, while a hook runs on every command and cannot be
-skipped. The rule: a commit is a single title line, with no body and no
-Co-Authored-By / "Generated with Claude Code" attribution.
-"""
-
 import json
 import re
 import sys

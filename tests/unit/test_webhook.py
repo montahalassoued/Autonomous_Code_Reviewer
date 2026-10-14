@@ -1,12 +1,3 @@
-"""
-Unit test for app/api/webhook.py
-
-No real GitHub, Azure, or LLM calls: the webhook handler's own job is HTTP
-plumbing (HMAC verification, payload extraction, dedupe, enqueueing), so
-the queue and dedupe store are the in-memory backends on app.state. The
-review itself runs in app/worker.py and is covered by tests/unit/test_worker.py.
-"""
-
 import hashlib
 import hmac
 import json

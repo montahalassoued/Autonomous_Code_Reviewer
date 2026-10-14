@@ -1,18 +1,3 @@
-"""
-chroma.py - stores and retrieves embedded chunks using ChromaDB.
-
-This is the local development vector store. In production, the same
-role is played by Qdrant Cloud (db/qdrant.py, written later) - both
-modules expose a similar shape so rag/hybrid_search.py can swap
-between them without caring which one is actually running.
-
-ChromaDB can generate its own embeddings via a built-in
-embedding_function, but we explicitly do NOT use that here: our
-vectors already come from Voyage AI (rag/embedder.py), which is
-code-specific and chosen deliberately. We pass our own embeddings in
-directly and disable Chroma's default behavior.
-"""
-
 import chromadb
 from rag.contextual_chunker import ContextualChunk
 

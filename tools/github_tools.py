@@ -1,19 +1,3 @@
-"""
-github_tools.py - PyGithub wrapper for reading PR diffs and posting
-review comments.
-
-Inputs: repo_full_name ("owner/repo"), pr_number, and (for posting) the
-final review markdown produced by review/synthesizer.py.
-Outputs: the raw PR diff text (for get_pr_diff) or a created/updated issue
-comment on the PR (for upsert_summary_comment).
-
-Kept as a thin wrapper deliberately: app/worker.py calls get_pr_diff()
-to build the initial ReviewState, and (after the graph finishes)
-upsert_summary_comment() to publish final_review_markdown. All
-GitHub API specifics live here so the rest of the app only deals with
-plain strings.
-"""
-
 import os
 from github import Github, Auth
 

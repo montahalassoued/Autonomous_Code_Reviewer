@@ -1,18 +1,3 @@
-"""
-embedder.py - converts ContextualChunk text into vectors using Voyage AI.
-
-This module does ONE thing: text in, vector out. It knows nothing about
-storage (that's db/chroma.py) and nothing about how the text was built
-(that's rag/contextual_chunker.py). If we ever switch embedding
-providers, only this file changes.
-
-Why voyage-code-2 specifically: it is trained on code (function names,
-identifiers, algorithmic patterns), unlike general-purpose text
-embedding models that are trained on natural language prose. Two
-functions doing similar things but using different variable names
-embed much closer together with a code-specific model.
-"""
-
 import os
 import voyageai
 from rag.contextual_chunker import ContextualChunk

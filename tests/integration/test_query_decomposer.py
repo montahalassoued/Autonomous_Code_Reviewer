@@ -1,13 +1,3 @@
-"""
-Manual test for rag/query_decomposer.py
-
-IMPORTANT: makes a real Groq API call. Requires GROQ_API_KEY in .env.
-
-Goal: verify that a diff touching multiple concerns (password reset
-involving auth, database, and email) gets decomposed into multiple
-targeted queries rather than one vague blended query.
-"""
-
 from dotenv import load_dotenv
 load_dotenv()
 

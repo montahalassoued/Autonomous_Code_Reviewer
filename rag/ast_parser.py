@@ -1,34 +1,3 @@
-"""
-ast_parser.py - extracts functions from source files as structured chunks.
-
-This is the FIRST step of the ingestion pipeline. It does not call any
-LLM and does not touch the network - it is pure, deterministic parsing.
-
-Why tree-sitter instead of naive text splitting (e.g. every 500 chars):
-splitting by character count can cut a function in half, producing a
-chunk that makes no sense on its own. tree-sitter parses the actual
-grammar of the language, so we can extract exactly the nodes we want
-(function definitions) as complete, syntactically valid units.
-
-Chunk identity: each function gets a qualified_name ("Class.method",
-"Outer.Inner.method", or just "func" at module level). The chunk id
-used everywhere downstream is "file_path::qualified_name", so two
-classes in one file can each have an __init__ without colliding.
-Nested functions (a def inside another def) are NOT emitted as their
-own chunks: they stay inside the parent's code, and their calls are
-not attributed to the parent, because they only run if the parent
-calls them.
-
-Decorators are part of a function's chunk (code and start_line),
-since things like @app.route or @retry change what the function does
-and a reviewer needs to see them.
-
-Output of this module feeds directly into:
-- rag/contextual_chunker.py (Step 4): needs the raw code + file path
-- rag/knowledge_graph.py (Step 5): needs `calls` to build graph edges
-- rag/embedder.py (Step 6): needs the final text to embed
-"""
-
 from dataclasses import dataclass, field
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser, Node

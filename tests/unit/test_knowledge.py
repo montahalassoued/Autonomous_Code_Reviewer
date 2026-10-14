@@ -1,18 +1,3 @@
-"""
-Manual test for rag/knowledge_graph.py
-
-Goal: build a graph from the same auth/utils.py snippet used in
-previous steps, and verify:
-1. Every function becomes a node
-2. Edges are created for internal calls (login -> verify_password)
-3. External calls (bcrypt.hashpw, db.execute) are correctly SKIPPED
-   (not turned into broken edges to non-existent nodes)
-4. get_callers / get_callees correctly traverse the graph
-5. methods get class-qualified node ids ("file::Class.method"), so two
-   __init__ methods in one file don't collide
-6. save_graph / load_graph round-trip works
-"""
-
 import os
 from rag.ast_parser import parse_file
 from rag.knowledge_graph import (

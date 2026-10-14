@@ -1,12 +1,3 @@
-"""
-Unit tests for eval/llm_benchmark.py
-
-No LLM calls: the scorers are pure functions, and run_benchmark takes a
-fake call_fn that returns canned output, so these tests are fast,
-deterministic and use no API quota. They also check that the real
-dataset file loads and that every case builds a prompt.
-"""
-
 import json
 
 from eval.llm_benchmark import (

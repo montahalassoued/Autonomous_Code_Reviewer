@@ -1,26 +1,3 @@
-"""
-knowledge_graph.py - builds a directed graph of function call relationships.
-
-This is what GraphRAG adds on top of vector search: vector search finds
-functions that are SEMANTICALLY similar to a query, but it cannot answer
-structural questions like "what calls this function?" or "what does this
-function depend on?". A graph captures exactly that relationship, and we
-can traverse it to enrich whatever the
-vector search already found.
-
-This module is pure, deterministic graph construction - no LLM calls,
-no network access. It directly reuses ParsedFunction.calls from
-rag/ast_parser.py , so the call-detection limitation documented
-there (plain identifiers only, not attribute calls) also applies here:
-the graph will under-count edges involving method calls.
-
-Node ids are "file_path::qualified_name" (e.g. "auth/service.py::
-AuthService.login"), the same ids db/chroma.py uses, so a search hit's
-chunk_id can be looked up directly in the graph. Call resolution is
-still by BARE name, because a call site only knows `login(...)`, not
-which class it belongs to.
-"""
-
 import pickle
 import networkx as nx
 from rag.ast_parser import ParsedFunction

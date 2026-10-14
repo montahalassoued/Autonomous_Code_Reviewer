@@ -1,18 +1,3 @@
-"""
-Integration test for tools/github_tools.py
-
-Makes REAL calls to the GitHub API against a small, stable, public
-pull request, to check get_pr_diff() returns real diff content.
-post_review_comment() is NOT exercised here since it's a real,
-irreversible write against a public repo - it's covered by manual
-verification against a disposable test PR instead.
-
-Requires GITHUB_TOKEN in the environment (a public token with no
-special scopes is enough to read a public PR's diff). Skips cleanly if
-not set, rather than failing the whole suite in environments where
-it's not configured.
-"""
-
 import os
 import pytest
 from dotenv import load_dotenv

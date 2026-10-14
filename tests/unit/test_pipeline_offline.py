@@ -1,36 +1,3 @@
-"""
-Offline end-to-end test for the review pipeline (review/graph.py).
-
-Runs the REAL compiled LangGraph - retriever (decompose -> hybrid
-search -> graph expansion -> rerank -> judge), the 3 review agents,
-join_agents and the synthesizer - over a tiny in-memory index, and
-checks the things that broke in production: the graph terminates
-(including for a clean PR), the retry loop is bounded, agent prompts
-contain real code for search hits AND graph neighbours, retrieved
-chunks are unique, and a None LLM response doesn't crash anything.
-
-What is real: tree-sitter parsing, the knowledge graph, an ephemeral
-ChromaDB collection, BM25 + RRF fusion, graph enrichment, reranker
-ordering, the routing, every agent's prompt building and parsing, and
-the synthesizer.
-
-What is faked (no network, no API keys):
-- Groq: every _build_groq_client / _build_client returns a FakeLLM
-  that returns canned content per role and RECORDS each prompt.
-- Voyage: rag.hybrid_search.embed_query is a deterministic hashed
-  bag-of-words vector, the same function used to embed the chunks.
-- Gemini: ContextualChunks are built directly with fixed sentences.
-- The cross-encoder: rag.reranker._get_model returns a fake whose
-  predict() scores (query, document) pairs by token overlap.
-
-review.retriever.hybrid_search is wrapped to search with top_k=1
-(still the real hybrid_search). With 7 functions in the index, the
-default top_k=10 would return every function as a direct hit, and no
-chunk would ever arrive through graph expansion - the path we need to
-test. With top_k=1 the single hit is BM25's best match
-(verify_password), and AuthService.login arrives only as its caller.
-"""
-
 import math
 import re
 import uuid

@@ -1,20 +1,3 @@
-"""
-contextual_chunker.py - enriches each parsed function with LLM-generated
-context before it gets embedded.
-
-This implements Anthropic's "Contextual Retrieval" technique: a bare code
-chunk (just the function body) often loses meaning when isolated from its
-file and surrounding codebase - two functions named `get()` in different
-classes can look nearly identical to a vector embedding. By prepending a
-short, LLM-generated description of what the function does and where it
-lives, the resulting embedding captures MEANING, not just syntax.
-
-Why Gemini Flash specifically: this step runs once per function in the
-ENTIRE repo during ingestion - potentially hundreds of calls in one run.
-We want a fast, free, "good enough" model here, keeping the more
-expensive/precious Groq calls for the actual agent analysis later.
-"""
-
 import os
 from dataclasses import dataclass
 from google import genai

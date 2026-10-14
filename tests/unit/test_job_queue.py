@@ -1,11 +1,3 @@
-"""
-Unit test for app/jobs/queue.py and app/jobs/models.py
-
-No Azure and no network: InMemoryJobQueue runs with an injected fake clock
-so lease expiry is tested without sleeping. AzureStorageJobQueue is tested
-with fake QueueClients that mimic the few SDK methods it calls.
-"""
-
 from types import SimpleNamespace
 
 from app.jobs.models import ReviewJob

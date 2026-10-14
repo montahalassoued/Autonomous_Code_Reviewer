@@ -1,14 +1,3 @@
-"""
-ReviewState - the central shared state of the LangGraph.
-
-This module defines the data structure that flows through ALL agents:
-retriever, the 3 review agents (security, logic, quality), synthesizer.
-
-Principle: each agent reads what it needs from this state, does its work,
-writes its result back into it, and hands off to the next agent (or runs
-in parallel for the review agents).
-"""
-
 from typing import TypedDict, Annotated, Literal
 import operator
 

@@ -1,25 +1,3 @@
-"""
-webhook.py - GitHub webhook route handler.
-
-Inputs: GitHub webhook HTTP requests (pull_request event, "opened" or
-"synchronize" action), including the raw request body, the
-X-Hub-Signature-256 header GitHub signs every payload with, and the
-X-GitHub-Delivery header (a unique id per delivery).
-Outputs: 202 {"status": "queued"} after the review job is stored in the
-durable queue; 200 {"status": "duplicate"} if that commit was already
-queued; 503 if the queue is unavailable so the delivery shows as failed
-in GitHub and can be redelivered.
-
-The handler never runs a review and never needs the compiled graph or
-the repo index: app/worker.py does that. The queue and dedupe store live
-on `request.app.state` (set in app/main.py, replaced in tests).
-
-Why dedupe by (repo, head sha, PR): GitHub delivers at least once and
-users can redeliver by hand. The same commit must not be reviewed twice.
-The claim is made BEFORE enqueueing and released if enqueueing fails,
-so a failed enqueue never blocks the redelivery.
-"""
-
 import hashlib
 import hmac
 import logging

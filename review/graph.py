@@ -1,32 +1,3 @@
-"""
-graph.py - the orchestrator of the review: builds and compiles the LangGraph StateGraph.
-
-This module defines the TOPOLOGY of the review pipeline: which nodes
-exist, how they connect, and the routing logic that decides what runs
-next. Every node below is the real implementation (the 3 Groq-backed
-review agents, the full RAG retriever, and the markdown synthesizer) - this
-file only wires them together and owns the graph's shape: sequencing,
-parallel fan-out, and conditional routing.
-
-Flow:
-    START -> retriever --(score < QUALITY_THRESHOLD and
-                          attempts < MAX_RETRIEVAL_ATTEMPTS)--> retriever
-                       --(otherwise)--> security | logic | quality (parallel)
-          -> join_agents -> synthesizer -> END
-
-Why there is no supervisor node: an earlier version routed through a
-no-op supervisor after the agents and sent the graph back to the
-agents whenever there were no findings, so a clean PR looped until
-the recursion limit and never got a review. Every path here moves
-forward, so the graph always terminates and always reaches the
-synthesizer.
-
-The retriever node needs objects that don't belong in ReviewState
-(the Chroma collection, the corpus text used by BM25, and the
-knowledge graph) - see build_graph()'s parameters for how those get
-bound in via closure.
-"""
-
 from langgraph.graph import StateGraph, START, END
 from review.state import ReviewState
 from review.retriever import (

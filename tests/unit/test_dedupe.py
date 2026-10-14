@@ -1,12 +1,3 @@
-"""
-Unit test for app/jobs/dedupe.py
-
-No Azure and no network: the in-memory store is tested directly, and the
-Azure Table store is tested with a fake TableClient that raises the real
-azure.core ResourceExistsError / ResourceNotFoundError (azure-core is
-installed with azure-data-tables; the tests skip if it is missing).
-"""
-
 import pytest
 
 from app.jobs.dedupe import AzureTableDedupeStore, InMemoryDedupeStore, encode_table_key, table_keys

@@ -1,20 +1,3 @@
-"""
-worker.py - the review worker: pulls jobs from the queue and runs the review pipeline.
-
-Run with: python -m app.worker
-
-Inputs (environment): everything app/bootstrap.py and app/jobs/factory.py read,
-plus REVIEW_VISIBILITY_TIMEOUT_S (default 900) and MAX_ATTEMPTS (default 3).
-Outputs: one upserted summary comment per reviewed PR; failed jobs end in the
-poison queue after MAX_ATTEMPTS tries.
-
-Why a separate process: reviews take minutes and many LLM calls. Running them
-in the API (FastAPI BackgroundTasks) lost them on every restart. Here a job is
-deleted only after it succeeded; a crash lets the message reappear after the
-visibility timeout. Posting is an upsert, so a retry edits the comment
-instead of duplicating it.
-"""
-
 import logging
 import os
 import signal

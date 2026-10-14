@@ -1,30 +1,3 @@
-"""
-agent_runner.py - the executor shared by the three review agents
-(security_agent.py, logic_agent.py and quality_agent.py, in this
-folder). It runs ONE agent at a time and knows nothing about the others:
-the order and parallelism are decided by review/graph.py, the orchestrator.
-
-Inputs: an AgentSpec (the agent's category and prompt template), the
-current ReviewState (pr_diff + retrieved_context) and a Groq client.
-Outputs: a list of validated Finding objects tagged with the agent's
-name, which review/synthesizer.py groups by category.
-
-Why one shared runner: the old five agents each copied the same ~150
-lines (client, context formatting, JSON parsing, validation). A fix in
-one copy never reached the others. Now an agent is just a prompt plus a
-name, and the robustness rules live in one place:
-  - the LLM output is parsed defensively and never crashes the review:
-    a malformed response degrades to zero findings from that agent;
-  - every finding is validated (known severity, integer line, non-empty
-    text) and invalid entries are dropped and logged, so the synthesizer
-    never renders a half-empty finding.
-
-The model is read from REVIEW_AGENT_MODEL so it can change without a
-code change - Groq retires models (llama-3.3-70b-versatile was retired
-while production still used it). The default is provisional until
-eval/llm_benchmark.py has compared the candidates on the 3 agents.
-"""
-
 import json
 import logging
 import os

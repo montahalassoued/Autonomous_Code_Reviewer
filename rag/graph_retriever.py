@@ -1,24 +1,3 @@
-"""
-graph_retriever.py - enriches hybrid search results with graph context.
-
-This connects the two RAG pillars built so far: hybrid_search.py (Step
-7, content-based relevance) and knowledge_graph.py (Step 5, structural
-relationships). Hybrid search alone can miss functions that are
-structurally important but didn't score well on content/semantic
-similarity - e.g. login() might rank low for a query specifically
-about password hashing, even though it's the function that actually
-CALLS verify_password() and therefore matters for understanding the
-real-world impact of a change to it.
-
-We deliberately limit traversal to 1 hop (direct callers + direct
-callees only), not a deeper multi-hop walk. Two reasons: (1) it's
-enough to capture the immediately useful architectural context without
-exploding to "friend of a friend of a friend", and (2) this output
-eventually becomes part of an LLM prompt (the agents in Step 11+) -
-unbounded graph expansion would blow past any reasonable context
-window long before it added more useful signal than noise.
-"""
-
 from dataclasses import dataclass
 import networkx as nx
 from rag.knowledge_graph import get_callers, get_callees

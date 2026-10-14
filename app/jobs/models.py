@@ -1,13 +1,3 @@
-"""
-models.py - plain data objects that travel through the job pipeline.
-
-Inputs: values extracted from a GitHub pull_request webhook payload.
-Outputs: ReviewJob (the queue message body) and DedupeKey (the idempotency key).
-
-Why plain JSON: the queue message is human-readable in the Azure portal and
-survives code changes (unknown fields are rejected loudly, see from_json).
-"""
-
 import json
 import uuid
 from dataclasses import asdict, dataclass, field

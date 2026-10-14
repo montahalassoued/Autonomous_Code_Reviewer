@@ -1,12 +1,3 @@
-"""
-Integration test for review/agents/security_agent.py
-
-Makes a REAL call to Groq (REVIEW_AGENT_MODEL, see review/agents/agent_runner.py)
-against diffs that introduce a classic SQL injection (string-concatenated
-query) and a missing ownership check (IDOR), to check the agent actually
-detects security issues rather than just returning valid-but-empty output.
-"""
-
 from dotenv import load_dotenv
 load_dotenv()
 

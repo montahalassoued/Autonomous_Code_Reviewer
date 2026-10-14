@@ -1,11 +1,3 @@
-"""
-Unit test for app/worker.py and tools/github_tools.py (upsert_summary_comment)
-
-No Azure, GitHub, or LLM calls: the queue is InMemoryJobQueue with a fake
-clock, the review function is a stub, and PyGithub is a MagicMock. The
-real graph is covered by tests/unit/test_pipeline_offline.py.
-"""
-
 import threading
 from unittest.mock import MagicMock
 

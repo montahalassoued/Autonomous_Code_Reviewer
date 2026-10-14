@@ -1,22 +1,3 @@
-"""
-Manual test for rag/hybrid_search.py
-
-IMPORTANT: makes real Gemini + Voyage API calls.
-
-Bug fixed after hitting Gemini's 20 req/day quota: the original version
-called setup_collection() once per test function (2x total), so every
-run of this file burned 8 Gemini calls (4 functions x 2 ingestions)
-instead of 4. Rewritten to ingest ONCE and run both searches against
-the same populated collection.
-
-Goal: prove that BM25 and dense search genuinely contribute different
-signals, and that RRF fusion combines them sensibly, using two queries:
-1. An exact-keyword query - both functions containing the literal term
-   should outrank the two that don't.
-2. A semantic query - the two auth-related functions should outrank
-   the unrelated one, even with zero exact word overlap.
-"""
-
 from dotenv import load_dotenv
 load_dotenv()
 

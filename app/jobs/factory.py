@@ -1,19 +1,3 @@
-"""
-factory.py - builds the queue and dedupe store chosen by environment variables.
-
-Inputs (environment):
-  JOBS_BACKEND                    "memory" (default) or "azure".
-  AZURE_STORAGE_CONNECTION_STRING if set, used for auth (Azurite / local dev).
-  AZURE_STORAGE_ACCOUNT_NAME      otherwise, the account used with DefaultAzureCredential
-                                  (managed identity in Azure).
-  REVIEW_QUEUE_NAME               main queue name, default "review-jobs"; poison queue is "<name>-poison".
-  REVIEW_DEDUPE_TABLE             table name, default "reviewdedupe".
-Outputs: a JobQueue and a DedupeStore.
-
-Why lazy imports: the Azure SDKs are imported only inside the azure branches,
-so memory mode and the offline tests never need them configured.
-"""
-
 import os
 
 from app.jobs.dedupe import AzureTableDedupeStore, DedupeStore, InMemoryDedupeStore

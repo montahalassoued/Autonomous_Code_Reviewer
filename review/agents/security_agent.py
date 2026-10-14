@@ -1,27 +1,3 @@
-"""
-security_agent.py - the review agent that looks for security vulnerabilities
-in a PR diff.
-
-Inputs: ReviewState (pr_diff + retrieved_context).
-Outputs: a partial state update adding this agent's findings (agent =
-"security") to ReviewState.findings, merged with the logic and quality
-agents' findings by the operator.add reducer in review/state.py.
-
-Focus areas: OWASP Top 10 and CWE-classified vulnerabilities - SQL
-injection, XSS, command injection, insecure deserialization, hardcoded
-secrets, SSRF, path traversal, weak cryptography - plus an explicit
-authentication/authorization check on every endpoint the PR adds or
-modifies (missing authentication CWE-306, missing authorization CWE-862,
-IDOR CWE-639). That check gets its own prompt section because missing
-authorization on internal endpoints is one of the most common real
-findings in code review, and a one-line "broken access control" bullet
-was too vague for the model to apply consistently.
-
-The model call, JSON parsing and validation live in review/agents/agent_runner.py,
-shared with review/agents/logic_agent.py and review/agents/quality_agent.py. This file owns only
-what is security-specific: the prompt.
-"""
-
 from review.agents.agent_runner import (
     AgentSpec,
     FINDINGS_OUTPUT_INSTRUCTIONS,

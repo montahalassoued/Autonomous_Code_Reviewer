@@ -1,20 +1,3 @@
-"""
-query_decomposer.py - transforms a raw PR diff into targeted search
-queries for the retrieval pipeline.
-
-This is the missing piece connecting "a PR was opened" to "here's what
-to search for": a diff is raw code, not a search query. A single
-generic query built from the whole diff is often too vague - a diff
-touching authentication AND email AND database access needs queries
-covering each concern, not one blurry average of all three.
-
-Why Groq here, not Gemini (used in contextual_chunker.py): this runs
-ONCE PER REVIEW (a handful of times per PR), not once per function in
-an entire repo. Volume is low, so we use Groq - the model we reserve
-for actual reasoning tasks the agents depend on, as opposed to Gemini
-which we use for high-volume, low-stakes ingestion-time chunking.
-"""
-
 import os
 import json
 from groq import Groq

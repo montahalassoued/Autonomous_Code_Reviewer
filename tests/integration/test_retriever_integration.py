@@ -1,23 +1,3 @@
-"""
-Full end-to-end integration test for review/retriever.py
-
-IMPORTANT: this is the heaviest test in the project so far. It makes
-REAL calls to:
-  - Gemini (contextual_chunker.py)   - 4 calls, one per function
-  - Voyage AI (embedder.py)           - 1 batched call
-  - Groq (query_decomposer.py)        - 1 call
-  - Groq (retriever.py's LLM-judge)   - 1 call
-Plus local CPU inference via the cross-encoder reranker (no API call,
-but downloads the model on first run if not already cached from the
-reranker test).
-
-Goal: prove the ENTIRE pipeline works together - from raw source code
-all the way to a final, judged, RetrievedChunk list - using a diff
-that introduces a NEW function (reset_password) which legitimately
-relates to existing indexed functions, so the test can check that
-genuinely relevant context gets surfaced.
-"""
-
 from dotenv import load_dotenv
 load_dotenv()
 

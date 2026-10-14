@@ -1,24 +1,3 @@
-"""
-retriever.py - the LangGraph node that orchestrates the full RAG
-pipeline and implements the corrective retrieval loop.
-
-This is the piece that connects every RAG module built so far into one
-working agent:
-  query_decomposer.py  -> turns the diff into search queries
-  hybrid_search.py      -> finds candidates (BM25 + dense + RRF)
-  graph_retriever.py    -> enriches with direct callers/callees
-  reranker.py            -> precisely re-scores down to a final top-K
-
-On top of chaining these together, this module adds the one piece the
-RAG pipeline never had: an LLM-as-judge that scores whether the
-retrieved context is actually good enough, and triggers a retry with
-reformulated queries if not - bounded by ReviewState.retrieval_attempts
-to guarantee termination (review/graph.py's route_after_retriever
-implements the bounded-retry routing using QUALITY_THRESHOLD and
-MAX_RETRIEVAL_ATTEMPTS from this module; this module is what actually
-DOES the retrieval work that routing function inspects).
-"""
-
 import os
 import json
 from groq import Groq

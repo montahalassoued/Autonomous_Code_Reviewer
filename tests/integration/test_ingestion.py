@@ -1,16 +1,3 @@
-"""
-Integration test for rag/ingestion.py
-
-Makes REAL calls to Gemini (contextual_chunker.py) and Voyage AI
-(embedder.py), plus local ChromaDB storage and graph construction, to
-verify ingest_repository() walks a real directory tree end-to-end and
-returns everything review/graph.py's build_graph() needs.
-
-Writes a tiny throwaway 2-file "repo" to a temp directory (pytest's
-tmp_path fixture) so this test doesn't depend on any specific repo
-being present on disk.
-"""
-
 import os
 from dotenv import load_dotenv
 load_dotenv()

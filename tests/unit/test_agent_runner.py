@@ -1,14 +1,3 @@
-"""
-Unit test for review/agents/agent_runner.py
-
-Offline: the Groq client is a fake that returns canned content and
-records the request, so these tests check what the runner owns - JSON
-parsing of messy LLM output, finding validation, the model setting and
-the prompt it sends - without any API call. Real model behavior is
-covered by tests/integration/test_security_agent.py,
-test_logic_agent.py and test_quality_agent.py.
-"""
-
 import json
 from types import SimpleNamespace
 

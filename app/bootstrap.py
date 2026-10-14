@@ -1,16 +1,3 @@
-"""
-bootstrap.py - one-time startup work shared by the review worker.
-
-Inputs: TARGET_REPO_URL (remote Git URL to clone) or REPO_PATH (local checkout).
-Outputs: a compiled LangGraph bound to the ingested repo index.
-
-Why a shared module: resolving the repo and building the graph used to live in
-app/main.py. The API no longer ingests anything (it only enqueues), so this
-logic now has one owner and one place to change. Heavy imports (chromadb,
-tree-sitter, sentence-transformers) are inside the functions so importing
-this module is cheap.
-"""
-
 import os
 
 

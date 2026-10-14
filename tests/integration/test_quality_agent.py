@@ -1,12 +1,3 @@
-"""
-Integration test for review/agents/quality_agent.py
-
-Makes a REAL call to Groq (REVIEW_AGENT_MODEL, see review/agents/agent_runner.py)
-against a diff with an N+1 query, to check the agent actually detects
-quality issues (here, performance) rather than just returning
-valid-but-empty output. Uses Groq quota: run it by hand, not in CI.
-"""
-
 from dotenv import load_dotenv
 load_dotenv()
 

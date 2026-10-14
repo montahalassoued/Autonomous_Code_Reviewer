@@ -1,13 +1,3 @@
-"""
-Unit test for review/synthesizer.py
-
-No LLM calls needed - synthesizer_node is pure formatting logic over
-findings already present in state, so this test is fast and fully
-deterministic. It checks the layout the PR comment relies on: one
-section per category in a fixed order, severity order inside each
-section, a summary table, and empty categories still shown.
-"""
-
 from review.synthesizer import synthesizer_node
 
 

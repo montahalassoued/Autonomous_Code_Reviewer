@@ -1,16 +1,3 @@
-"""
-dedupe.py - "claim once" store so the same commit is never queued twice.
-
-Inputs: a DedupeKey (repo, head_sha, target) from the webhook.
-Outputs: claim() returns True for the first caller and False for every later one.
-
-Why: GitHub delivers at least once and users can redeliver by hand. The
-natural idempotency key of a review is (repo, PR, head sha). Azure Table
-Storage gives an atomic "insert if absent" (create_entity fails with a
-conflict if the row exists), so it works across API replicas with no lock.
-Azure Tables have no TTL, so old rows stay; they are tiny.
-"""
-
 import re
 import threading
 import time

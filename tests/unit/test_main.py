@@ -1,13 +1,3 @@
-"""
-Unit test for app/main.py
-
-No Azure, ingestion, or LLM calls: with JOBS_BACKEND=memory the lifespan
-startup only builds the in-memory queue and dedupe store. This test
-verifies main.py's own wiring (routes mounted, health is immediately ok,
-queue and dedupe are on app.state, nothing is ingested). The worker's
-startup work is covered by tests/unit/test_worker.py.
-"""
-
 import os
 
 # Force (not setdefault): other tests load the real .env, which could select Azure.

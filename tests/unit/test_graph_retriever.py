@@ -1,22 +1,3 @@
-"""
-Manual test for rag/graph_retriever.py
-
-This test does NOT call any LLM or embedding API - it builds the
-knowledge graph from Step 5 directly and constructs fake SearchResult
-objects to simulate what hybrid_search.py would have returned, so we
-can test the graph enrichment logic in complete isolation.
-
-Goal: verify that
-1. A search result for verify_password() gets login() pulled in as a
-   caller, even though login() was NOT in the original search results
-2. A search result for login() gets verify_password() and
-   create_session() pulled in as callees
-3. No duplicates appear when the same function would be reachable
-   from multiple original results
-4. Traversal stops at exactly 1 hop (we don't recursively expand the
-   newly-added nodes' own neighbors)
-"""
-
 from rag.ast_parser import parse_file
 from rag.knowledge_graph import build_knowledge_graph
 from rag.hybrid_search import SearchResult

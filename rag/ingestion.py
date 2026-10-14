@@ -1,21 +1,3 @@
-"""
-ingestion.py - runs the full ingestion pipeline over a repository:
-clone (if given a URL) -> parse -> contextualize -> embed -> store ->
-delete stale ids -> build graph.
-
-Inputs: either a local filesystem path to an existing repository
-checkout, or a remote Git URL to clone first (clone_repository()).
-Outputs: a populated Chroma collection, the parallel (all_documents,
-all_ids) lists hybrid_search.py's BM25 index needs, and the NetworkX
-knowledge graph - exactly the four values review/graph.py's
-build_graph() needs to wire up the real retriever node.
-
-This is the one-time (or per-deploy-startup) batch job that makes the
-rest of the RAG pipeline possible: review/retriever.py assumes a
-Chroma collection is already populated and a graph is already built -
-this module is what populates them.
-"""
-
 import os
 import git
 from rag.ast_parser import parse_file, ParsedFunction

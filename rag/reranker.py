@@ -1,37 +1,3 @@
-"""
-reranker.py - precisely re-scores enriched results down to a final
-top-K context using a local cross-encoder.
-
-Why this step exists even though we already have RRF-fused hybrid
-search scores: a cross-encoder evaluates the query and a candidate
-document TOGETHER, in a single forward pass, rather than encoding
-them separately and comparing vectors (what both BM25 and dense
-search do). This lets it catch nuanced relevance signals - like a
-function that mentions the right keywords but in an unrelated role -
-that bi-encoder-style scoring can miss. It is also too slow to run
-over an entire codebase, which is exactly why it only runs here, on
-the small (~15-20) candidate set already narrowed down by
-hybrid_search.py + graph_retriever.py.
-
-Why local (BAAI/bge-reranker-v2-m3 via sentence-transformers) instead
-of an API: zero cost, zero rate limits, zero API key to manage - a
-deliberate choice given the quota issues hit with Gemini and Voyage
-during earlier steps. The trade-off is a one-time model download
-(~few hundred MB) and CPU-only inference, which is slow per-query but
-entirely acceptable for reranking 15-20 candidates rather than
-scanning a full corpus.
-
-What gets scored: the query against the chunk's context sentence plus
-its code (truncated to MAX_RERANK_CODE_CHARS). Scoring only the
-"file::name" label would leave the cross-encoder nothing to judge
-relevance on, which defeats the point of reranking.
-
-The output is the top_k chunks sorted by score, with no duplicates.
-An earlier version repeated the best chunk at the end (to exploit LLM
-primacy/recency bias), but that put the same code into every agent
-prompt twice for little benefit with only 5 chunks.
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from rag.graph_retriever import EnrichedResult

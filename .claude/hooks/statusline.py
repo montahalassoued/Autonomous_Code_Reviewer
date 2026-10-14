@@ -1,10 +1,3 @@
-"""Claude Code status line: model, context usage, git branch.
-
-File purpose: render a one-line status line; warn in red/bold at >= 40% context.
-Inputs: status line JSON on stdin (model.display_name, context_window.used_percentage,
-    or total_input_tokens / context_window_size as fallback, workspace.current_dir).
-Outputs: a single line on stdout. Never raises; prints a fallback line on error.
-"""
 import json
 import os
 import sys
