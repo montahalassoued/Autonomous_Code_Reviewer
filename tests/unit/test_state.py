@@ -38,9 +38,9 @@ def test_operator_add_merge_findings():
             "evidence": "...", "suggestion": "...",
         }
     ]
-    performance_findings: list[Finding] = [
+    quality_findings: list[Finding] = [
         {
-            "agent": "performance", "severity": "MEDIUM", "file_path": "auth/login.py",
+            "agent": "quality", "severity": "MEDIUM", "file_path": "auth/login.py",
             "line_number": 10, "title": "N+1 query", "description": "...",
             "evidence": "...", "suggestion": "...",
         }
@@ -48,11 +48,11 @@ def test_operator_add_merge_findings():
 
     # This is exactly LangGraph's internal mechanism for a field
     # typed as Annotated[list[Finding], operator.add]
-    merged = operator.add(security_findings, performance_findings)
+    merged = operator.add(security_findings, quality_findings)
 
     assert len(merged) == 2, "Both findings must survive, not overwrite each other"
     assert merged[0]["agent"] == "security"
-    assert merged[1]["agent"] == "performance"
+    assert merged[1]["agent"] == "quality"
     print(f"OK - operator.add merges correctly: {len(merged)} findings kept")
 
 

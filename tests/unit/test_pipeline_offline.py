@@ -2,7 +2,7 @@
 Offline end-to-end test for the review pipeline (agents/graph.py).
 
 Runs the REAL compiled LangGraph - retriever (decompose -> hybrid
-search -> graph expansion -> rerank -> judge), the 5 domain agents,
+search -> graph expansion -> rerank -> judge), the 3 review agents,
 join_agents and the synthesizer - over a tiny in-memory index, and
 checks the things that broke in production: the graph terminates
 (including for a clean PR), the retry loop is bounded, agent prompts
@@ -300,7 +300,7 @@ def test_pr_with_findings_reaches_the_synthesizer(monkeypatch):
         assert roles.count(agent) == 1, f"{agent} should run exactly once"
     assert len(final_state["findings"]) == len(DOMAIN_AGENTS), "one finding per agent, merged"
     assert "Empty hash accepted" in final_state["final_review_markdown"]
-    print("OK - findings from all 5 agents merged and rendered once")
+    print("OK - findings from all review agents merged and rendered once")
 
 
 def test_low_judge_score_stops_after_max_attempts(monkeypatch):

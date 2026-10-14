@@ -1,0 +1,78 @@
+"""
+logic.py - the review agent that looks for correctness bugs in a PR diff:
+code that runs but does the wrong thing.
+
+Inputs: ReviewState (pr_diff + retrieved_context).
+Outputs: a partial state update adding this agent's findings (agent =
+"logic") to ReviewState.findings, merged with the security and quality
+agents' findings by the operator.add reducer in agents/state.py.
+
+Focus areas: wrong conditions and off-by-one errors, unhandled None and
+empty inputs, broken error handling, callers that break when a signature
+or return value changes, wrong API usage, async and concurrency mistakes.
+The retrieved context matters most for this agent: a changed function is
+often correct on its own and wrong only for the callers that rely on its
+old behavior.
+
+The model call, JSON parsing and validation live in agents/agent_runner.py,
+shared with agents/security.py and agents/quality.py. This file owns only
+what is logic-specific: the prompt.
+"""
+
+from agents.agent_runner import (
+    AgentSpec,
+    FINDINGS_OUTPUT_INSTRUCTIONS,
+    build_groq_client as _build_groq_client,
+    run_agent,
+)
+from agents.state import ReviewState
+
+
+LOGIC_PROMPT_TEMPLATE = """You are a senior software engineer reviewing a pull request diff for
+correctness.
+
+Look for logic bugs ONLY - code that runs but produces the wrong result
+or fails on inputs it should handle, such as:
+- Wrong or inverted conditions, wrong comparison operators, off-by-one
+  errors in ranges, slices and loop bounds
+- Missing handling of None, empty collections, zero, negative numbers
+  or other edge cases the code will receive
+- Error handling that hides failures: swallowed exceptions, a wrong
+  fallback value, an error path that leaves state half-updated
+- Wrong return values or types, a missing return, a mutated argument
+  or a mutable default argument the caller doesn't expect
+- Changed contracts: a new signature, return value or raised exception
+  that existing callers in the context don't handle
+- Wrong use of a library or API (wrong argument order, units, time
+  zones, integer vs float division)
+- Async and concurrency mistakes: a missing await, shared state
+  modified without a lock, check-then-act races
+
+Only report a bug you can point to in the diff, and explain the input
+or scenario that triggers it. Do NOT report security vulnerabilities or
+style and maintainability issues: other reviewers cover them.
+
+Diff:
+{diff}
+
+Related existing code context (may be empty):
+{context_summary}
+
+""" + FINDINGS_OUTPUT_INSTRUCTIONS
+
+LOGIC_AGENT = AgentSpec(name="logic", prompt_template=LOGIC_PROMPT_TEMPLATE)
+
+
+def logic_node(state: ReviewState) -> dict:
+    """
+    The LangGraph node for the "logic" agent (see agents/graph.py).
+
+    Args:
+        state: the current ReviewState, reads pr_diff and retrieved_context
+
+    Returns:
+        {"findings": [...]}: this agent's validated findings
+    """
+    # _build_groq_client is looked up at call time, so tests can
+    # monkeypatch agents.logic._build_groq_client with a fake.
+    return run_agent(LOGIC_AGENT, state, _build_groq_client())

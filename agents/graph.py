@@ -3,15 +3,15 @@ graph.py - builds and compiles the LangGraph StateGraph.
 
 This module defines the TOPOLOGY of the review pipeline: which nodes
 exist, how they connect, and the routing logic that decides what runs
-next. Every node below is the real implementation (Groq-backed domain
-agents, the full RAG retriever, and the markdown synthesizer) - this
+next. Every node below is the real implementation (the 3 Groq-backed
+review agents, the full RAG retriever, and the markdown synthesizer) - this
 file only wires them together and owns the graph's shape: sequencing,
 parallel fan-out, and conditional routing.
 
 Flow:
     START -> retriever --(score < QUALITY_THRESHOLD and
                           attempts < MAX_RETRIEVAL_ATTEMPTS)--> retriever
-                       --(otherwise)--> 5 domain agents in parallel
+                       --(otherwise)--> security | logic | quality (parallel)
           -> join_agents -> synthesizer -> END
 
 Why there is no supervisor node: an earlier version routed through a
@@ -35,19 +35,19 @@ from agents.retriever import (
     MAX_RETRIEVAL_ATTEMPTS,
 )
 from agents.security import security_node
-from agents.performance import performance_node
-from agents.architecture import architecture_node
-from agents.testing import testing_node
-from agents.documentation import documentation_node
+from agents.logic import logic_node
+from agents.quality import quality_node
 from agents.synthesizer import synthesizer_node
 
 
-DOMAIN_AGENTS = ["security", "performance", "architecture", "testing", "documentation"]
+# The review categories: each is a node name, an agent module and the
+# `agent` field of its findings. agents/synthesizer.py renders them in this order.
+DOMAIN_AGENTS = ["security", "logic", "quality"]
 
 
 def join_agents_node(state: ReviewState) -> dict:
     """
-    Barrier node - LangGraph waits for ALL 5 parallel agents to finish
+    Barrier node - LangGraph waits for ALL parallel agents to finish
     before running this node, because it is the single common downstream
     target they all converge on via plain (non-conditional) edges.
 
@@ -121,16 +121,14 @@ def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_
     # Register every node
     graph.add_node("retriever", retriever_node)
     graph.add_node("security", security_node)
-    graph.add_node("performance", performance_node)
-    graph.add_node("architecture", architecture_node)
-    graph.add_node("testing", testing_node)
-    graph.add_node("documentation", documentation_node)
+    graph.add_node("logic", logic_node)
+    graph.add_node("quality", quality_node)
     graph.add_node("join_agents", join_agents_node)
     graph.add_node("synthesizer", synthesizer_node)
 
     graph.add_edge(START, "retriever")
 
-    # retriever decides: retry itself, or fan out to all 5 agents.
+    # retriever decides: retry itself, or fan out to all review agents.
     # route_after_retriever returns real node names (a list for the
     # parallel fan-out), so no mapping dict is passed.
     graph.add_conditional_edges("retriever", route_after_retriever)
