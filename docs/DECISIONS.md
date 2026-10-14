@@ -4,25 +4,40 @@ Every significant design choice, and why it was made. Add new entries with the `
 
 ## At a glance
 
-- Groq over OpenAI: free tier, no credit card, LLaMA 3.3 70B matches GPT-4o quality for code
-- voyage-code-2 over text-embedding-3-small: code-specific training, better function/symbol retrieval
-- Contextual chunking: Anthropic research shows -67% retrieval failures vs naive chunking
-- AST Knowledge Graph over vector-only: solves multi-hop architectural reasoning failures
-- Hybrid search BM25+dense: exact symbol matching (BM25) + semantic intent (dense) combined
-- RRF fusion: better than weighted sum for merging different retrieval signals
-- BAAI/bge-reranker-v2-m3: CPU-only, no API cost, strong cross-encoder quality for code
-- Corrective RAG loop: guarantees every review has sufficient context before agents run
-- NetworkX over Neo4j: zero infrastructure cost, in-memory, sufficient for single repo graphs
-- ChromaDB dev / Qdrant prod: zero setup locally, horizontal scaling in production
+**Current:**
+
+- Groq over OpenAI: free tier, no credit card. The model is picked with `eval/llm_benchmark.py` (LLaMA 3.3 70B was retired by Groq)
 - Langfuse over LangSmith: open source, self-hostable, tracing + evals + prompt versioning, no per-trace cost
-- Railway over DigitalOcean: GitHub login only, no credit card, Docker-native
+- Azure Container Apps webhook server over a GitHub Action: warm worker, multi-repo later, deployment skills
+- Durable queue + separate worker over BackgroundTasks: no lost events, retries, poison queue
+- Postgres code index over Chroma + NetworkX pickle: one store for symbols, edges, reviews and findings, incremental updates
+- Structural context over semantic retrieval: review relevance comes from calls, tests and module code, not similarity
+- Bounded context subagent returning ids over free-form summaries: exact code, capped cost, safe fallback
+- Index mirrors `main` only, PR code is an in-memory overlay: no cleanup, no cross-PR leakage
+- Review before index update: the review sees the true "before", a failed review never corrupts the index
+- Push coalescing over one review per push: fewer LLM calls, one review of the whole range
+- `reviews` table over Azure Table dedupe: dedupe, status and metrics in one row (supersedes the Table claim)
+- BAAI/bge-reranker-v2-m3: CPU-only, no API cost (legacy path; kept only while the legacy mode exists)
+
+**Superseded by the structural-context design (kept for history):**
+
+- voyage-code-2 embeddings, contextual chunking, hybrid BM25+dense with RRF, corrective RAG loop: semantic retrieval is now optional "similar code" only
+- NetworkX over Neo4j, ChromaDB dev / Qdrant prod: replaced by the Postgres index (`edges` table)
+- Railway over DigitalOcean: replaced by Azure Container Apps
+
+**Open decisions resolved (2026-10-14, see `docs/IMPLEMENTATION_PLAN.md`):**
+
+- D1: embeddings kept only for optional "similar code" (option B)
+- D2: on new commits, post only new findings, matched by fingerprint (option a)
+- D3: dedupe key is (repo, target, head_sha), the `reviews` unique constraint
+- D4: custom deterministic metrics only, no RAGAS
 
 ---
 
 ## Why LangGraph over plain sequential Python functions
 
 Explicit state management, conditional routing, true parallel fan-out
-(asyncio under the hood), and built-in tracing via LangSmith. A plain
+(asyncio under the hood), and tracing hooks (Langfuse, see below). A plain
 function chain would execute the 5 domain agents sequentially (total
 time = sum of all 5), while LangGraph runs them concurrently (total
 time = the slowest of the 5).
@@ -160,3 +175,84 @@ timeout can run twice (the upsert makes the result the same); a slow or stale re
 of an old commit can still overwrite a newer one (stale-SHA check not done yet).
 Local dev and offline tests use in-memory backends (JOBS_BACKEND=memory).
 Validated in tests/unit/test_webhook.py, tests/unit/test_worker.py, tests/unit/test_job_queue.py, tests/unit/test_dedupe.py.
+
+## Why Postgres as code index over Chroma + NetworkX
+
+The index was a Chroma collection plus a pickled NetworkX graph, rebuilt in
+memory at every worker start with one Gemini call per function, and with no
+place for review history. The target is one Postgres database: `repos`,
+`files`, `symbols`, `edges` (the call/import/inherit/tested_by graph),
+`unresolved_calls`, optional `symbol_embeddings` (pgvector), `reviews` and
+`findings` (schema in `docs/ARCHITECTURE.md`). It is a derived map of `main`;
+git stays the source of truth and raw Python files are never stored.
+Alternatives: keep Chroma + pickle (no transactions, no incremental deletes,
+the graph lives in one process), Neo4j (a second database to run for one-hop
+queries that SQL does fine), Qdrant (vectors only). Trade-off: a managed
+Postgres to pay for and operate, and graph traversals become SQL joins
+(NetworkX is still loaded ad hoc if an algorithm needs it). Hosting is not
+decided yet.
+
+## Why structural context over semantic retrieval
+
+A review needs what the change affects: callers (especially of a changed
+signature or a deleted function), callees, tests, and module-level code such
+as router dependencies. Those are structural facts. Similarity search found
+code that *looks like* the diff, ran 2-6 LLM calls per review (decomposer +
+judge loop), and never indexed module-level code, so the security agent could
+not see whether an endpoint was protected. Context is now built
+deterministically from the index with a priority order and a ~12k token
+budget, each block tagged with the reason it was included. Alternatives: keep
+hybrid search as the core and add graph hops (still similarity-ranked), or
+send whole files (blows the budget, dilutes attention). Trade-off: code linked
+only by dynamic dispatch or strings is missed; it is listed under "Not
+verifiable" and can be recovered by the context subagent or by grep. Legacy
+retrieval is deleted only after the eval shows structural >= legacy.
+
+## Why a bounded context subagent returning ids, not summaries
+
+Rules can't close every gap (unresolved calls, a deleted public symbol, a
+change across several modules). An agent with tools can, but a free-form
+agent is unbounded in cost and its paraphrased code can be wrong or
+injected. The subagent runs only when such gaps exist, once for all 3 review
+agents, with read-only tools over Postgres and at most 6 tool calls. It
+returns `{selected: [{id, reason}], gaps: [...]}`; the deterministic builder
+fetches the exact code by id. Invalid output is ignored. Alternatives: no
+agent (gaps stay open), one agent per reviewer (3x the calls), letting it
+write summaries (unverifiable). Trade-off: one or two extra LLM calls on
+complex changes, and it lands only after the structural-vs-legacy eval.
+
+## Why the index mirrors main only, with PR code as an in-memory overlay
+
+If PR code were written to the index, every open PR would need its own
+version of the data, cleanup on close, and a guarantee that one PR's code
+never leaks into another's review. The index holds `main` at `indexed_sha`
+only. For a review, the new code is parsed from git and its edges are
+computed on the fly in an in-memory overlay that is thrown away afterwards.
+Alternatives: per-PR namespaces in the index (storage and cleanup), or a full
+re-index per review (slow, costly). Trade-off: overlay edges are recomputed
+every review (cheap: only the changed files). See the open point on the PR
+"before" side in `docs/ARCHITECTURE.md`.
+
+## Why review before index update
+
+On a push to `main`, the review needs the old code as its "before" side and
+the old callers as context. Updating the index first would erase that.
+The worker reviews, posts, then applies the symbol diff in one transaction
+and sets `indexed_sha = after`. Before each push it checks
+`indexed_sha == before` and resyncs if not, so a failed or skipped update is
+repaired by the next push. Alternatives: update first and keep a copy of the
+old rows (more storage and code), or update in parallel (race on the same
+rows). Trade-off: the index lags `main` by one review; a PR reviewed during
+that window sees slightly older context.
+
+## Why push coalescing
+
+Several pushes within seconds (fixup commits, a rebase) would each trigger a
+full review, costing LLM calls and posting comments on commits that are
+already outdated. Jobs are enqueued with a ~60 s visibility delay, and the
+latest push reviews the whole range. Alternatives: review every push (cost,
+noise), or debounce in the API process (lost on restart, not shared across
+replicas). Trade-off: every review starts at least ~60 s after the push. How
+the worker detects and skips a superseded job is still to be designed
+(open point in `docs/ARCHITECTURE.md`); the Storage Queue cannot replace a
+queued message, so it will rely on the `reviews` table.
