@@ -1,37 +1,57 @@
 # File purpose: Local multi-service orchestration for the durable review pipeline.
 # Inputs: Environment variables from .env and the container image built from this repository.
-# Outputs: Three containers on one network:
-#   azurite - local emulator of Azure Storage (queue + table), data kept in a named volume
-#   api     - FastAPI webhook receiver (verify, dedupe, enqueue, 202); no indexing
-#   worker  - python -m app.worker; builds the index once and consumes the queue
-# The api and worker share one image and talk only through Azurite.
+# Outputs: Four containers on one network:
+#   azurite  - local emulator of Azure Storage (review queue), data kept in a named volume
+#   postgres - code index and review history (reviews table = webhook dedupe)
+#   api      - FastAPI webhook receiver (verify, dedupe, enqueue, 202); no indexing
+#   worker   - python -m app.worker; builds the index once and consumes the queue
+# The api and worker share one image and talk through Azurite and Postgres.
 
 x-jobs-env: &jobs-env
   JOBS_BACKEND: azure
+  DEDUPE_BACKEND: postgres
+  # Local-only credentials of the postgres service below, not a secret.
+  DATABASE_URL: postgresql://reviewer:reviewer@postgres:5432/reviewer
   # Azurite's standard dev account. The account name and key below are the
   # well-known PUBLIC defaults documented by Microsoft, not a secret. They only
   # work against the local emulator.
   # Kept on one line on purpose: YAML folding would insert spaces.
-  AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;"
+  AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://azurite:10001/devstoreaccount1;"
 
 services:
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:3.33.0
-    # Queue (10001) and table (10002) are used by the app; blob (10000) also
-    # starts but is unused. Hosts must be 0.0.0.0 so other containers can reach
-    # it (default is loopback). --loose ignores unsupported request headers;
-    # --skipApiVersionCheck lets SDKs newer than this Azurite build connect.
+    # Only the queue service (10001) is used. Hosts must be 0.0.0.0 so other
+    # containers can reach it (default is loopback). --loose ignores unsupported
+    # request headers; --skipApiVersionCheck lets newer SDKs connect.
     command: >-
-      azurite --location /data
-      --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+      azurite-queue --location /data --queueHost 0.0.0.0
       --loose --skipApiVersionCheck
     ports:
       - "10001:10001"
-      - "10002:10002"
     volumes:
       - azurite_data:/data
     healthcheck:
       test: ["CMD", "node", "-e", "require('net').connect(10001,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  postgres:
+    # pgvector build of Postgres 16, so "similar code" embeddings can be enabled later.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: reviewer
+      POSTGRES_PASSWORD: reviewer
+      POSTGRES_DB: reviewer
+    # Published so tests and psql on your machine can reach it at localhost:5432.
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reviewer -d reviewer"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -47,6 +67,8 @@ services:
       <<: *jobs-env
     depends_on:
       azurite:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
@@ -72,5 +94,6 @@ services:
 
 volumes:
   azurite_data:
+  postgres_data:
   chroma_data:
   target_repo:

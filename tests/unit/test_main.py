@@ -2,6 +2,7 @@ import os
 
 # Force (not setdefault): other tests load the real .env, which could select Azure.
 os.environ["JOBS_BACKEND"] = "memory"
+os.environ["DEDUPE_BACKEND"] = "memory"
 os.environ["GITHUB_WEBHOOK_SECRET"] = "test-secret"
 
 from fastapi.testclient import TestClient

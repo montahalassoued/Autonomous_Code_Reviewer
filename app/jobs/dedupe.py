@@ -1,7 +1,5 @@
-import re
 import threading
 import time
-from datetime import datetime, timezone
 from typing import Callable, Optional, Protocol
 
 from app.jobs.models import DedupeKey
@@ -10,12 +8,16 @@ from app.jobs.models import DedupeKey
 # What the webhook needs from a dedupe store.
 class DedupeStore(Protocol):
 
-    # Atomically records the key.
+    # Atomically records the key; False if it was already recorded.
     def claim(self, key: DedupeKey) -> bool:
         ...
 
     # Forgets the key so a redelivery can claim it again.
     def release(self, key: DedupeKey) -> None:
+        ...
+
+    # Frees connections on shutdown.
+    def close(self) -> None:
         ...
 
 
@@ -38,55 +40,54 @@ class InMemoryDedupeStore:
             self._claimed_at[key] = now
             return True
 
-    # Removes the claim if present.
     def release(self, key: DedupeKey) -> None:
         with self._lock:
             self._claimed_at.pop(key, None)
 
-
-_UNSAFE_KEY_CHARS = re.compile(r"[^A-Za-z0-9.\-]")
-
-
-# Makes a string safe for an Azure Table PartitionKey/RowKey.
-def encode_table_key(value: str) -> str:
-    return _UNSAFE_KEY_CHARS.sub(lambda match: f"_{ord(match.group()):02x}", value)
+    def close(self) -> None:
+        pass  # nothing to free
 
 
-# Maps a DedupeKey to (PartitionKey, RowKey).
-def table_keys(key: DedupeKey) -> tuple[str, str]:
-    partition_key = encode_table_key(key.repo_full_name)
-    row_key = f"{encode_table_key(key.head_sha)}~{encode_table_key(key.target)}"
-    return partition_key, row_key
+# DO UPDATE (a no-op) instead of DO NOTHING, so RETURNING gives the id of an existing repo too.
+UPSERT_REPO_SQL = """
+INSERT INTO repos (full_name) VALUES (%s)
+ON CONFLICT (full_name) DO UPDATE SET full_name = EXCLUDED.full_name
+RETURNING id
+"""
+
+INSERT_REVIEW_SQL = """
+INSERT INTO reviews (repo_id, target, head_sha) VALUES (%s, %s, %s)
+ON CONFLICT (repo_id, target, head_sha) DO NOTHING
+RETURNING id
+"""
+
+# Only a still-queued review is forgotten: a running or finished one keeps its row.
+DELETE_QUEUED_REVIEW_SQL = """
+DELETE FROM reviews USING repos
+WHERE reviews.repo_id = repos.id
+  AND repos.full_name = %s
+  AND reviews.target = %s
+  AND reviews.head_sha = %s
+  AND reviews.status = 'queued'
+"""
 
 
-# Azure Table Storage dedupe store.
-class AzureTableDedupeStore:
+# Dedupe through the reviews table: its unique (repo_id, target, head_sha) is the claim.
+class PostgresDedupeStore:
 
-    def __init__(self, table_client) -> None:
-        self._table = table_client
+    def __init__(self, pool) -> None:
+        self._pool = pool
 
-    # Inserts the row.
+    # Inserts a 'queued' review row; False if this commit was already queued for this target.
     def claim(self, key: DedupeKey) -> bool:
-        from azure.core.exceptions import ResourceExistsError  # lazy: memory mode needs no Azure
+        with self._pool.connection() as connection:
+            repo_id = connection.execute(UPSERT_REPO_SQL, (key.repo_full_name,)).fetchone()[0]
+            inserted = connection.execute(INSERT_REVIEW_SQL, (repo_id, key.target, key.head_sha)).fetchone()
+        return inserted is not None
 
-        partition_key, row_key = table_keys(key)
-        entity = {
-            "PartitionKey": partition_key,
-            "RowKey": row_key,
-            "claimed_at": datetime.now(timezone.utc).isoformat(),
-        }
-        try:
-            self._table.create_entity(entity)
-        except ResourceExistsError:
-            return False
-        return True
-
-    # Deletes the row; a missing row is fine.
     def release(self, key: DedupeKey) -> None:
-        from azure.core.exceptions import ResourceNotFoundError
+        with self._pool.connection() as connection:
+            connection.execute(DELETE_QUEUED_REVIEW_SQL, (key.repo_full_name, key.target, key.head_sha))
 
-        partition_key, row_key = table_keys(key)
-        try:
-            self._table.delete_entity(partition_key, row_key)
-        except ResourceNotFoundError:
-            pass  # already released, nothing to undo
+    def close(self) -> None:
+        self._pool.close()

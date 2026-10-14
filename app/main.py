@@ -14,6 +14,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    app.state.dedupe.close()
+
 
 app = FastAPI(title="Autonomous Code Reviewer", lifespan=lifespan)
 app.include_router(webhook_router)

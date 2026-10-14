@@ -1,11 +1,10 @@
 import os
 
-from app.jobs.dedupe import AzureTableDedupeStore, DedupeStore, InMemoryDedupeStore
+from app.jobs.dedupe import DedupeStore, InMemoryDedupeStore, PostgresDedupeStore
 from app.jobs.queue import AzureStorageJobQueue, InMemoryJobQueue, JobQueue
 
 
 DEFAULT_QUEUE_NAME = "review-jobs"
-DEFAULT_DEDUPE_TABLE = "reviewdedupe"
 
 
 # Reads JOBS_BACKEND and validates it.
@@ -61,28 +60,24 @@ def build_queue() -> JobQueue:
     )
 
 
-# Returns the dedupe store for the configured backend.
+# DEDUPE_BACKEND: memory or postgres; defaults to postgres when the queue is Azure, so replicas share it.
+def _dedupe_backend() -> str:
+    default = "postgres" if _backend() == "azure" else "memory"
+    backend = os.environ.get("DEDUPE_BACKEND", default).strip().lower()
+    if backend not in {"memory", "postgres"}:
+        raise ValueError(f"DEDUPE_BACKEND must be 'memory' or 'postgres', got '{backend}'")
+    return backend
+
+
+# Returns the dedupe store; the postgres one first brings the schema up to date.
 def build_dedupe() -> DedupeStore:
-    if _backend() == "memory":
+    if _dedupe_backend() == "memory":
         return InMemoryDedupeStore()
 
-    from azure.core.exceptions import ResourceExistsError
-    from azure.data.tables import TableClient
+    from db.migration_runner import apply_migrations
+    from db.postgres import build_pool
 
-    table_name = os.environ.get("REVIEW_DEDUPE_TABLE", DEFAULT_DEDUPE_TABLE)
-    connection_string = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
-    if connection_string:
-        table = TableClient.from_connection_string(connection_string, table_name=table_name)
-    else:
-        from azure.identity import DefaultAzureCredential
-
-        table = TableClient(
-            endpoint=f"https://{_account_name()}.table.core.windows.net",
-            table_name=table_name,
-            credential=DefaultAzureCredential(),
-        )
-    try:
-        table.create_table()
-    except ResourceExistsError:
-        pass  # normal after the first start
-    return AzureTableDedupeStore(table)
+    pool = build_pool()
+    with pool.connection() as connection:
+        apply_migrations(connection)
+    return PostgresDedupeStore(pool)
