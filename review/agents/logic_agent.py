@@ -42,16 +42,8 @@ Related existing code context (may be empty):
 LOGIC_AGENT = AgentSpec(name="logic", prompt_template=LOGIC_PROMPT_TEMPLATE)
 
 
+# LangGraph node for the logic agent.
 def logic_node(state: ReviewState) -> dict:
-    """
-    The LangGraph node for the "logic" agent (see review/graph.py).
-
-    Args:
-        state: the current ReviewState, reads pr_diff and retrieved_context
-
-    Returns:
-        {"findings": [...]}: this agent's validated findings
-    """
     # _build_groq_client is looked up at call time, so tests can
     # monkeypatch agents.logic._build_groq_client with a fake.
     return run_agent(LOGIC_AGENT, state, _build_groq_client())

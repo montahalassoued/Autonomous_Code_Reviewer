@@ -46,39 +46,13 @@ def _build_groq_client() -> Groq:
     return Groq(api_key=api_key)
 
 
+# Chunk's 'Class.method' name, or the bare name for older metadata.
 def _qualified_name(metadata: dict) -> str:
-    """
-    Returns a chunk's qualified name ("Class.method"), falling back to
-    the bare function_name for metadata written before qualified names
-    existed (module-level functions have the same value for both).
-
-    Args:
-        metadata: a chunk metadata dict (Chroma or graph_retriever shape)
-
-    Returns:
-        the qualified name
-    """
     return metadata.get("qualified_name", metadata["function_name"])
 
 
+# RankedChunk -> the flat RetrievedChunk shape the agents read.
 def _ranked_chunk_to_retrieved_chunk(chunk: RankedChunk, graph) -> RetrievedChunk:
-    """
-    Converts a reranker.py RankedChunk (chunk_id + metadata dict) into
-    the flatter RetrievedChunk shape review/state.py expects, since
-    that's the contract every domain agent (security.py, etc.) will
-    read from. Pulls caller info from the graph directly rather than
-    re-deriving it, since we already have the graph loaded here.
-
-    function_name is set to the qualified name ("Class.method") so the
-    agents can tell two same-named methods apart.
-
-    Args:
-        chunk: one reranked chunk
-        graph: the knowledge graph, or None
-
-    Returns:
-        the RetrievedChunk for ReviewState.retrieved_context
-    """
     from rag.knowledge_graph import get_callers
 
     file_path = chunk.metadata["file_path"]
@@ -95,15 +69,8 @@ def _ranked_chunk_to_retrieved_chunk(chunk: RankedChunk, graph) -> RetrievedChun
     )
 
 
+# Ask Groq how useful the retrieved chunks are for this diff (0-1).
 def _judge_retrieval_quality(diff: str, chunks: list[RankedChunk]) -> float:
-    """
-    Calls Groq to score how useful the retrieved chunks are for
-    reviewing this specific diff. Returns a score in [0, 1].
-
-    Falls back to 0.0 (treated as "insufficient, please retry") if the
-    LLM response can't be parsed - a safe default, since failing to
-    parse a quality score should never be silently treated as "good".
-    """
     if not chunks:
         return 0.0  # no context retrieved at all - obviously insufficient
 
@@ -133,6 +100,7 @@ def _judge_retrieval_quality(diff: str, chunks: list[RankedChunk]) -> float:
         return 0.0
 
 
+# One RAG pass: decompose -> search -> enrich -> rerank -> judge.
 def run_retrieval(
     diff: str,
     collection,
@@ -140,26 +108,6 @@ def run_retrieval(
     all_ids: list[str],
     graph,
 ) -> tuple[list[RetrievedChunk], float]:
-    """
-    Runs one full pass of the RAG pipeline: decompose -> search ->
-    enrich -> rerank -> judge. This is the function retriever_node()
-    calls; separated out so it can be tested without needing a full
-    LangGraph state object.
-
-    Args:
-        diff: the PR diff text
-        collection: a populated Chroma collection (db/chroma.py)
-        all_documents: full corpus text list, needed by hybrid_search's
-                        BM25 index (same order as all_ids)
-        all_ids: full corpus id list (same order as all_documents)
-        graph: the knowledge graph (rag/knowledge_graph.py), or None
-               if unavailable (degrades gracefully: no caller info)
-
-    Returns:
-        (retrieved_chunks, quality_score) - ready to be written
-        directly into ReviewState's retrieved_context and
-        retrieval_quality_score fields
-    """
     queries = decompose_diff(diff)
 
     # Run hybrid search for every sub-query and merge candidates,
@@ -201,20 +149,8 @@ def run_retrieval(
     return retrieved_chunks, quality_score
 
 
+# LangGraph node for 'retriever': one RAG pass written into ReviewState.
 def retriever_node(state: ReviewState, collection, all_documents, all_ids, graph) -> dict:
-    """
-    The actual LangGraph node function for the "retriever" node defined
-    in review/graph.py. Replaces that file's retriever_node STUB.
-
-    Note the extra parameters beyond `state`: collection/all_documents/
-    all_ids/graph are NOT part of ReviewState (they're large, repo-wide
-    objects that don't belong in a per-review state dict) - they need
-    to be bound via a closure or partial application when this node is
-    registered in the graph, e.g.:
-        graph.add_node("retriever", lambda s: retriever_node(s, collection, all_documents, all_ids, graph))
-    This wiring happens when review/graph.py is updated to use the real
-    retriever instead of its current stub.
-    """
     retrieved_chunks, quality_score = run_retrieval(
         diff=state["pr_diff"],
         collection=collection,

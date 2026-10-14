@@ -55,16 +55,8 @@ Related existing code context (may be empty):
 SECURITY_AGENT = AgentSpec(name="security", prompt_template=SECURITY_PROMPT_TEMPLATE)
 
 
+# LangGraph node for the security agent.
 def security_node(state: ReviewState) -> dict:
-    """
-    The LangGraph node for the "security" agent (see review/graph.py).
-
-    Args:
-        state: the current ReviewState, reads pr_diff and retrieved_context
-
-    Returns:
-        {"findings": [...]}: this agent's validated findings
-    """
     # _build_groq_client is looked up at call time, so tests can
     # monkeypatch agents.security._build_groq_client with a fake.
     return run_agent(SECURITY_AGENT, state, _build_groq_client())

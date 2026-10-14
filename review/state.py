@@ -2,14 +2,8 @@ from typing import TypedDict, Annotated, Literal
 import operator
 
 
+# A single issue detected by an agent in the analyzed code.
 class Finding(TypedDict):
-    """
-    A single issue detected by an agent in the analyzed code.
-
-    This is the atomic unit produced by review/agents/security_agent.py, logic.py and
-    quality.py (through review/agents/agent_runner.py). The synthesizer groups a
-    list of Finding by `agent` to produce the final review comment.
-    """
     agent: str  # the review category: "security", "logic" or "quality"
     severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
     file_path: str
@@ -20,13 +14,8 @@ class Finding(TypedDict):
     suggestion: str
 
 
+# A piece of code retrieved by the RAG pipeline.
 class RetrievedChunk(TypedDict):
-    """
-    A piece of code retrieved by the RAG pipeline.
-
-    Output of rag/reranker.py after the full pipeline
-    (self-query + hybrid search + graph traversal + reranking).
-    """
     file_path: str
     function_name: str  # qualified: "Class.method", or "func" at module level
     code: str
@@ -35,15 +24,8 @@ class RetrievedChunk(TypedDict):
     callers: list[str]
 
 
+# The full state that flows through the graph during a review.
 class ReviewState(TypedDict):
-    """
-    The full state that flows through the graph during a review.
-
-    Two categories of fields:
-    1. Normal fields -> the last node that writes overwrites the value
-    2. Annotated[type, operator.add] fields -> writes are merged together
-       (required for findings, since the agents write to it in parallel)
-    """
 
     # Input - populated from the GitHub webhook payload
     pr_number: int

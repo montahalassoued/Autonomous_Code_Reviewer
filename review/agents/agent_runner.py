@@ -32,42 +32,20 @@ no explanation, no preamble. If there are no issues, output an empty
 JSON array: []"""
 
 
+# What makes one review agent different from the others.
 @dataclass(frozen=True)
 class AgentSpec:
-    """
-    What makes one review agent different from the others.
-
-    Attributes:
-        name: the agent's category, also its LangGraph node name and the
-              `agent` field of its findings ("security", "logic", "quality")
-        prompt_template: the prompt, with {diff} and {context_summary}
-                         placeholders
-    """
     name: str
     prompt_template: str
 
 
+# Returns the Groq model the review agents call.
 def review_agent_model() -> str:
-    """
-    Returns the Groq model the review agents call.
-
-    Returns:
-        REVIEW_AGENT_MODEL from the environment, or the provisional default
-    """
     return os.environ.get("REVIEW_AGENT_MODEL", "").strip() or DEFAULT_REVIEW_AGENT_MODEL
 
 
+# Builds a Groq client from GROQ_API_KEY.
 def build_groq_client() -> Groq:
-    """
-    Builds a Groq client from GROQ_API_KEY.
-
-    Returns:
-        a ready Groq client
-
-    Raises:
-        RuntimeError: if GROQ_API_KEY is not set, so the failure is clear
-                      instead of a cryptic error mid-call
-    """
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError(
@@ -78,19 +56,8 @@ def build_groq_client() -> Groq:
     return Groq(api_key=api_key)
 
 
+# Render the retrieved chunks as '- name (file)' + code blocks for the prompt.
 def format_context(retrieved_context: list[RetrievedChunk]) -> str:
-    """
-    Renders the retrieved context chunks into a text block for the prompt,
-    so an agent can judge the diff together with the code around it
-    (e.g. an existing caller that breaks when a signature changes).
-
-    Args:
-        retrieved_context: chunks produced by review/retriever.py
-
-    Returns:
-        one "- name (file):\\ncode" block per chunk, or a placeholder line
-        if no context was retrieved
-    """
     if not retrieved_context:
         return EMPTY_CONTEXT_SUMMARY
 
@@ -100,18 +67,8 @@ def format_context(retrieved_context: list[RetrievedChunk]) -> str:
     )
 
 
+# Parses the LLM's JSON array response into a list of dicts.
 def parse_findings(raw_output: str) -> list[dict]:
-    """
-    Parses the LLM's JSON array response into a list of dicts.
-
-    Args:
-        raw_output: the raw LLM response text
-
-    Returns:
-        the parsed dicts, or [] if the output can't be parsed - a
-        malformed response means "no findings from this agent", never a
-        crashed review
-    """
     cleaned = raw_output.strip().strip("`").removeprefix("json").strip()
 
     try:
@@ -136,17 +93,8 @@ def parse_findings(raw_output: str) -> list[dict]:
     return []
 
 
+# Positive int from an int or numeric string; None otherwise (bool rejected).
 def _parse_line_number(value) -> int | None:
-    """
-    Reads a line number the LLM may have sent as an int or a numeric string.
-
-    Args:
-        value: the raw "line_number" value
-
-    Returns:
-        a positive int, or None if the value isn't a usable line number.
-        bool is rejected explicitly because Python treats True as 1.
-    """
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -156,19 +104,8 @@ def _parse_line_number(value) -> int | None:
     return None
 
 
+# Validates one parsed dict and converts it into a Finding.
 def to_finding(raw: dict, agent_name: str) -> Finding | None:
-    """
-    Validates one parsed dict and converts it into a Finding.
-
-    Args:
-        raw: one dict from the LLM's parsed JSON array
-        agent_name: the agent's category, stored in Finding.agent
-
-    Returns:
-        a Finding, or None if a field is missing or invalid (unknown
-        severity, non-integer line, empty title/description/suggestion).
-        One bad entry is skipped; the rest of the array still counts.
-    """
     severity = str(raw.get("severity", "")).strip().upper()
     if severity not in VALID_SEVERITIES:
         return None
@@ -194,37 +131,16 @@ def to_finding(raw: dict, agent_name: str) -> Finding | None:
     )
 
 
+# Fills the agent's prompt template from the review state.
 def build_prompt(spec: AgentSpec, state: ReviewState) -> str:
-    """
-    Fills the agent's prompt template from the review state.
-
-    Args:
-        spec: the agent being run
-        state: the current ReviewState (reads pr_diff, retrieved_context)
-
-    Returns:
-        the complete prompt string
-    """
     return spec.prompt_template.format(
         diff=state["pr_diff"],
         context_summary=format_context(state["retrieved_context"]),
     )
 
 
+# Run one agent: prompt -> Groq -> validated findings.
 def run_agent(spec: AgentSpec, state: ReviewState, client: Groq) -> dict:
-    """
-    Runs one review agent: builds its prompt, calls the model, and
-    returns its validated findings as a LangGraph partial state update.
-
-    Args:
-        spec: the agent to run
-        state: the current ReviewState
-        client: a Groq client (tests pass a fake)
-
-    Returns:
-        {"findings": [...]}, merged into ReviewState.findings by the
-        operator.add reducer alongside the other agents' findings
-    """
     response = client.chat.completions.create(
         model=review_agent_model(),
         messages=[{"role": "user", "content": build_prompt(spec, state)}],

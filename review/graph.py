@@ -16,43 +16,14 @@ from review.synthesizer import synthesizer_node
 REVIEW_AGENTS = ["security", "logic", "quality"]
 
 
+# Barrier: LangGraph waits here for all parallel agents, so the synthesizer runs once.
 def join_agents_node(state: ReviewState) -> dict:
-    """
-    Barrier node - LangGraph waits for ALL parallel agents to finish
-    before running this node, because it is the single common downstream
-    target they all converge on via plain (non-conditional) edges.
-
-    Without it, each agent pointing straight at the next step would
-    run that step once per finished agent instead of once per review.
-
-    Args:
-        state: the current ReviewState, with all agents' findings merged
-
-    Returns:
-        an empty update - this node only exists as a synchronization point
-    """
     print(f"[join_agents] all parallel agents finished, {len(state['findings'])} findings total")
     return {}
 
 
+# Retry retrieval while quality is low and attempts remain, else fan out to the agents.
 def route_after_retriever(state: ReviewState) -> list[str] | str:
-    """
-    Corrective RAG decision: is retrieval quality good enough, or do we
-    retry (bounded by MAX_RETRIEVAL_ATTEMPTS to guarantee termination)?
-
-    IMPORTANT: when fanning out to multiple parallel nodes, LangGraph
-    requires the routing function to return the ACTUAL node names
-    directly (not abstract keys mapped through a dict) - that's why
-    this returns "retriever" / REVIEW_AGENTS as literal node names, and
-    build_graph() below calls add_conditional_edges WITHOUT a mapping
-    dict.
-
-    Args:
-        state: the ReviewState right after a retrieval attempt
-
-    Returns:
-        "retriever" to retry, or REVIEW_AGENTS to fan out to all agents
-    """
     quality_ok = state["retrieval_quality_score"] >= QUALITY_THRESHOLD
     attempts_exhausted = state["retrieval_attempts"] >= MAX_RETRIEVAL_ATTEMPTS
 
@@ -61,30 +32,10 @@ def route_after_retriever(state: ReviewState) -> list[str] | str:
     return "retriever"
 
 
+# Assembles and compiles the StateGraph.
 def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_index):
-    """
-    Assembles and compiles the StateGraph.
-
-    Args:
-        collection: a populated Chroma collection (db/chroma.py),
-                    passed straight through to review/retriever.py
-        all_documents: full corpus text list backing hybrid_search.py's
-                        BM25 index (same order as all_ids)
-        all_ids: full corpus id list (same order as all_documents)
-        graph_index: the knowledge graph (rag/knowledge_graph.py), or
-                     None if unavailable (degrades gracefully: no
-                     caller info in retrieved chunks)
-
-    Returns:
-        a compiled graph ready to run via .invoke(initial_state)
-    """
+    # Bind the repo-wide RAG objects (too big for ReviewState) into the retriever node.
     def retriever_node(state: ReviewState) -> dict:
-        """
-        Binds the RAG pipeline's repo-wide objects (collection,
-        all_documents, all_ids, graph_index) into review/retriever.py's
-        real retriever_node via closure, since those objects are too
-        large and too repo-wide to belong in per-review ReviewState.
-        """
         return _run_retriever_node(state, collection, all_documents, all_ids, graph_index)
 
     graph = StateGraph(ReviewState)

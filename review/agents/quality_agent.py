@@ -38,16 +38,8 @@ Related existing code context (may be empty):
 QUALITY_AGENT = AgentSpec(name="quality", prompt_template=QUALITY_PROMPT_TEMPLATE)
 
 
+# LangGraph node for the quality agent.
 def quality_node(state: ReviewState) -> dict:
-    """
-    The LangGraph node for the "quality" agent (see review/graph.py).
-
-    Args:
-        state: the current ReviewState, reads pr_diff and retrieved_context
-
-    Returns:
-        {"findings": [...]}: this agent's validated findings
-    """
     # _build_groq_client is looked up at call time, so tests can
     # monkeypatch agents.quality._build_groq_client with a fake.
     return run_agent(QUALITY_AGENT, state, _build_groq_client())
