@@ -139,7 +139,7 @@ def install_fakes(monkeypatch, replies: dict) -> list:
 
     for agent in REVIEW_AGENTS:
         monkeypatch.setattr(
-            f"review.agents.{agent}_agent._build_groq_client",
+            f"review.agents.{agent}.agent._build_groq_client",
             lambda role=agent: FakeLLM(role, calls, replies),
         )
     monkeypatch.setattr("review.retriever._build_groq_client", lambda: FakeLLM("judge", calls, replies))

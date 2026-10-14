@@ -1,0 +1,44 @@
+[
+  {
+    "about": "a blocking HTTP call inside an async function",
+    "diff": [
+      "diff --git a/app/profiles.py b/app/profiles.py",
+      "--- a/app/profiles.py",
+      "+++ b/app/profiles.py",
+      "@@ -1,1 +1,5 @@",
+      " import requests",
+      "+",
+      "+async def fetch_profile(user_id: int) -> dict:",
+      "+    response = requests.get(f\"https://api.example.com/users/{user_id}\", timeout=5)",
+      "+    return response.json()"
+    ],
+    "answer": [
+      {
+        "severity": "MEDIUM",
+        "rule_id": "blocking_io_in_async",
+        "confidence": "high",
+        "file_path": "app/profiles.py",
+        "line_number": 4,
+        "title": "Blocking requests.get inside an async function",
+        "description": "requests.get blocks the event loop for the whole HTTP round trip, so every other request handled by this worker waits up to 5 seconds while one profile loads.",
+        "evidence": "response = requests.get(f\"https://api.example.com/users/{user_id}\", timeout=5)",
+        "suggestion": "Use an async client: async with httpx.AsyncClient(timeout=5) as client: response = await client.get(url)."
+      }
+    ]
+  },
+  {
+    "about": "a set built once before the loop, which is already efficient: nothing to report",
+    "diff": [
+      "diff --git a/app/admin.py b/app/admin.py",
+      "--- a/app/admin.py",
+      "+++ b/app/admin.py",
+      "@@ -1,1 +1,5 @@",
+      " # Filters for the admin dashboard.",
+      "+",
+      "+def active_user_ids(users, banned_ids):",
+      "+    banned = set(banned_ids)",
+      "+    return [user.id for user in users if user.id not in banned]"
+    ],
+    "answer": []
+  }
+]

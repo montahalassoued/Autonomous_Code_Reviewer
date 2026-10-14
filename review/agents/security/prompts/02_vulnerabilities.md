@@ -1,0 +1,12 @@
+Look for:
+- SQL injection (string-built queries, unparameterized input)
+- Cross-site scripting (XSS) (unescaped output rendered as HTML)
+- Command injection (unsanitized input passed to a shell/subprocess)
+- Insecure deserialization (pickle, yaml.load, unsafe unmarshalling)
+- Hardcoded secrets, API keys, or credentials
+- Server-side request forgery (SSRF)
+- Path traversal (unsanitized file paths from user input, archive extraction without path checks)
+- Insecure cryptography (weak hashing, hardcoded salts/IVs, ECB mode)
+- Sensitive data exposure (CWE-200): a response that returns a whole database record or object (e.g. user.__dict__, a raw ORM model) and leaks fields such as password hashes, tokens or emails; stack traces or internal details sent to the client
+- Secrets in logs or error messages (CWE-532): tokens, passwords, API keys or personal data written to a log line or an exception text
+- New dependencies (only if the diff changes requirements.txt, pyproject.toml, package.json or similar): an unpinned version, a typosquatted or unknown package name, a package with known vulnerabilities

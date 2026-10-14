@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from review.agents.logic_agent import logic_node  # noqa: E402 - must load .env before the agent reads its keys
+from review.agents.logic.agent import logic_node  # noqa: E402 - must load .env before the agent reads its keys
 
 
 OFF_BY_ONE_DIFF = """

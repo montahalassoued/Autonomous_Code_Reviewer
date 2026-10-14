@@ -1,0 +1,43 @@
+[
+  {
+    "about": "a mutable default argument shared between calls",
+    "diff": [
+      "diff --git a/app/tags.py b/app/tags.py",
+      "--- a/app/tags.py",
+      "+++ b/app/tags.py",
+      "@@ -1,1 +1,5 @@",
+      " # Tag helpers used by the importer.",
+      "+",
+      "+def add_tag(tag: str, tags: list[str] = []) -> list[str]:",
+      "+    tags.append(tag)",
+      "+    return tags"
+    ],
+    "answer": [
+      {
+        "severity": "HIGH",
+        "rule_id": "mutable_default",
+        "confidence": "high",
+        "file_path": "app/tags.py",
+        "line_number": 3,
+        "title": "Default tag list is shared between calls",
+        "description": "The default [] is created once, when the function is defined. add_tag(\"a\") then add_tag(\"b\") returns [\"a\", \"b\"] on the second call, so tags leak from one import into the next.",
+        "evidence": "def add_tag(tag: str, tags: list[str] = []) -> list[str]:",
+        "suggestion": "Default to None and create the list inside: def add_tag(tag, tags=None): tags = [] if tags is None else tags."
+      }
+    ]
+  },
+  {
+    "about": "an empty list handled correctly: nothing to report",
+    "diff": [
+      "diff --git a/app/lists.py b/app/lists.py",
+      "--- a/app/lists.py",
+      "+++ b/app/lists.py",
+      "@@ -1,1 +1,4 @@",
+      " # Small list helpers.",
+      "+",
+      "+def first_or_none(items: list):",
+      "+    return items[0] if items else None"
+    ],
+    "answer": []
+  }
+]

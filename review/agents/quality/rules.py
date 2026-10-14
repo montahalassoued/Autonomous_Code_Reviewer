@@ -1,0 +1,20 @@
+# What the quality agent may report; the rule_id also feeds the finding fingerprint.
+QUALITY_RULES = {
+    "n_plus_one": "a database query inside a loop",
+    "quadratic_work": "quadratic work such as list membership inside a loop",
+    "repeated_work_in_loop": "work redone on every iteration that could be done once",
+    "blocking_io_in_async": "blocking I/O inside async code",
+    "unbounded_query": "a query or endpoint with no limit or pagination",
+    "unbounded_growth": "a cache, list or registry that only grows",
+    "duplicated_logic": "logic that already exists elsewhere in the code",
+    "too_complex": "a function doing several things, or deeply nested",
+    "misleading_name": "a name that does not say what the thing is or does",
+    "dead_code": "unreachable, unused or commented-out code",
+    "magic_number": "an unexplained literal that should be a named constant",
+    "unnecessary_abstraction": "layers or classes that make simple code harder to follow",
+    "missing_test": "new behavior or a fixed bug with no test",
+    "weak_test": "a test that asserts almost nothing",
+    "flaky_test": "a test depending on network, timing or test order",
+    "stale_test": "changed behavior whose tests were not updated",
+    "missing_docs": "a public interface with no or outdated documentation",
+}

@@ -13,9 +13,10 @@ from dotenv import load_dotenv
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from review.agents.agent_runner import EMPTY_CONTEXT_SUMMARY
-from review.agents.security_agent import SECURITY_PROMPT_TEMPLATE
-from review.agents.logic_agent import LOGIC_PROMPT_TEMPLATE
-from review.agents.quality_agent import QUALITY_PROMPT_TEMPLATE
+from review.agents.prompt_assembler import fill_prompt
+from review.agents.security.agent import SECURITY_AGENT
+from review.agents.logic.agent import LOGIC_AGENT
+from review.agents.quality.agent import QUALITY_AGENT
 from review.retriever import JUDGE_PROMPT_TEMPLATE, QUALITY_THRESHOLD
 from rag.query_decomposer import DECOMPOSE_PROMPT_TEMPLATE
 from rag.contextual_chunker import CONTEXT_PROMPT_TEMPLATE
@@ -41,9 +42,9 @@ DEFAULT_MODELS = [
 ]
 
 AGENT_PROMPTS = {
-    "security": SECURITY_PROMPT_TEMPLATE,
-    "logic": LOGIC_PROMPT_TEMPLATE,
-    "quality": QUALITY_PROMPT_TEMPLATE,
+    "security": SECURITY_AGENT.prompt_template,
+    "logic": LOGIC_AGENT.prompt_template,
+    "quality": QUALITY_AGENT.prompt_template,
 }
 
 # Same temperatures production uses for each job, so the benchmark
@@ -251,9 +252,7 @@ def _join_lines(value) -> str:
 
 # Production agent prompt for an 'agents' case, with no retrieved context.
 def build_agent_prompt(case: dict) -> str:
-    return AGENT_PROMPTS[case["agent"]].format(
-        diff=_join_lines(case["diff"]), context_summary=EMPTY_CONTEXT_SUMMARY
-    )
+    return fill_prompt(AGENT_PROMPTS[case["agent"]], _join_lines(case["diff"]), EMPTY_CONTEXT_SUMMARY)
 
 
 # Production decomposer prompt for a 'decomposer' case.

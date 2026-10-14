@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from groq import Groq
 
+from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
 from review.state import ReviewState, Finding, RetrievedChunk
 
 
@@ -14,30 +15,16 @@ DEFAULT_REVIEW_AGENT_MODEL = "openai/gpt-oss-120b"
 AGENT_TEMPERATURE = 0.1  # consistency over creativity for analysis
 VALID_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
 REQUIRED_TEXT_FIELDS = ("file_path", "title", "description", "suggestion")
+VALID_CONFIDENCES = {"high", "medium", "low"}
+DEFAULT_CONFIDENCE = "medium"
 EMPTY_CONTEXT_SUMMARY = "(no related context retrieved)"
-
-# The output contract every agent prompt ends with. Shared so the three
-# agents can never drift apart on the JSON shape the runner parses.
-FINDINGS_OUTPUT_INSTRUCTIONS = """For each issue found, output one JSON object with these exact fields:
-- "severity": one of "CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"
-- "file_path": the file the issue is in
-- "line_number": the line number (integer) the issue occurs at, from the diff
-- "title": a short title for the issue
-- "description": what goes wrong, for which input or scenario, and its impact
-- "evidence": the specific code snippet that shows the issue
-- "suggestion": a concrete fix and why it helps, with a short code example
-  when that makes it clearer
-
-Output ONLY a JSON array of these objects, nothing else - no markdown,
-no explanation, no preamble. If there are no issues, output an empty
-JSON array: []"""
-
 
 # What makes one review agent different from the others.
 @dataclass(frozen=True)
 class AgentSpec:
     name: str
     prompt_template: str
+    rule_ids: frozenset[str]
 
 
 # Returns the Groq model the review agents call.
@@ -106,7 +93,7 @@ def _parse_line_number(value) -> int | None:
 
 
 # Validates one parsed dict and converts it into a Finding.
-def to_finding(raw: dict, agent_name: str) -> Finding | None:
+def to_finding(raw: dict, spec: AgentSpec) -> Finding | None:
     severity = str(raw.get("severity", "")).strip().upper()
     if severity not in VALID_SEVERITIES:
         return None
@@ -119,10 +106,15 @@ def to_finding(raw: dict, agent_name: str) -> Finding | None:
         if not isinstance(raw.get(field), str) or not raw[field].strip():
             return None
 
+    # An unknown rule id or confidence is normalized, not a reason to drop the finding.
+    rule_id = str(raw.get("rule_id", "")).strip().lower()
+    confidence = str(raw.get("confidence", "")).strip().lower()
     evidence = raw.get("evidence")
     return Finding(
-        agent=agent_name,
+        agent=spec.name,
         severity=severity,
+        rule_id=rule_id if rule_id in spec.rule_ids else OTHER_RULE_ID,
+        confidence=confidence if confidence in VALID_CONFIDENCES else DEFAULT_CONFIDENCE,
         file_path=raw["file_path"].strip(),
         line_number=line_number,
         title=raw["title"].strip(),
@@ -134,10 +126,7 @@ def to_finding(raw: dict, agent_name: str) -> Finding | None:
 
 # Fills the agent's prompt template from the review state.
 def build_prompt(spec: AgentSpec, state: ReviewState) -> str:
-    return spec.prompt_template.format(
-        diff=state["pr_diff"],
-        context_summary=format_context(state["retrieved_context"]),
-    )
+    return fill_prompt(spec.prompt_template, state["pr_diff"], format_context(state["retrieved_context"]))
 
 
 # Run one agent: prompt -> Groq -> validated findings.
@@ -154,7 +143,7 @@ def run_agent(spec: AgentSpec, state: ReviewState, client: Groq) -> dict:
 
     findings = []
     for raw in raw_findings:
-        finding = to_finding(raw, spec.name)
+        finding = to_finding(raw, spec)
         if finding is None:
             logger.warning("Dropped invalid %s finding: %.200s", spec.name, json.dumps(raw, default=str))
             continue

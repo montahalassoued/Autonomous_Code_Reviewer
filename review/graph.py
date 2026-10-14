@@ -5,9 +5,9 @@ from review.retriever import (
     QUALITY_THRESHOLD,
     MAX_RETRIEVAL_ATTEMPTS,
 )
-from review.agents.security_agent import security_node
-from review.agents.logic_agent import logic_node
-from review.agents.quality_agent import quality_node
+from review.agents.security.agent import security_node
+from review.agents.logic.agent import logic_node
+from review.agents.quality.agent import quality_node
 from review.synthesizer import synthesizer_node
 
 

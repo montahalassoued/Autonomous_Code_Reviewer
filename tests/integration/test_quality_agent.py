@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from review.agents.quality_agent import quality_node  # noqa: E402 - must load .env before the agent reads its keys
+from review.agents.quality.agent import quality_node  # noqa: E402 - must load .env before the agent reads its keys
 
 
 N_PLUS_ONE_DIFF = """

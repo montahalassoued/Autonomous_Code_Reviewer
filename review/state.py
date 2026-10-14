@@ -6,6 +6,8 @@ import operator
 class Finding(TypedDict):
     agent: str  # the review category: "security", "logic" or "quality"
     severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+    rule_id: str  # from the agent's rules.py, or "other"
+    confidence: Literal["high", "medium", "low"]
     file_path: str
     line_number: int
     title: str

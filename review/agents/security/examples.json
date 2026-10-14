@@ -1,0 +1,45 @@
+[
+  {
+    "about": "an archive extracted without checking its paths",
+    "diff": [
+      "diff --git a/app/backups/restore.py b/app/backups/restore.py",
+      "--- a/app/backups/restore.py",
+      "+++ b/app/backups/restore.py",
+      "@@ -1,1 +1,6 @@",
+      " import tarfile",
+      "+",
+      "+def restore_backup(archive_path: str, destination: str) -> None:",
+      "+    # archive_path is an archive uploaded by the user",
+      "+    with tarfile.open(archive_path) as archive:",
+      "+        archive.extractall(destination)"
+    ],
+    "answer": [
+      {
+        "severity": "HIGH",
+        "rule_id": "path_traversal",
+        "confidence": "high",
+        "file_path": "app/backups/restore.py",
+        "line_number": 6,
+        "title": "CWE-22: archive entries can be written outside the destination",
+        "description": "A user-uploaded tar file can contain entries such as ../../etc/cron.d/job. extractall() writes them outside destination, so an attacker can overwrite any file the service can write.",
+        "evidence": "archive.extractall(destination)",
+        "suggestion": "Extract with the data filter, which rejects absolute paths and '..': archive.extractall(destination, filter=\"data\")."
+      }
+    ]
+  },
+  {
+    "about": "a parameterized query, which is safe: nothing to report",
+    "diff": [
+      "diff --git a/app/users.py b/app/users.py",
+      "--- a/app/users.py",
+      "+++ b/app/users.py",
+      "@@ -1,1 +1,5 @@",
+      " from app.db import connection",
+      "+",
+      "+def find_user(user_id: int):",
+      "+    cursor = connection.execute(\"SELECT id, name FROM users WHERE id = ?\", (user_id,))",
+      "+    return cursor.fetchone()"
+    ],
+    "answer": []
+  }
+]

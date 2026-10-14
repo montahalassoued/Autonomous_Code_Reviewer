@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from review.agents.security_agent import security_node  # noqa: E402 - must load .env before the agent reads its keys
+from review.agents.security.agent import security_node  # noqa: E402 - must load .env before the agent reads its keys
 
 
 SQL_INJECTION_DIFF = """
