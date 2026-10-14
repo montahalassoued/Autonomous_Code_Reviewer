@@ -62,18 +62,9 @@ LINE_TOLERANCE = 3
 MAX_CONTEXT_WORDS = 30  # the chunker prompt asks for "max 30 words"
 
 
+# What one model call returned, in a provider-neutral shape.
 @dataclass
 class CallResult:
-    """
-    What one model call returned, in a provider-neutral shape.
-
-    Attributes:
-        text: the model's output text ("" on error or empty output)
-        latency_s: wall-clock seconds for the call, retries included
-        input_tokens: prompt tokens reported by the provider (0 if unknown)
-        output_tokens: completion tokens reported by the provider (0 if unknown)
-        error: the error message if the call failed after retries, else None
-    """
     text: str
     latency_s: float
     input_tokens: int = 0
@@ -90,16 +81,8 @@ CallFn = Callable[[str, str, float | None], CallResult]
 # Model calls
 # ---------------------------------------------------------------------
 
+# Reads GROQ_API_KEY from the environment.
 def _build_groq_client():
-    """
-    Reads GROQ_API_KEY from the environment.
-
-    Returns:
-        a groq.Groq client
-
-    Raises:
-        RuntimeError: if GROQ_API_KEY is not set
-    """
     from groq import Groq
 
     api_key = os.environ.get("GROQ_API_KEY")
@@ -112,16 +95,8 @@ def _build_groq_client():
     return Groq(api_key=api_key)
 
 
+# Reads GOOGLE_API_KEY from the environment.
 def _build_gemini_client():
-    """
-    Reads GOOGLE_API_KEY from the environment.
-
-    Returns:
-        a google.genai.Client
-
-    Raises:
-        RuntimeError: if GOOGLE_API_KEY is not set
-    """
     from google import genai
 
     api_key = os.environ.get("GOOGLE_API_KEY")
@@ -134,20 +109,8 @@ def _build_gemini_client():
     return genai.Client(api_key=api_key)
 
 
+# Splits "provider:model" into its two parts.
 def _split_model_spec(model_spec: str) -> tuple[str, str]:
-    """
-    Splits "provider:model" into its two parts. The model part may
-    itself contain "/" (e.g. "groq:openai/gpt-oss-120b").
-
-    Args:
-        model_spec: e.g. "groq:llama-3.3-70b-versatile"
-
-    Returns:
-        (provider, model_name)
-
-    Raises:
-        ValueError: if the provider is not "groq" or "gemini"
-    """
     provider, _, model_name = model_spec.partition(":")
     if provider not in ("groq", "gemini") or not model_name:
         raise ValueError(
@@ -156,22 +119,13 @@ def _split_model_spec(model_spec: str) -> tuple[str, str]:
     return provider, model_name
 
 
+# Rate limits (429) and server errors (5xx) are worth retrying.
 def _is_retryable(exc: BaseException) -> bool:
-    """
-    True for rate limits (429) and server errors (5xx), which usually
-    pass on their own. Client errors (bad model name, bad key) are not
-    retried because they never will.
-
-    Args:
-        exc: the exception raised by the provider SDK
-
-    Returns:
-        whether tenacity should retry the call
-    """
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
     return status in (429, 500, 502, 503, 504)
 
 
+# One Groq chat completion, retried on 429/5xx.
 @retry(
     retry=retry_if_exception(_is_retryable),
     stop=stop_after_attempt(4),
@@ -179,17 +133,6 @@ def _is_retryable(exc: BaseException) -> bool:
     reraise=True,
 )
 def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int]:
-    """
-    One Groq chat completion, retried on 429/5xx.
-
-    Args:
-        model_name: Groq model id
-        prompt: the full user prompt
-        temperature: sampling temperature, or None for the default
-
-    Returns:
-        (text, input_tokens, output_tokens)
-    """
     client = _build_groq_client()
     kwargs = {"temperature": temperature} if temperature is not None else {}
     response = client.chat.completions.create(
@@ -205,6 +148,7 @@ def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple
     )
 
 
+# One Gemini generate_content call, retried on 429/5xx.
 @retry(
     retry=retry_if_exception(_is_retryable),
     stop=stop_after_attempt(4),
@@ -212,17 +156,6 @@ def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple
     reraise=True,
 )
 def _call_gemini(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int]:
-    """
-    One Gemini generate_content call, retried on 429/5xx.
-
-    Args:
-        model_name: Gemini model id
-        prompt: the full prompt
-        temperature: sampling temperature, or None for the default
-
-    Returns:
-        (text, input_tokens, output_tokens)
-    """
     from google.genai import types
 
     client = _build_gemini_client()
@@ -236,19 +169,8 @@ def _call_gemini(model_name: str, prompt: str, temperature: float | None) -> tup
     )
 
 
+# Call a model and never raise: errors come back in CallResult.error.
 def call_model(model_spec: str, prompt: str, temperature: float | None) -> CallResult:
-    """
-    Calls a model and never raises: a failure becomes a CallResult with
-    `error` set, so one broken model can't stop the whole benchmark.
-
-    Args:
-        model_spec: "groq:<model>" or "gemini:<model>"
-        prompt: the full prompt
-        temperature: sampling temperature, or None for the default
-
-    Returns:
-        a CallResult
-    """
     start = time.perf_counter()
     try:
         provider, model_name = _split_model_spec(model_spec)
@@ -259,11 +181,8 @@ def call_model(model_spec: str, prompt: str, temperature: float | None) -> CallR
         return CallResult("", time.perf_counter() - start, error=f"{type(exc).__name__}: {exc}"[:300])
 
 
+# Print the model ids each provider key can call right now.
 def list_available_models() -> None:
-    """
-    Prints the model ids each provider key can call right now, so the
-    candidate list can be checked against what the free tier offers.
-    """
     def list_groq() -> list[str]:
         return sorted(m.id for m in _build_groq_client().models.list().data)
 
@@ -292,38 +211,14 @@ def list_available_models() -> None:
 # Output parsing
 # ---------------------------------------------------------------------
 
+# Strip <think> blocks, code fences and a leading 'json' tag from model output.
 def _clean_output(text: str) -> str:
-    """
-    Removes the wrappers models add despite instructions: reasoning
-    blocks (<think>...</think>, from qwen and similar), markdown code
-    fences, and a leading "json" language tag.
-
-    Args:
-        text: raw model output
-
-    Returns:
-        the cleaned text
-    """
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     return text.strip().strip("`").removeprefix("json").strip()
 
 
+# Parse JSON as-is, else from the outermost opener..closer span; None on failure.
 def _extract_json(text: str, opener: str, closer: str):
-    """
-    Parses a JSON value from model output, first as-is, then from the
-    outermost opener..closer span (for output wrapped in prose). Same
-    two-step approach as review/agents/agent_runner.py's parse_findings, but it
-    reports failure instead of hiding it, because the valid-output rate
-    is one of the things we're measuring.
-
-    Args:
-        text: raw model output
-        opener: "[" for an array, "{" for an object
-        closer: "]" or "}"
-
-    Returns:
-        the parsed value, or None if nothing parses
-    """
     cleaned = _clean_output(text)
     try:
         return json.loads(cleaned)
@@ -339,17 +234,8 @@ def _extract_json(text: str, opener: str, closer: str):
     return None
 
 
+# Case-insensitive "does any keyword appear in the text".
 def _contains_any(text: str, keywords: list[str]) -> bool:
-    """
-    Case-insensitive "does any keyword appear in the text".
-
-    Args:
-        text: text to search
-        keywords: lowercase keywords
-
-    Returns:
-        True if at least one keyword is a substring of the text
-    """
     lowered = text.lower()
     return any(keyword in lowered for keyword in keywords)
 
@@ -358,65 +244,31 @@ def _contains_any(text: str, keywords: list[str]) -> bool:
 # Prompt builders (one per task) - use the production templates
 # ---------------------------------------------------------------------
 
+# Dataset text fields are stored as lists of lines for readability.
 def _join_lines(value) -> str:
-    """
-    Dataset text fields are stored as lists of lines for readability.
-
-    Args:
-        value: a string or a list of lines
-
-    Returns:
-        the text as one string
-    """
     return "\n".join(value) if isinstance(value, list) else value
 
 
+# Production agent prompt for an 'agents' case, with no retrieved context.
 def build_agent_prompt(case: dict) -> str:
-    """
-    Args:
-        case: an "agents" case (agent, diff)
-
-    Returns:
-        the agent's production prompt, with no retrieved context (we're
-        measuring the model, not the RAG pipeline)
-    """
     return AGENT_PROMPTS[case["agent"]].format(
         diff=_join_lines(case["diff"]), context_summary=EMPTY_CONTEXT_SUMMARY
     )
 
 
+# Production decomposer prompt for a 'decomposer' case.
 def build_decomposer_prompt(case: dict) -> str:
-    """
-    Args:
-        case: a "decomposer" case (diff)
-
-    Returns:
-        the production query-decomposition prompt
-    """
     return DECOMPOSE_PROMPT_TEMPLATE.format(diff=_join_lines(case["diff"]))
 
 
+# Production judge prompt for a 'judge' case.
 def build_judge_prompt(case: dict) -> str:
-    """
-    Args:
-        case: a "judge" case (diff, context list of {name, file})
-
-    Returns:
-        the production retrieval-judge prompt, with the context rendered
-        the way review/retriever.py renders it
-    """
     context_summary = "\n".join(f"- {c['name']} ({c['file']})" for c in case["context"])
     return JUDGE_PROMPT_TEMPLATE.format(diff=_join_lines(case["diff"]), context_summary=context_summary)
 
 
+# Production chunker prompt for a 'chunker' case.
 def build_chunker_prompt(case: dict) -> str:
-    """
-    Args:
-        case: a "chunker" case (file_path, calls, code)
-
-    Returns:
-        the production contextual-chunking prompt
-    """
     return CONTEXT_PROMPT_TEMPLATE.format(
         file_path=case["file_path"],
         calls=", ".join(case["calls"]) if case["calls"] else "none",
@@ -428,18 +280,8 @@ def build_chunker_prompt(case: dict) -> str:
 # Scorers (one per task) - each returns {"score": 0..1, "valid": bool, ...}
 # ---------------------------------------------------------------------
 
+# A finding matches a planted issue: same file and one of its keywords.
 def _finding_matches(finding: dict, expected: dict) -> bool:
-    """
-    A finding matches a planted issue when it is in the same file and
-    its text uses one of the issue's keywords.
-
-    Args:
-        finding: one dict from the model's JSON array
-        expected: one expected_issues entry (file, line, keywords)
-
-    Returns:
-        whether the finding reports that issue
-    """
     # Models sometimes keep the diff's "a/" / "b/" prefix or report a
     # shorter path, so compare by suffix in both directions.
     file_path = str(finding.get("file_path", "")).removeprefix("a/").removeprefix("b/").lstrip("/")
@@ -450,19 +292,8 @@ def _finding_matches(finding: dict, expected: dict) -> bool:
     return same_file and _contains_any(text, expected["keywords"])
 
 
+# Buggy diff: score = share of planted issues found (recall).
 def score_agent(case: dict, output: str) -> dict:
-    """
-    Buggy diff: score = share of planted issues found (recall).
-    Clean diff: score = 1 if there is no MEDIUM+ finding, else 0.
-
-    Args:
-        case: an "agents" case
-        output: the model's raw output
-
-    Returns:
-        score, valid (output is a JSON array of well-formed findings),
-        and details: n_findings, found, line_hits, false_positives
-    """
     findings = _extract_json(output, "[", "]")
     if not isinstance(findings, list):
         return {"score": 0.0, "valid": False, "n_findings": 0}
@@ -500,34 +331,16 @@ def score_agent(case: dict, output: str) -> dict:
     }
 
 
+# True if the reported line is within LINE_TOLERANCE of the planted bug.
 def _line_close(reported, expected_line: int) -> bool:
-    """
-    Args:
-        reported: the line_number the model gave (any type)
-        expected_line: the planted bug's line
-
-    Returns:
-        True if reported is an int within LINE_TOLERANCE of expected_line
-    """
     try:
         return abs(int(reported) - expected_line) <= LINE_TOLERANCE
     except (TypeError, ValueError):
         return False
 
 
+# score = share of the diff's concerns covered by at least one query.
 def score_decomposer(case: dict, output: str) -> dict:
-    """
-    score = share of the diff's concerns covered by at least one query.
-    Only the first 3 queries count, like production's [:3] cap.
-
-    Args:
-        case: a "decomposer" case (expected_concerns: list of keyword lists)
-        output: the model's raw output
-
-    Returns:
-        score, valid (a non-empty JSON array of non-blank strings,
-        3 or fewer), n_queries, queries
-    """
     queries = _extract_json(output, "[", "]")
     if not (isinstance(queries, list) and queries and all(isinstance(q, str) and q.strip() for q in queries)):
         return {"score": 0.0, "valid": False, "n_queries": 0}
@@ -543,19 +356,8 @@ def score_decomposer(case: dict, output: str) -> dict:
     }
 
 
+# 1 if the judge's score falls on the right side of QUALITY_THRESHOLD, else 0.
 def score_judge(case: dict, output: str) -> dict:
-    """
-    score = 1 if the judge lands on the right side of production's
-    QUALITY_THRESHOLD (>= for relevant context, < for irrelevant), else 0.
-
-    Args:
-        case: a "judge" case (expected: "high" or "low")
-        output: the model's raw output
-
-    Returns:
-        score, valid (a JSON object with a numeric "score" in [0, 1]),
-        judge_score (the raw number)
-    """
     parsed = _extract_json(output, "{", "}")
     try:
         judge_score = float(parsed["score"])
@@ -570,18 +372,8 @@ def score_judge(case: dict, output: str) -> dict:
     }
 
 
+# 0.25 each: <= 30 words, one sentence, names the file, uses a keyword.
 def score_chunker(case: dict, output: str) -> dict:
-    """
-    Four equal parts (0.25 each): at most 30 words, one sentence,
-    names the file, and uses at least one expected keyword.
-
-    Args:
-        case: a "chunker" case (file_path, keywords)
-        output: the model's raw output
-
-    Returns:
-        score, valid (non-empty output), words, sentence
-    """
     # Same post-processing as rag/contextual_chunker.generate_context.
     sentence = _clean_output(output).strip('"').strip("'")
     if not sentence:
@@ -614,19 +406,14 @@ TASKS = {
 # Running and summarizing
 # ---------------------------------------------------------------------
 
+# Load the benchmark cases from the dataset JSON.
 def load_cases(path: Path) -> dict:
-    """
-    Args:
-        path: the dataset JSON file
-
-    Returns:
-        {task_name: [case, ...]} for the tasks present in the file
-    """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     return {task: data[task] for task in ALL_TASKS if task in data}
 
 
+# Runs every case of every task against every model, `runs` times.
 def run_benchmark(
     cases: dict,
     models: list[str],
@@ -635,21 +422,6 @@ def run_benchmark(
     call_fn: CallFn = call_model,
     delay_s: float = 0.0,
 ) -> list[dict]:
-    """
-    Runs every case of every task against every model, `runs` times.
-
-    Args:
-        cases: output of load_cases
-        models: model specs ("provider:model")
-        tasks: task names to run (subset of ALL_TASKS)
-        runs: repetitions per case, to see how stable a model is
-        call_fn: the model-calling function (a fake in tests)
-        delay_s: pause between calls, to stay under free-tier rate limits
-
-    Returns:
-        one record per call: task, model, case_id, run, the score dict
-        fields, latency, tokens, error, and the raw output
-    """
     records = []
     for task in tasks:
         build_prompt, score = TASKS[task]
@@ -673,18 +445,8 @@ def run_benchmark(
     return records
 
 
+# Aggregates records per (task, model).
 def summarize(records: list[dict]) -> list[dict]:
-    """
-    Aggregates records per (task, model).
-
-    Args:
-        records: output of run_benchmark
-
-    Returns:
-        one row per (task, model): quality (mean score), valid_rate,
-        error count, mean/p95 latency, mean input/output tokens, calls.
-        Sorted by task, then quality (best first), then latency.
-    """
     groups: dict[tuple[str, str], list[dict]] = {}
     for record in records:
         groups.setdefault((record["task"], record["model"]), []).append(record)
@@ -710,15 +472,8 @@ def summarize(records: list[dict]) -> list[dict]:
     return rows
 
 
+# Summary tables as Markdown.
 def format_markdown(summary: list[dict]) -> str:
-    """
-    Args:
-        summary: output of summarize
-
-    Returns:
-        one Markdown table per task, best model first, followed by a
-        "best per task" line
-    """
     lines = ["# LLM benchmark results", ""]
     best = []
     for task in ALL_TASKS:
@@ -744,19 +499,8 @@ def format_markdown(summary: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# Writes the full JSON (every call) and the Markdown summary.
 def save_results(records: list[dict], summary: list[dict], results_dir: Path, settings: dict) -> Path:
-    """
-    Writes the full JSON (every call) and the Markdown summary.
-
-    Args:
-        records: output of run_benchmark
-        summary: output of summarize
-        results_dir: where to write
-        settings: the run settings, stored so results can be reproduced
-
-    Returns:
-        the path of the JSON file (the .md sits next to it)
-    """
     results_dir.mkdir(parents=True, exist_ok=True)
     stem = f"llm_benchmark_{datetime.now():%Y%m%d_%H%M%S}"
     json_path = results_dir / f"{stem}.json"
@@ -768,11 +512,8 @@ def save_results(records: list[dict], summary: list[dict], results_dir: Path, se
     return json_path
 
 
+# Command-line arguments.
 def _parse_args() -> argparse.Namespace:
-    """
-    Returns:
-        the parsed command-line arguments
-    """
     parser = argparse.ArgumentParser(description="Benchmark free LLMs on this project's LLM jobs.")
     parser.add_argument("--tasks", default=",".join(ALL_TASKS),
                         help=f"comma-separated subset of {ALL_TASKS}")
@@ -788,10 +529,8 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# CLI entry point: load .env, run the benchmark, print and save results.
 def main() -> None:
-    """
-    CLI entry point: load .env, run the benchmark, print and save results.
-    """
     load_dotenv()
     args = _parse_args()
 
