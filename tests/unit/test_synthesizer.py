@@ -16,11 +16,11 @@ def make_finding(agent: str, severity: str, title: str = "Issue", evidence: str 
 
 
 # Builds a minimal ReviewState-shaped dict for the node under test.
-def build_state(findings: list[dict]) -> dict:
+def build_state(findings: list[dict], diff: str = "+ def f(): pass") -> dict:
     return {
         "pr_number": 1,
         "repo_full_name": "test/repo",
-        "pr_diff": "+ def f(): pass",
+        "pr_diff": diff,
         "changed_files": ["some/file.py"],
         "retrieved_context": [],
         "retrieval_quality_score": 1.0,
@@ -32,8 +32,8 @@ def build_state(findings: list[dict]) -> dict:
 
 
 # Runs the synthesizer and returns the Markdown comment.
-def render(findings: list[dict]) -> str:
-    return synthesizer_node(build_state(findings))["final_review_markdown"]
+def render(findings: list[dict], diff: str = "+ def f(): pass") -> str:
+    return synthesizer_node(build_state(findings, diff))["final_review_markdown"]
 
 
 def test_synthesizer_renders_categories_in_fixed_order():
@@ -81,7 +81,7 @@ def test_synthesizer_summary_table_counts_per_category():
         make_finding("quality", "MEDIUM"),
     ])
 
-    assert "Found **3** issue(s)." in markdown
+    assert "⛔ **2 blocking issue(s)** to fix before merging, out of 3 finding(s)." in markdown
     assert "| 🔒 Security | 2 | - | - | - | - | 2 |" in markdown
     assert "| 🧠 Logic | - | - | - | - | - | 0 |" in markdown
     assert "| ✨ Code quality | - | - | 1 | - | - | 1 |" in markdown
@@ -91,7 +91,7 @@ def test_synthesizer_summary_table_counts_per_category():
 def test_synthesizer_includes_finding_fields():
     markdown = render([make_finding("logic", "HIGH", "Off by one")])
 
-    assert "#### 🟠 HIGH - Off by one" in markdown
+    assert "#### 🟠 [blocking] HIGH - Off by one" in markdown
     assert "`some/file.py:10`" in markdown
     assert "some_code_here()" in markdown
     assert "**Suggestion:** Do this instead." in markdown
@@ -113,6 +113,47 @@ def test_synthesizer_keeps_unknown_agent_findings():
     print("OK - a finding from an unknown agent is shown under Other, not dropped")
 
 
+def test_synthesizer_labels_each_severity():
+    markdown = render([
+        make_finding("security", "CRITICAL", "Crit"),
+        make_finding("logic", "MEDIUM", "Med"),
+        make_finding("quality", "INFO", "Info"),
+    ])
+
+    assert "[blocking] CRITICAL - Crit" in markdown
+    assert "[suggestion] MEDIUM - Med" in markdown
+    assert "[nit] INFO - Info" in markdown
+    print("OK - CRITICAL/HIGH are blocking, MEDIUM a suggestion, LOW/INFO nits")
+
+
+def test_synthesizer_verdict_when_nothing_blocks():
+    markdown = render([make_finding("quality", "MEDIUM"), make_finding("quality", "LOW")])
+
+    assert "✅ **Nothing blocking.** 2 suggestion(s) or nit(s) below." in markdown
+    assert "⛔" not in markdown
+    print("OK - no CRITICAL/HIGH finding gives a 'nothing blocking' verdict")
+
+
+def test_synthesizer_folds_nits_under_details():
+    markdown = render([make_finding("quality", "MEDIUM", "Real issue"), make_finding("quality", "LOW", "Tiny nit")])
+
+    details_pos = markdown.find("<details>\n<summary>1 nit(s)</summary>\n\n")
+    assert details_pos != -1, "nits must be folded in a <details> block with a blank line after <summary>"
+    assert markdown.find("Real issue") < details_pos < markdown.find("Tiny nit")
+    assert markdown.rstrip().endswith("</details>")
+    print("OK - nits are folded below the real issues")
+
+
+def test_synthesizer_flags_large_prs_only():
+    large_diff = "\n".join(["+++ b/big.py"] + [f"+line {i}" for i in range(450)])
+    small_diff = "\n".join(["--- a/small.py", "+++ b/small.py"] + [f"-old {i}" for i in range(200)] + [f"+new {i}" for i in range(200)])
+
+    assert "📏 **Large PR:** 450 changed lines." in render([make_finding("security", "HIGH")], large_diff)
+    assert "📏 **Large PR:** 450 changed lines." in render([], large_diff), "the note also shows on a clean review"
+    assert "Large PR" not in render([make_finding("security", "HIGH")], small_diff), "400 changed lines is not large"
+    print("OK - only diffs above 400 changed lines get the size note; file headers don't count")
+
+
 def test_synthesizer_handles_no_findings():
     markdown = render([])
 
@@ -128,5 +169,9 @@ if __name__ == "__main__":
     test_synthesizer_includes_finding_fields()
     test_synthesizer_skips_empty_evidence_block()
     test_synthesizer_keeps_unknown_agent_findings()
+    test_synthesizer_labels_each_severity()
+    test_synthesizer_verdict_when_nothing_blocks()
+    test_synthesizer_folds_nits_under_details()
+    test_synthesizer_flags_large_prs_only()
     test_synthesizer_handles_no_findings()
     print("\nAll synthesizer tests passed.")

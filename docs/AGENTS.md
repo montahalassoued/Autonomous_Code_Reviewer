@@ -45,9 +45,11 @@ Runs the semantic RAG pipeline (query decomposition, hybrid search, graph expans
 
 No LLM call. It builds one Markdown comment:
 
-1. A heading and the total number of findings.
-2. A summary table: one row per category, one column per severity.
-3. One section per category, always in the order **Security → Logic → Code quality**, each with its count. Findings are sorted by severity inside a section. An empty category says "No issues found", so the reader can see that all three reviews ran.
-4. Findings from an unknown agent go under "Other" instead of being dropped.
+1. A heading and a **verdict**: "⛔ N blocking issue(s) to fix before merging" or "✅ Nothing blocking".
+2. A **size note** when the diff has more than 400 changed lines, since reviews miss more on large PRs.
+3. A summary table: one row per category, one column per severity.
+4. One section per category, always in the order **Security → Logic → Code quality**, each with its count. Findings are sorted by severity inside a section. An empty category says "No issues found", so the reader can see that all three reviews ran.
+5. Each finding carries a label derived from its severity: CRITICAL / HIGH → `[blocking]`, MEDIUM → `[suggestion]`, LOW / INFO → `[nit]`. Nits are folded in a `<details>` block so they don't bury the real issues.
+6. Findings from an unknown agent go under "Other" instead of being dropped.
 
 A review with no findings at all is a single "No issues found" line. The comment is posted, or edited in place, by `tools/github_tools.py`.
