@@ -1,9 +1,11 @@
-import os
 import json
-from groq import Groq
+import logging
+import os
+
+from groq import APIError, Groq
 
 
-DECOMPOSE_MODEL = "llama-3.3-70b-versatile"
+logger = logging.getLogger(__name__)
 
 DECOMPOSE_PROMPT_TEMPLATE = """You are analyzing a pull request diff to figure out what existing
 code in the repository would be useful context for reviewing it.
@@ -35,17 +37,21 @@ def _build_client() -> Groq:
     return Groq(api_key=api_key)
 
 
-# Generates 1-3 search queries from a raw PR diff.
-def decompose_diff(diff: str) -> list[str]:
+# Generates 1-3 search queries from a raw PR diff; the caller picks the Groq model.
+def decompose_diff(diff: str, model: str) -> list[str]:
     client = _build_client()
     prompt = DECOMPOSE_PROMPT_TEMPLATE.format(diff=diff)
 
-    response = client.chat.completions.create(
-        model=DECOMPOSE_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,  # low temperature: we want consistent,
-                          # focused queries, not creative variation
-    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,  # consistent, focused queries, not creative variation
+        )
+    except APIError as error:
+        # A Groq outage or rate limit degrades retrieval, never the whole review.
+        logger.warning("Query decomposition failed (%s), searching with the diff itself", type(error).__name__)
+        return [diff[:200]]
 
     # content can be None on an empty or filtered completion - treat it
     # like unparseable output so we reach the fallback below.

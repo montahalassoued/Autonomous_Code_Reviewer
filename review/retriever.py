@@ -1,15 +1,21 @@
-import os
 import json
-from groq import Groq
+import logging
+import os
+
+from groq import APIError, Groq
 
 from review.state import ReviewState, RetrievedChunk
 from rag.query_decomposer import decompose_diff
 from rag.hybrid_search import hybrid_search
 from rag.graph_retriever import enrich_with_graph_context
 from rag.reranker import rerank, RankedChunk
+from review.agents.agent_runner import review_agent_model
 
 
-JUDGE_MODEL = "llama-3.3-70b-versatile"
+logger = logging.getLogger(__name__)
+
+# Score used when the judge call fails: high enough to stop the retry loop instead of spending more calls.
+JUDGE_FALLBACK_SCORE = 1.0
 
 # Corrective-RAG loop bounds, read by review/graph.py's routing: retry
 # retrieval while the judge scores below QUALITY_THRESHOLD, but never
@@ -81,11 +87,15 @@ def _judge_retrieval_quality(diff: str, chunks: list[RankedChunk]) -> float:
     )
     prompt = JUDGE_PROMPT_TEMPLATE.format(diff=diff, context_summary=context_summary)
 
-    response = client.chat.completions.create(
-        model=JUDGE_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0,  # deterministic scoring, not creative
-    )
+    try:
+        response = client.chat.completions.create(
+            model=review_agent_model(),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,  # deterministic scoring, not creative
+        )
+    except APIError as error:
+        logger.warning("Retrieval judge failed (%s), keeping the current context", type(error).__name__)
+        return JUDGE_FALLBACK_SCORE
 
     # content can be None on an empty or filtered completion; "" then
     # fails to parse below and scores 0.0, same as any bad output.
@@ -108,7 +118,7 @@ def run_retrieval(
     all_ids: list[str],
     graph,
 ) -> tuple[list[RetrievedChunk], float]:
-    queries = decompose_diff(diff)
+    queries = decompose_diff(diff, review_agent_model())
 
     # Run hybrid search for every sub-query and merge candidates,
     # deduplicating by chunk_id - a candidate found by multiple

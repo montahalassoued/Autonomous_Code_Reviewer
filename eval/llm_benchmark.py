@@ -31,8 +31,8 @@ ALL_TASKS = ["agents", "decomposer", "judge", "chunker"]
 # Free-tier candidates. Provider model lists change over time; run with
 # --list-models to see what your keys can call today, and pass --models
 # to override this list. (Groq retired llama-3.3-70b-versatile and
-# llama-3.1-8b-instant, which the legacy decomposer and judge still use;
-# the review agents read REVIEW_AGENT_MODEL - see review/agents/agent_runner.py.)
+# llama-3.1-8b-instant; the review agents, the legacy decomposer and the
+# judge read REVIEW_AGENT_MODEL - see review/agents/agent_runner.py.)
 DEFAULT_MODELS = [
     "groq:openai/gpt-oss-120b",
     "groq:openai/gpt-oss-20b",

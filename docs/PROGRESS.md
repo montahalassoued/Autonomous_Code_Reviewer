@@ -35,5 +35,5 @@ The durable jobs, the tests split, the decisions merge, the security authz promp
 
 ## Known issues
 
-- The review agents' model `openai/gpt-oss-120b` is a provisional default until the benchmark runs on the 3 agents. The legacy decomposer (`rag/query_decomposer.py`) and judge (`review/retriever.py`) still call the retired `llama-3.3-70b-versatile` and don't catch API errors, so the retriever node raises and every review fails until they are switched too.
+- The review agents' model `openai/gpt-oss-120b` is a provisional default until the benchmark runs on the 3 agents. The legacy decomposer (`rag/query_decomposer.py`) and judge (`review/retriever.py`) use the same model; on a Groq API error the decomposer searches with the diff itself and the judge keeps the current context, so retrieval never fails the review.
 - The latest benchmark run (2026-10-13) predates the 5 authn/authz cases and scores almost every model at 1.00, so it does not separate them.

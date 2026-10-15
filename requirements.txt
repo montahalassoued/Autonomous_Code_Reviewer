@@ -12,7 +12,7 @@ langchain>=0.3.0
 langchain-core>=0.3.0
 google-genai>=1.0.0                # Gemini Flash SDK, used directly in rag/contextual_chunker.py
 
-langchain-groq>=0.2.0              # Groq - llama-3.3-70b-versatile, free tier
+langchain-groq>=0.2.0              # Groq - REVIEW_AGENT_MODEL, free tier
 langchain-google-genai>=2.0.0      # Gemini Flash - free tier, used for contextual chunking
 
 # --- RAG: AST parsing (Step 3) ---
