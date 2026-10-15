@@ -1,15 +1,3 @@
-"""
-Manual test for rag/contextual_chunker.py
-
-IMPORTANT: this test makes REAL calls to the Gemini API. You need a
-valid GOOGLE_API_KEY set in your environment (or a .env file loaded
-via python-dotenv) for this to work.
-
-Goal: verify that generate_context() produces a short, relevant
-sentence for a real function, and that embeddable_text correctly
-prepends it to the original code.
-"""
-
 from dotenv import load_dotenv
 load_dotenv()  # reads .env file in the project root, if present
 

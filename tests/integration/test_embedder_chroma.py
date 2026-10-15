@@ -1,14 +1,3 @@
-"""
-Manual test for rag/embedder.py + db/chroma.py
-
-IMPORTANT: this test makes REAL calls to the Voyage AI API. You need a
-valid VOYAGE_API_KEY set in your .env file.
-
-Goal: run the full chain - parse, contextualize, embed, store, search -
-and verify that a semantic search query actually returns the most
-relevant function, proving the embeddings capture real meaning.
-"""
-
 from dotenv import load_dotenv
 load_dotenv()
 

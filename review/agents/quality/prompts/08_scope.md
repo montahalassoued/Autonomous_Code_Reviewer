@@ -1,0 +1,1 @@
+Report only issues introduced or made worse by this change, not issues in unchanged lines of the context, each with a concrete fix. Do NOT report security vulnerabilities or logic bugs: other reviewers cover them.

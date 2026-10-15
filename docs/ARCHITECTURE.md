@@ -17,7 +17,7 @@ The diff is the input under review. **Context** is what the agents need from the
 | Code index | Postgres: a derived, structural map of `main` (symbols, edges, reviews, findings). Git stays the source of truth | `db/` (planned) |
 | Indexer | tree-sitter parse, symbol extraction, call resolution, test linking. No LLM | `rag/` → planned indexing modules |
 | Analysis | Triage, symbol diff, context builder | `analysis/` (planned) |
-| Review graph | LangGraph: build_context → optional context subagent → 3 agents → synthesizer | `agents/` |
+| Review graph | LangGraph: build_context → optional context subagent → 3 agents → synthesizer | `review/` (`review/agents/` for the 3 agents) |
 | GitHub client | Diffs, PR metadata, inline review, summary upsert, commit comments | `tools/github_tools.py` |
 
 ## Flow

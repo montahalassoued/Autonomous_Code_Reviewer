@@ -1,17 +1,3 @@
-"""
-check_commit_message.py - Claude Code PreToolUse hook that blocks git
-commits that break this project's commit rule.
-
-Inputs: the hook payload as JSON on stdin (tool_name + tool_input.command).
-Outputs: exit code 0 to allow the command, or exit code 2 with a reason
-on stderr to block it (Claude Code shows the reason to Claude).
-
-Why a hook and not just the commit-message skill: a skill is guidance
-that can be missed, while a hook runs on every command and cannot be
-skipped. The rule: a commit is a single title line, with no body and no
-Co-Authored-By / "Generated with Claude Code" attribution.
-"""
-
 import json
 import re
 import sys
@@ -25,8 +11,8 @@ FORBIDDEN_PATTERNS = [
 ]
 
 
+# Print the reason and exit 2, which blocks the tool call.
 def block(reason: str) -> None:
-    """Print the reason for Claude and exit with code 2, which blocks the tool call."""
     print(f"Commit blocked by .claude/hooks/check_commit_message.py: {reason}", file=sys.stderr)
     sys.exit(2)
 
@@ -58,13 +44,8 @@ def main() -> None:
     sys.exit(0)
 
 
+# Cut the segment at the first &&, ||, ; or | outside quotes.
 def cut_at_command_end(segment: str) -> str:
-    """
-    Trims the segment to the commit command itself: up to the first &&, ||, ;
-    or | that sits outside quotes. Otherwise flags of later commands in a
-    chain (e.g. `python -m pytest`) would be mistaken for commit flags.
-    A heredoc (<<) is kept, because it belongs to the commit.
-    """
     quote = None
     for position, char in enumerate(segment):
         if quote:
@@ -77,8 +58,8 @@ def cut_at_command_end(segment: str) -> str:
     return segment
 
 
+# Blocks the command if this one commit's message breaks the title-only rule.
 def check_commit_segment(segment: str) -> None:
-    """Blocks the command if this one commit's message breaks the title-only rule."""
     lowered = segment.lower()
     for pattern in FORBIDDEN_PATTERNS:
         if re.search(pattern, lowered):

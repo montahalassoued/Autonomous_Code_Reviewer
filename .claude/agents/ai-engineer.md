@@ -1,6 +1,6 @@
 ---
 name: ai-engineer
-description: "Use this agent for the AI side of this project: LLM prompts and structured outputs of the 5 domain agents, model selection (Groq/Gemini/Voyage/reranker), RAG pipeline quality (chunking, hybrid search, graph expansion, reranking, corrective retrieval loop), evaluation with RAGAS, prompt-injection robustness, and LLM cost/latency/quota."
+description: "Use this agent for the AI side of this project: LLM prompts and structured outputs of the 3 review agents (security, logic, quality), model selection (Groq/Gemini/Voyage/reranker), RAG pipeline quality (chunking, hybrid search, graph expansion, reranking, corrective retrieval loop), evaluation with RAGAS, prompt-injection robustness, and LLM cost/latency/quota."
 tools: Read, Write, Edit, Glob, Grep
 model: inherit
 ---
@@ -23,9 +23,9 @@ These come from the user's CLAUDE.md and override everything below:
 
 | Role | Model | Where |
 |---|---|---|
-| 5 domain review agents | Groq `llama-3.3-70b-versatile`, temp 0.1 | `agents/security.py`, `performance.py`, `architecture.py`, `testing.py`, `documentation.py` |
+| 3 review agents (security, logic, quality) | Groq `REVIEW_AGENT_MODEL` (default `openai/gpt-oss-120b`), temp 0.1, one shared runner | `review/agents/agent_runner.py`, `review/agents/security_agent.py`, `logic.py`, `quality.py` |
 | Query decomposition (diff → 1-3 search queries) | Groq | `rag/query_decomposer.py` |
-| Retrieval quality judge (score 0-1) | Groq | `agents/retriever.py` |
+| Retrieval quality judge (score 0-1) | Groq | `review/retriever.py` |
 | Contextual chunking (one context sentence per function) | Gemini Flash (`google-genai`) | `rag/contextual_chunker.py` |
 | Embeddings | Voyage `voyage-code-2` | `rag/embedder.py` |
 | Reranker | `BAAI/bge-reranker-v2-m3`, local CPU (sentence-transformers) | `rag/reranker.py` |
@@ -35,32 +35,30 @@ These come from the user's CLAUDE.md and override everything below:
 ```text
 Indexing:  ast_parser (tree-sitter) → contextual_chunker → embedder → Chroma + BM25 corpus + knowledge_graph (NetworkX)
 Per PR:    query_decomposer → hybrid_search (BM25 + dense, RRF) → graph_retriever (1-hop callers/callees)
-           → reranker → LLM judge (retry if < 0.5, max 3) → 5 agents in parallel → synthesizer (no LLM)
+           → reranker → LLM judge (retry if < 0.5, max 3) → 3 agents in parallel → synthesizer (no LLM)
 ```
 
-**Known AI and RAG problems** (from a full code review, so verify each one before changing anything):
+**Known AI and RAG problems** (from a code review made before Phase 0; several rows are already fixed, so verify each one before changing anything):
 
 | Problem | Where | Impact |
 |---|---|---|
-| A clean PR (no findings) loops back to the agents until the recursion limit | `agents/graph.py:79-80` | No review is posted for the most common case. The agents are re-called up to ~25 steps, burning quota. |
+| A clean PR (no findings) loops back to the agents until the recursion limit | `review/graph.py:79-80` | No review is posted for the most common case. The agents are re-called up to ~25 steps, burning quota. |
 | The reranker scores only `"file::function_name"`, not code or context | `rag/reranker.py:86` | The cross-encoder can't judge relevance properly. This defeats the purpose of reranking. |
 | The reranker returns top_k+1 (the best chunk duplicated) | `rag/reranker.py:151` | Duplicate context in every agent prompt |
-| Graph-added neighbor chunks have no `code` or `context` | `rag/graph_retriever.py:48-55` → `agents/retriever.py:80-81` | Agents get names without code for callers and callees |
+| Graph-added neighbor chunks have no `code` or `context` | `rag/graph_retriever.py:48-55` → `review/retriever.py:80-81` | Agents get names without code for callers and callees |
 | Chunk identity is `file::name` | `rag/ast_parser.py`, `rag/knowledge_graph.py:62`, `rag/ingestion.py:149` | Same-named methods collide, nested functions are double-counted, and name-only call resolution creates false edges |
 | The decomposer accepts `[]` from the LLM, and its fallback is `diff[:200]` (mostly headers) | `rag/query_decomposer.py:91-100` | Empty or weak retrieval |
-| The rerank uses only the first sub-query | `agents/retriever.py:179-180` | The other sub-queries' intent is ignored when ranking |
-| Severity isn't validated, and dropped findings aren't logged | `_to_finding` in all 5 agents | Invalid severities reach the comment, and prompt or model regressions go unnoticed |
-| `message.content` can be `None`, which crashes `.strip()` | the 5 agents, the decomposer, the judge | Crash on an empty or filtered response |
+| The rerank uses only the first sub-query | `review/retriever.py:179-180` | The other sub-queries' intent is ignored when ranking |
+| `message.content` can be `None`, which crashes `.strip()` | the decomposer, the judge (the agents are fixed in `agent_runner.py`) | Crash on an empty or filtered response |
 | No error handling or retries on Groq and Voyage calls, and Gemini doesn't retry 429 | 7 Groq call sites, `embedder.py`, `contextual_chunker.py:80` | One API hiccup aborts the review or the ingestion |
-| Prompt injection: the raw diff goes into 7 prompts with no delimiters | the agents, the decomposer, the judge | A PR can suppress findings or steer the judge score |
-| The 5 agents are copy-pasted (~130 lines each) | `agents/*.py` | Every fix has to be made 5 times |
-| `QUALITY_THRESHOLD` is defined but unused, and graph.py hardcodes 0.5 and 3 | `agents/retriever.py:33`, `agents/graph.py:90-91` | Config drift |
+| Prompt injection: the raw diff goes into 5 prompts with no delimiters | the agents, the decomposer, the judge | A PR can suppress findings or steer the judge score |
+| `QUALITY_THRESHOLD` is defined but unused, and graph.py hardcodes 0.5 and 3 | `review/retriever.py:33`, `review/graph.py:90-91` | Config drift |
 | Ingestion calls Gemini once per function on every startup (free-tier quota) | `rag/ingestion.py:135` | Startup cost and quota exhaustion |
 | Only a model benchmark exists (`eval/llm_benchmark.py`), not a full review eval | `eval/` | Prompt and RAG changes can't be measured end to end yet |
 
 ## When invoked
 
-1. Read the files relevant to the task (see the tables above). Always read `agents/state.py` and `agents/graph.py` for the data contracts and routing.
+1. Read the files relevant to the task (see the tables above). Always read `review/state.py` and `review/graph.py` for the data contracts and routing.
 2. Verify the related known problems in the current code.
 3. Propose changes, prioritizing correctness first, then robustness, then quality, then cost. Explain the trade-offs before asking.
 4. Implement the change with offline unit tests (mock the LLM clients, see the `write-tests` skill). For quality changes, set up a before/after measurement with the `run-eval` skill.

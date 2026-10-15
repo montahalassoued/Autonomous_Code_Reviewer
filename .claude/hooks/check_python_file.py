@@ -1,22 +1,3 @@
-"""
-check_python_file.py - Claude Code PostToolUse hook that checks a Python
-file right after Claude edits or writes it.
-
-Inputs: the hook payload as JSON on stdin (tool_input.file_path).
-Outputs: exit code 0 if the file is fine (or isn't Python), or exit code
-2 with the error on stderr so Claude sees the problem and fixes it
-immediately.
-
-What it checks:
-1. Syntax, via py_compile (standard library, always available).
-2. Lint errors via ruff, only if ruff is installed - so the hook works
-   today and gets stricter automatically after `pip install ruff`.
-
-Why not run pytest here: most tests in tests/ make real Groq/Gemini/
-Voyage calls, which would burn API quota on every single edit. Tests
-are run on demand by the test-runner subagent instead.
-"""
-
 import json
 import py_compile
 import shutil
@@ -25,8 +6,8 @@ import sys
 from pathlib import Path
 
 
+# Print the problem and exit 2 so it gets fixed.
 def fail(message: str) -> None:
-    """Print the problem for Claude and exit with code 2 so it gets fixed."""
     print(message, file=sys.stderr)
     sys.exit(2)
 

@@ -1,43 +1,28 @@
-"""
-dedupe.py - "claim once" store so the same commit is never queued twice.
-
-Inputs: a DedupeKey (repo, head_sha, target) from the webhook.
-Outputs: claim() returns True for the first caller and False for every later one.
-
-Why: GitHub delivers at least once and users can redeliver by hand. The
-natural idempotency key of a review is (repo, PR, head sha). Azure Table
-Storage gives an atomic "insert if absent" (create_entity fails with a
-conflict if the row exists), so it works across API replicas with no lock.
-Azure Tables have no TTL, so old rows stay; they are tiny.
-"""
-
-import re
 import threading
 import time
-from datetime import datetime, timezone
 from typing import Callable, Optional, Protocol
 
 from app.jobs.models import DedupeKey
 
 
+# What the webhook needs from a dedupe store.
 class DedupeStore(Protocol):
-    """What the webhook needs from a dedupe store."""
 
+    # Atomically records the key; False if it was already recorded.
     def claim(self, key: DedupeKey) -> bool:
-        """Atomically records the key. True if this call claimed it, False if already claimed."""
+        ...
 
+    # Forgets the key so a redelivery can claim it again.
     def release(self, key: DedupeKey) -> None:
-        """Forgets the key so a redelivery can claim it again."""
+        ...
+
+    # Frees connections on shutdown.
+    def close(self) -> None:
+        ...
 
 
+# Thread-safe dedupe for local development and tests (single process only).
 class InMemoryDedupeStore:
-    """
-    Thread-safe dedupe for local development and tests (single process only).
-
-    Args:
-        ttl_s: if set, a claim expires after this many seconds.
-        clock: returns "now" in seconds; injectable for tests.
-    """
 
     def __init__(self, ttl_s: Optional[float] = None, clock: Callable[[], float] = time.monotonic) -> None:
         self._ttl_s = ttl_s
@@ -45,8 +30,8 @@ class InMemoryDedupeStore:
         self._lock = threading.Lock()
         self._claimed_at: dict[DedupeKey, float] = {}
 
+    # Claims the key unless an unexpired claim exists.
     def claim(self, key: DedupeKey) -> bool:
-        """Claims the key unless an unexpired claim exists."""
         with self._lock:
             now = self._clock()
             claimed_at = self._claimed_at.get(key)
@@ -56,77 +41,53 @@ class InMemoryDedupeStore:
             return True
 
     def release(self, key: DedupeKey) -> None:
-        """Removes the claim if present."""
         with self._lock:
             self._claimed_at.pop(key, None)
 
-
-_UNSAFE_KEY_CHARS = re.compile(r"[^A-Za-z0-9.\-]")
-
-
-def encode_table_key(value: str) -> str:
-    """
-    Makes a string safe for an Azure Table PartitionKey/RowKey.
-
-    Table keys may not contain / \\ # ? or control characters. Every character
-    outside [A-Za-z0-9.-] becomes "_" + two hex digits. "_" itself is escaped
-    too, so the mapping is reversible and two different inputs never collide.
-
-    Args:
-        value: raw text such as "owner/repo".
-
-    Returns:
-        the encoded text.
-    """
-    return _UNSAFE_KEY_CHARS.sub(lambda match: f"_{ord(match.group()):02x}", value)
+    def close(self) -> None:
+        pass  # nothing to free
 
 
-def table_keys(key: DedupeKey) -> tuple[str, str]:
-    """
-    Maps a DedupeKey to (PartitionKey, RowKey).
+# DO UPDATE (a no-op) instead of DO NOTHING, so RETURNING gives the id of an existing repo too.
+UPSERT_REPO_SQL = """
+INSERT INTO repos (full_name) VALUES (%s)
+ON CONFLICT (full_name) DO UPDATE SET full_name = EXCLUDED.full_name
+RETURNING id
+"""
 
-    Partition = repo (so one repo's rows sit together). Row = sha + target,
-    joined with "~", which the encoder never produces, so parts cannot blur.
-    """
-    partition_key = encode_table_key(key.repo_full_name)
-    row_key = f"{encode_table_key(key.head_sha)}~{encode_table_key(key.target)}"
-    return partition_key, row_key
+INSERT_REVIEW_SQL = """
+INSERT INTO reviews (repo_id, target, head_sha) VALUES (%s, %s, %s)
+ON CONFLICT (repo_id, target, head_sha) DO NOTHING
+RETURNING id
+"""
+
+# Only a still-queued review is forgotten: a running or finished one keeps its row.
+DELETE_QUEUED_REVIEW_SQL = """
+DELETE FROM reviews USING repos
+WHERE reviews.repo_id = repos.id
+  AND repos.full_name = %s
+  AND reviews.target = %s
+  AND reviews.head_sha = %s
+  AND reviews.status = 'queued'
+"""
 
 
-class AzureTableDedupeStore:
-    """
-    Azure Table Storage dedupe store.
+# Dedupe through the reviews table: its unique (repo_id, target, head_sha) is the claim.
+class PostgresDedupeStore:
 
-    Args:
-        table_client: an azure.data.tables TableClient for an existing table
-                      (the factory creates the table if missing).
-    """
+    def __init__(self, pool) -> None:
+        self._pool = pool
 
-    def __init__(self, table_client) -> None:
-        self._table = table_client
-
+    # Inserts a 'queued' review row; False if this commit was already queued for this target.
     def claim(self, key: DedupeKey) -> bool:
-        """Inserts the row. A conflict means somebody already claimed it."""
-        from azure.core.exceptions import ResourceExistsError  # lazy: memory mode needs no Azure
-
-        partition_key, row_key = table_keys(key)
-        entity = {
-            "PartitionKey": partition_key,
-            "RowKey": row_key,
-            "claimed_at": datetime.now(timezone.utc).isoformat(),
-        }
-        try:
-            self._table.create_entity(entity)
-        except ResourceExistsError:
-            return False
-        return True
+        with self._pool.connection() as connection:
+            repo_id = connection.execute(UPSERT_REPO_SQL, (key.repo_full_name,)).fetchone()[0]
+            inserted = connection.execute(INSERT_REVIEW_SQL, (repo_id, key.target, key.head_sha)).fetchone()
+        return inserted is not None
 
     def release(self, key: DedupeKey) -> None:
-        """Deletes the row; a missing row is fine."""
-        from azure.core.exceptions import ResourceNotFoundError
+        with self._pool.connection() as connection:
+            connection.execute(DELETE_QUEUED_REVIEW_SQL, (key.repo_full_name, key.target, key.head_sha))
 
-        partition_key, row_key = table_keys(key)
-        try:
-            self._table.delete_entity(partition_key, row_key)
-        except ResourceNotFoundError:
-            pass  # already released, nothing to undo
+    def close(self) -> None:
+        self._pool.close()

@@ -1,23 +1,3 @@
-"""
-Full end-to-end integration test for agents/retriever.py
-
-IMPORTANT: this is the heaviest test in the project so far. It makes
-REAL calls to:
-  - Gemini (contextual_chunker.py)   - 4 calls, one per function
-  - Voyage AI (embedder.py)           - 1 batched call
-  - Groq (query_decomposer.py)        - 1 call
-  - Groq (retriever.py's LLM-judge)   - 1 call
-Plus local CPU inference via the cross-encoder reranker (no API call,
-but downloads the model on first run if not already cached from the
-reranker test).
-
-Goal: prove the ENTIRE pipeline works together - from raw source code
-all the way to a final, judged, RetrievedChunk list - using a diff
-that introduces a NEW function (reset_password) which legitimately
-relates to existing indexed functions, so the test can check that
-genuinely relevant context gets surfaced.
-"""
-
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -26,7 +6,7 @@ from rag.contextual_chunker import contextualize_functions
 from rag.embedder import embed_chunks
 from db.chroma import get_client, get_collection, store_chunks
 from rag.knowledge_graph import build_knowledge_graph
-from agents.retriever import run_retrieval
+from review.retriever import run_retrieval
 
 
 EXISTING_REPO_CODE = '''def hash_password(password):
@@ -64,12 +44,8 @@ NEW_PR_DIFF = """
 """
 
 
+# Index EXISTING_REPO_CODE as if the repo was ingested before the PR.
 def setup_repo_index():
-    """
-    Runs the full Step 3-6 ingestion pipeline on EXISTING_REPO_CODE,
-    simulating a repo that was already indexed before this new PR
-    (with reset_password) was opened.
-    """
     print("Parsing existing repo...")
     functions = parse_file("auth/utils.py", EXISTING_REPO_CODE)
 

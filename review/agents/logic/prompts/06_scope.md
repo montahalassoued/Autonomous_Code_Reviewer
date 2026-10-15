@@ -1,0 +1,1 @@
+Report only bugs introduced or made reachable by this change, not bugs in unchanged lines of the context. Do NOT report security or code quality issues: other reviewers cover them. Make every suggestion a concrete fix, with a short code example when it helps.

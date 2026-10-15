@@ -1,10 +1,3 @@
-"""Claude Code status line: model, context usage, git branch.
-
-File purpose: render a one-line status line; warn in red/bold at >= 40% context.
-Inputs: status line JSON on stdin (model.display_name, context_window.used_percentage,
-    or total_input_tokens / context_window_size as fallback, workspace.current_dir).
-Outputs: a single line on stdout. Never raises; prints a fallback line on error.
-"""
 import json
 import os
 import sys
@@ -14,8 +7,8 @@ RED_BOLD = "\033[1;31m"
 RESET = "\033[0m"
 
 
+# Return context usage percent (float) or None if unavailable.
 def ctx_percent(data):
-    """Return context usage percent (float) or None if unavailable."""
     cw = data.get("context_window") or {}
     pct = cw.get("used_percentage")
     if isinstance(pct, (int, float)):
@@ -26,8 +19,8 @@ def ctx_percent(data):
     return None
 
 
+# Read the branch from .git/HEAD (no subprocess, no git locks).
 def git_branch(start):
-    """Read the branch from .git/HEAD (no subprocess, no git locks)."""
     d = os.path.abspath(start)
     while True:
         git = os.path.join(d, ".git")

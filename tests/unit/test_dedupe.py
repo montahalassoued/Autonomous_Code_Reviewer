@@ -1,20 +1,10 @@
-"""
-Unit test for app/jobs/dedupe.py
-
-No Azure and no network: the in-memory store is tested directly, and the
-Azure Table store is tested with a fake TableClient that raises the real
-azure.core ResourceExistsError / ResourceNotFoundError (azure-core is
-installed with azure-data-tables; the tests skip if it is missing).
-"""
-
 import pytest
 
-from app.jobs.dedupe import AzureTableDedupeStore, InMemoryDedupeStore, encode_table_key, table_keys
+from app.jobs.dedupe import InMemoryDedupeStore, PostgresDedupeStore
 from app.jobs.models import DedupeKey
 
 
 KEY = DedupeKey("owner/repo", "abc123", "pr:42")
-FORBIDDEN_TABLE_KEY_CHARS = set("/\\#?")
 
 
 def test_claim_once_then_duplicate_then_release():
@@ -47,69 +37,100 @@ def test_in_memory_claim_expires_after_ttl():
     print("OK - claims expire after the TTL")
 
 
-def test_table_keys_have_no_forbidden_characters():
-    partition_key, row_key = table_keys(DedupeKey("owner/repo#1?", "abc\\123", "pr:42"))
+# Mimics the reviews/repos tables: one row per (repo, target, sha), like the real unique constraint.
+class FakeConnection:
 
-    for part in (partition_key, row_key):
-        assert not (set(part) & FORBIDDEN_TABLE_KEY_CHARS), f"Forbidden character in {part}"
-    assert partition_key.startswith("owner_2frepo")
-    print(f"OK - table keys are valid: {partition_key} / {row_key}")
+    def __init__(self, tables: dict) -> None:
+        self.tables = tables
+        self._result = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        pass
+
+    def execute(self, sql: str, params: tuple):
+        repos, reviews = self.tables["repos"], self.tables["reviews"]
+        if sql.strip().startswith("INSERT INTO repos"):
+            self._result = (repos.setdefault(params[0], len(repos) + 1),)
+        elif sql.strip().startswith("INSERT INTO reviews"):
+            key = params
+            self._result = None if key in reviews else (len(reviews) + 1,)
+            reviews.setdefault(key, "queued")
+        elif sql.strip().startswith("DELETE FROM reviews"):
+            full_name, target, head_sha = params
+            key = (repos.get(full_name), target, head_sha)
+            if reviews.get(key) == "queued":
+                del reviews[key]
+        return self
+
+    def fetchone(self):
+        return self._result
 
 
-def test_table_key_encoding_does_not_collide():
-    assert encode_table_key("a/b") != encode_table_key("a_2fb"), "Escaping must be injective"
-    print("OK - key encoding is collision free")
-
-
-class FakeTableClient:
-    """Mimics the TableClient methods the store uses, with real Azure exceptions."""
+class FakePool:
 
     def __init__(self) -> None:
-        self.rows: dict[tuple[str, str], dict] = {}
+        self.tables = {"repos": {}, "reviews": {}}
+        self.closed = False
 
-    def create_entity(self, entity: dict) -> None:
-        from azure.core.exceptions import ResourceExistsError
+    def connection(self) -> FakeConnection:
+        return FakeConnection(self.tables)
 
-        identity = (entity["PartitionKey"], entity["RowKey"])
-        if identity in self.rows:
-            raise ResourceExistsError("entity exists")
-        self.rows[identity] = entity
-
-    def delete_entity(self, partition_key: str, row_key: str) -> None:
-        from azure.core.exceptions import ResourceNotFoundError
-
-        if (partition_key, row_key) not in self.rows:
-            raise ResourceNotFoundError("no such entity")
-        del self.rows[(partition_key, row_key)]
+    def close(self) -> None:
+        self.closed = True
 
 
-def test_azure_table_store_maps_conflict_to_false():
-    pytest.importorskip("azure.core.exceptions")
-    table = FakeTableClient()
-    store = AzureTableDedupeStore(table)
+def test_postgres_store_claims_once_per_commit_and_target():
+    store = PostgresDedupeStore(FakePool())
 
     assert store.claim(KEY) is True
-    assert store.claim(KEY) is False, "ResourceExistsError must become False"
-    assert len(table.rows) == 1
-    print("OK - Azure Table conflict means already claimed")
+    assert store.claim(KEY) is False, "The unique (repo, target, sha) row means already queued"
+    assert store.claim(DedupeKey("owner/repo", "abc123", "push:main")) is True, "Another target is another review"
+    print("OK - one reviews row per commit and target")
 
 
-def test_azure_table_store_release_is_idempotent():
-    pytest.importorskip("azure.core.exceptions")
-    store = AzureTableDedupeStore(FakeTableClient())
+def test_postgres_store_release_only_forgets_queued_reviews():
+    pool = FakePool()
+    store = PostgresDedupeStore(pool)
     store.claim(KEY)
-
     store.release(KEY)
-    store.release(KEY)  # must not raise on a missing row
+    assert store.claim(KEY) is True, "A released claim can be taken again"
 
-    assert store.claim(KEY) is True
-    print("OK - release ignores a missing row and allows a new claim")
+    pool.tables["reviews"][(1, KEY.target, KEY.head_sha)] = "running"
+    store.release(KEY)
+    assert store.claim(KEY) is False, "A running review must never be forgotten"
+    print("OK - release deletes a queued row only")
+
+
+def test_postgres_store_close_closes_the_pool():
+    pool = FakePool()
+    PostgresDedupeStore(pool).close()
+
+    assert pool.closed
+    print("OK - close() releases the connection pool")
+
+
+def test_dedupe_backend_defaults(monkeypatch):
+    from app.jobs import factory
+
+    monkeypatch.delenv("DEDUPE_BACKEND", raising=False)
+    monkeypatch.setenv("JOBS_BACKEND", "memory")
+    assert factory._dedupe_backend() == "memory"
+    monkeypatch.setenv("JOBS_BACKEND", "azure")
+    assert factory._dedupe_backend() == "postgres", "Azure replicas must share one dedupe store"
+    monkeypatch.setenv("DEDUPE_BACKEND", "redis")
+    with pytest.raises(ValueError):
+        factory._dedupe_backend()
+    print("OK - memory locally, postgres with the Azure queue, anything else rejected")
 
 
 if __name__ == "__main__":
     test_claim_once_then_duplicate_then_release()
     test_different_sha_is_a_different_key()
     test_in_memory_claim_expires_after_ttl()
-    test_table_keys_have_no_forbidden_characters()
-    test_table_key_encoding_does_not_collide()
-    print("\nDedupe tests passed (Azure fake tests run under pytest).")
+    test_postgres_store_claims_once_per_commit_and_target()
+    test_postgres_store_release_only_forgets_queued_reviews()
+    test_postgres_store_close_closes_the_pool()
+    print("\nDedupe tests passed (the backend test runs under pytest).")

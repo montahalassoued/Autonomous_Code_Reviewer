@@ -1,62 +1,40 @@
 ---
 name: clean-code
-description: Write clear, readable Python code with comments that anyone can understand. Use whenever writing new code, editing existing code, or refactoring in this project (agents/, rag/, tools/, app/, tests/, eval/).
+description: Write clear, readable Python code with comments that anyone can understand. Use whenever writing new code, editing existing code, or refactoring in this project (review/, rag/, tools/, app/, tests/, eval/).
 ---
 
 # Clean, readable code
 
 The goal: someone who has never seen this project, even a beginner, can open any file and understand **what** it does and **why** it does it that way.
 
-## 1. Every file starts with a module docstring
+## 1. Comments are one short line
 
-Follow the style already used in the repo (see `rag/reranker.py` and `agents/security.py`):
+The code and the names explain *how*. A comment only says *what* a block is for, or *why* it's done that way, in **one line, about 15 words at most**.
 
-```python
-"""
-reranker.py - re-scores search results with a local cross-encoder
-and keeps only the top-K chunks.
+- **No comment block at the top of a file.** No `"""..."""` header: the file name and its folder say its role (see the `project-structure` skill). The file starts with its imports.
+- **No multi-line `"""..."""` blocks**, and no `Args:` / `Returns:` / `Inputs:` / `Outputs:` sections.
+- **Use one-line `#` comments**, above a function or a block whose purpose isn't obvious from its name.
+  ```python
+  # Read the LLM's JSON array; [] if it can't be parsed.
+  def parse_findings(raw_output: str) -> list[dict]:
+      # Groq sometimes wraps JSON in ``` fences, so strip them first.
+      cleaned = raw_output.strip().strip("`")
+  ```
 
-Inputs: the enriched results from rag/graph_retriever.py.
-Outputs: a list of RankedChunk objects that feed agents/retriever.py.
+The longer *why* of a design choice (alternatives, trade-offs) goes in `docs/DECISIONS.md` with the `log-decision` skill, not in the code.
 
-Why this step exists: <one short paragraph explaining the reason,
-the alternative that was rejected, and the trade-off>.
-"""
-```
+## 2. When to write a comment
 
-The docstring covers:
-- **What** the file does, in one or two sentences
-- **Inputs / Outputs**, and which other files in the repo it connects to
-- **Why**: the design decision behind it, if it isn't obvious
-
-## 2. Every public function and class has a docstring
-
-```python
-def rerank(query: str, candidates: list[EnrichedResult], top_k: int = 5) -> list[RankedChunk]:
-    """
-    Score each candidate against the query and return the best top_k.
-
-    Args:
-        query: the reviewer's search question.
-        candidates: results from hybrid search, usually 15-20 items.
-        top_k: how many chunks to keep.
-
-    Returns:
-        The top_k chunks, sorted from most to least relevant.
-    """
-```
-
-## 3. Comments explain *why*, not *what*
-
-- Good: `# Groq sometimes wraps JSON in markdown fences, so strip them first`
-- Bad: `# loop over the list`
-
-Add a comment when code:
-- handles an edge case or a known bug or quirk (an API limit, a retry, a malformed LLM output)
-- makes a non-obvious choice (a magic number, ordering, a performance trick)
+Write one when the code:
+- handles an edge case or a quirk (an API limit, a retry, a malformed LLM output)
+- makes a non-obvious choice (a magic number, an order, a performance trick)
 - would surprise a reader
 
-Don't comment on code that is already obvious from good names.
+Don't comment code that its names already explain. Bad: `# loop over the findings`.
+
+## 3. Keep comments true
+
+A wrong comment is worse than none. When you change code, fix or delete the comment next to it.
 
 ## 4. Names say what things are
 
@@ -77,12 +55,12 @@ Don't comment on code that is already obvious from good names.
 ## 6. Handle errors clearly
 
 - Catch specific exceptions, not bare `except:`.
-- When you swallow an error on purpose (for example, a malformed LLM response), add a comment saying why that's safe.
+- When you swallow an error on purpose (for example, a malformed LLM response), add a one-line comment saying why that's safe.
 - Error messages say what went wrong and what to check: `"GITHUB_TOKEN is not set - add it to .env"`.
 
 ## 7. Before finishing
 
 Check the code against these questions:
-- Could a new developer understand each function from its name and docstring alone?
-- Is every non-obvious line explained by a comment?
+- Could a new developer understand each function from its name (and its one-line comment, if it has one)?
+- Is every comment one line, with no `"""` header at the top of the file?
 - Does it match the style of the surrounding files?

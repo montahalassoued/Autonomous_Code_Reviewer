@@ -1,0 +1,1 @@
+Do NOT report logic bugs or code quality issues: other reviewers cover them. Report only vulnerabilities introduced or made reachable by this change, not issues in unchanged lines of the context. Include the CWE id in the title when one applies, and make every suggestion a secure fix, with a short code example when it helps.

@@ -7,16 +7,20 @@ Every significant design choice, and why it was made. Add new entries with the `
 **Current:**
 
 - Groq over OpenAI: free tier, no credit card. The model is picked with `eval/llm_benchmark.py` (LLaMA 3.3 70B was retired by Groq)
+- Three review agents over five: security, logic, quality; adds the missing logic agent, 3 LLM calls instead of 5
+- One shared agent runner over a copy per agent: one place for parsing, validation and the model setting
 - Langfuse over LangSmith: open source, self-hostable, tracing + evals + prompt versioning, no per-trace cost
 - Azure Container Apps webhook server over a GitHub Action: warm worker, multi-repo later, deployment skills
 - Durable queue + separate worker over BackgroundTasks: no lost events, retries, poison queue
 - Postgres code index over Chroma + NetworkX pickle: one store for symbols, edges, reviews and findings, incremental updates
 - Structural context over semantic retrieval: review relevance comes from calls, tests and module code, not similarity
 - Bounded context subagent returning ids over free-form summaries: exact code, capped cost, safe fallback
+- Bounded per-agent tools (max 3 calls) over a prepared context only: agents can check guards, callers and tests
 - Index mirrors `main` only, PR code is an in-memory overlay: no cleanup, no cross-PR leakage
 - Review before index update: the review sees the true "before", a failed review never corrupts the index
 - Push coalescing over one review per push: fewer LLM calls, one review of the whole range
 - `reviews` table over Azure Table dedupe: dedupe, status and metrics in one row (supersedes the Table claim)
+- psycopg 3 + numbered SQL migrations over SQLAlchemy + Alembic: graph joins read best as SQL; seven tables need no ORM
 - BAAI/bge-reranker-v2-m3: CPU-only, no API cost (legacy path; kept only while the legacy mode exists)
 
 **Superseded by the structural-context design (kept for history):**
@@ -99,7 +103,7 @@ until LangGraph's recursion limit (re-calling all 5 agents each time)
 and no review was posted. The graph is now `START -> retriever (retry
 while score < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL_ATTEMPTS)
 -> 5 agents -> join_agents -> synthesizer -> END`, with both limits
-read from `agents/retriever.py` instead of being hardcoded. A fixed
+read from `review/retriever.py` instead of being hardcoded. A fixed
 supervisor was the alternative, but it had no real decision to make.
 Validated in tests/unit/test_pipeline_offline.py.
 
@@ -134,7 +138,7 @@ a paid SaaS beyond its free tier and is closed source. Langfuse is open source
 via its managed cloud, and it covers tracing, prompt versioning, datasets and
 scores in one tool. LangSmith was only declared in requirements and config, with
 no tracing code yet, so switching costs nothing. Integration point: the shared
-LLM client planned in Phase 3 (agents/llm_client.py), so all LLM calls get
+LLM client planned in Phase 3 (review/llm_client.py), so all LLM calls get
 traced in one place. The eval harness (Phase 1) can push its scores to Langfuse.
 Trade-off: self-hosting adds infrastructure to run, so start on Langfuse Cloud
 and self-host later if needed.
@@ -256,3 +260,86 @@ replicas). Trade-off: every review starts at least ~60 s after the push. How
 the worker detects and skips a superseded job is still to be designed
 (open point in `docs/ARCHITECTURE.md`); the Storage Queue cannot replace a
 queued message, so it will rely on the `reviews` table.
+
+## Why three review agents (security, logic, quality) over five
+
+The five agents (security, performance, architecture, testing, documentation)
+cost five LLM calls per review, mostly produced few findings, and had no agent
+for plain correctness bugs (wrong conditions, off-by-one, unhandled None),
+which are what a reviewer looks for first. The review now has three
+categories: Security, Logic (correctness, broken contracts for callers) and
+Quality (performance, maintainability, missing tests and docs). Each prompt
+says what the other two cover, so an issue is reported once. The PR comment
+has one section per category, always in that order and shown even when
+empty, so the reader sees that all three ran. Alternatives: keep five
+(cost, no logic agent), one agent for everything (one prompt doing three
+jobs, harder to evaluate per category). Trade-off: the quality prompt covers
+four former specialties, so each gets less prompt space; the benchmark
+measures it per category.
+
+## Why one shared agent runner over a copy per agent
+
+Each agent copied ~150 lines of client, context formatting, JSON parsing and
+validation, and fixes didn't reach every copy (none validated severity or
+logged dropped findings). `review/agents/agent_runner.py` now owns all of it, and an
+agent is an `AgentSpec(name, prompt_template)` plus its prompt. It also
+validates findings strictly (known severity, positive integer line, non-empty
+text), logs what it drops, and reads the model from `REVIEW_AGENT_MODEL` so a
+retired Groq model is a config change, not a code change. Each agent module
+keeps a `_build_groq_client` name so tests can fake one agent at a time.
+Alternatives: a base class per agent (inheritance for what is only data), or
+one generic node built from a list of specs (loses a named function per
+agent in traces and tests). Validated in tests/unit/test_agent_runner.py.
+
+## Why psycopg 3 with plain SQL migrations over SQLAlchemy and Alembic
+
+The code index is queried with graph-style joins (callers, callees, tests of a
+symbol) that read most clearly as SQL, and the schema is small and fixed
+(`db/migrations/001_initial_schema.sql`). The Postgres layer is psycopg 3 with
+its connection pool (`db/postgres.py`), and migrations are numbered `.sql`
+files applied in order by `db/migration_runner.py`, which records them in
+`schema_migrations` and holds a Postgres advisory lock so two API replicas
+starting together never migrate twice. The API applies them at startup.
+Alternatives: SQLAlchemy 2.0 (typed models and a query builder, but more code
+and concepts than seven tables need) with Alembic (its main gain, generating
+migrations from models, only applies with SQLAlchemy models). The unused
+`sqlalchemy`, `asyncpg`, `psycopg2-binary` and `alembic` requirements were
+removed. Trade-off: no ORM, so every query is hand-written SQL, kept next to the
+code that uses it and covered by tests/integration/test_postgres_dedupe.py.
+
+## Why the reviews table over Azure Table Storage for webhook dedupe
+
+The webhook claimed (repo, head sha, PR) in Azure Table Storage. The target
+design already needs a `reviews` row per review (status, cost, context), with
+the unique key (repo_id, target, head_sha), so a second store only for dedupe
+was redundant. `PostgresDedupeStore` (app/jobs/dedupe.py) inserts a `queued`
+review and treats a unique-key conflict as a duplicate; releasing it after a
+failed enqueue deletes the row only while it is still `queued`, so a running
+or posted review is never forgotten. `DEDUPE_BACKEND` defaults to postgres when
+`JOBS_BACKEND=azure`, so a deployed API without `DATABASE_URL` fails at startup
+instead of silently deduping in memory per replica. Trade-off: the API now
+depends on Postgres being up, and Azure has no Postgres server provisioned yet.
+Supersedes the Table Storage part of "Why a durable queue + separate worker".
+
+## Why bounded per-agent tools over a prepared context only
+
+The target design gave tools only to one shared context subagent, and the
+three review agents a prepared context. The agents could not check what they
+could not see: whether an endpoint is protected by a router-level dependency,
+who calls a changed function, whether a test already exists. Each agent now has
+a small read-only toolset in its folder (`review/agents/<category>/tools/`,
+one file per tool it owns, listed in `toolset.py`): Security `find_auth_guards`
+/ `find_input_guards` / `find_security_settings` / `find_sql_queries`, Logic `find_exception_handlers` plus the shared
+`find_callers` / `find_callees`, Quality `find_similar_functions` plus the
+shared `find_tests`, and `read_file` / `search_code`. The runner allows at most
+`max_tool_calls` (3) per agent, then forces an answer with `tool_choice="none"`.
+Shared implementations live in `review/agents/tools/`, so path, symlink and
+secret-file checks, output caps and nonce wrapping exist in one place, and the
+future context subagent reuses the same tools. Alternatives: no agent tools
+(cheapest, but the agents guess), an unbounded loop per agent (cost and Groq
+tokens-per-minute grow with every turn, less reproducible), every tool copied
+into each agent folder (three places to secure). Trade-offs: up to 3 extra
+calls per agent per review, each resending the prompt; tool outputs are a
+prompt-injection surface (wrapped and marked as data); tools read the checkout
+cloned at worker start, not the PR head. Whether tools improve findings is
+measured with the benchmark before raising the limit.

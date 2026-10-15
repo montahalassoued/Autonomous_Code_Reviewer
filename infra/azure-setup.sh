@@ -12,8 +12,10 @@
 #   3. Azure Container Registry (Basic SKU, admin user DISABLED)
 #   4. Log Analytics workspace + Container Apps environment
 #   5. User-assigned managed identity with AcrPull on the registry
-#   6. Storage account (queues review-jobs + review-jobs-poison, table
-#      reviewdedupe) + data roles for the managed identity
+#   6. Storage account (queues review-jobs + review-jobs-poison) + the queue
+#      data role for the managed identity
+#   NOT YET: the Postgres server the apps need for DATABASE_URL (dedupe and
+#   code index). See infra/README.md, "Postgres (not provisioned yet)".
 #   7. API Container App   (external ingress, 0.5 vCPU / 1Gi, min=max=1)
 #   8. Worker Container App (no ingress, 2 vCPU / 4Gi, min=max=1)
 #   9. GitHub Actions OIDC: Entra app + service principal + federated credential
@@ -61,12 +63,11 @@ LOG_WORKSPACE="${LOG_WORKSPACE:-log-code-reviewer}"
 IDENTITY_NAME="${IDENTITY_NAME:-id-code-reviewer-acrpull}"
 OIDC_APP_NAME="${OIDC_APP_NAME:-github-oidc-code-reviewer}"
 
-# Queue / table names. They match the defaults in app/jobs/factory.py, so no
-# env var is needed in the apps. If you change them here, also set
-# REVIEW_QUEUE_NAME / REVIEW_DEDUPE_TABLE on both apps.
+# Queue names. They match the defaults in app/jobs/factory.py, so no env var
+# is needed in the apps. If you change them here, also set REVIEW_QUEUE_NAME
+# on both apps.
 QUEUE_NAME="review-jobs"
 POISON_QUEUE_NAME="review-jobs-poison"
-DEDUPE_TABLE="reviewdedupe"
 
 # API sizing: it only verifies the webhook and enqueues, so it is small.
 # 0.5 vCPU / 1.0Gi is a valid Consumption combination.
@@ -195,7 +196,7 @@ assign_identity_role "AcrPull" "$ACR_ID"
 pause
 
 # ------------------------------- STEP 6 --------------------------------------
-step "6/9 Storage account (queues + dedupe table) and data roles for the identity"
+step "6/9 Storage account (queues) and the queue data role for the identity"
 # Shared-key access is OFF: both apps use the managed identity (Entra auth), so
 # no account key can leak. Consequence: az storage commands must use
 # --auth-mode login, and the Azure portal data browser needs your own data role.
@@ -208,7 +209,7 @@ if ! az storage account show --name "$STORAGE_ACCOUNT_NAME" --resource-group "$R
 fi
 STORAGE_ID="$(az storage account show --name "$STORAGE_ACCOUNT_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)"
 
-# Pre-create queues and the table through ARM (control plane). This needs only
+# Pre-create the queues through ARM (control plane). This needs only
 # Contributor/Owner on the resource group - the person running the script does
 # NOT need data-plane roles. `az storage queue create` would need
 # "Storage Queue Data Contributor" for you because shared keys are disabled.
@@ -219,11 +220,8 @@ for q in "$QUEUE_NAME" "$POISON_QUEUE_NAME"; do
   az rest --method put --url "${ARM_BASE}/queueServices/default/queues/${q}?api-version=2023-05-01" \
     --body '{}' -o none
 done
-az rest --method put --url "${ARM_BASE}/tableServices/default/tables/${DEDUPE_TABLE}?api-version=2023-05-01" \
-  --body '{}' -o none
 
 assign_identity_role "Storage Queue Data Contributor" "$STORAGE_ID"
-assign_identity_role "Storage Table Data Contributor" "$STORAGE_ID"
 if [ "$ROLE_CREATED" = "1" ]; then
   echo "Waiting 60s for the role assignments to propagate before the apps start..."
   sleep 60
@@ -489,7 +487,7 @@ VARIABLES:
 Also useful:
   Image reference        = $ACR_LOGIN_SERVER/autonomous-code-reviewer:<git-sha>
   Webhook URL (GitHub)   = https://$APP_FQDN/webhook/github
-  Storage account        = $STORAGE_ACCOUNT_NAME (queues: $QUEUE_NAME, $POISON_QUEUE_NAME; table: $DEDUPE_TABLE)
+  Storage account        = $STORAGE_ACCOUNT_NAME (queues: $QUEUE_NAME, $POISON_QUEUE_NAME)
   Federated subject      = repo:${GITHUB_REPO}:ref:refs/heads/main
   Worker logs            = az containerapp logs show -n $WORKER_APP_NAME -g $RESOURCE_GROUP --follow
 

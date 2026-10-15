@@ -1,16 +1,3 @@
-"""
-Unit test for chunk identity in rag/ast_parser.py
-
-Checks the rules that make chunk ids ("file_path::qualified_name")
-stable and unique: methods are class-qualified, decorators are part of
-the chunk, nested defs are not separate chunks (and their calls are
-not attributed to the parent), and two classes' __init__ methods in
-one file get distinct ids in both the knowledge graph and Chroma.
-
-Fully offline: tree-sitter parsing and NetworkX only, no LLM calls.
-ContextualChunk objects are built directly instead of calling Gemini.
-"""
-
 from rag.ast_parser import parse_file
 from rag.contextual_chunker import ContextualChunk
 from rag.knowledge_graph import build_knowledge_graph
@@ -61,8 +48,8 @@ PROPERTY_CODE = '''class Account:
 '''
 
 
+# Parses SAMPLE_CODE and returns its functions keyed by qualified_name.
 def parse_sample() -> dict:
-    """Parses SAMPLE_CODE and returns its functions keyed by qualified_name."""
     return {fn.qualified_name: fn for fn in parse_file(FILE_PATH, SAMPLE_CODE)}
 
 

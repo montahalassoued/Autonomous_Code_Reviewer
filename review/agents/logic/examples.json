@@ -1,0 +1,90 @@
+[
+  {
+    "about": "a mutable default argument shared between calls",
+    "diff": [
+      "diff --git a/app/tags.py b/app/tags.py",
+      "--- a/app/tags.py",
+      "+++ b/app/tags.py",
+      "@@ -1,1 +1,5 @@",
+      " # Tag helpers used by the importer.",
+      "+",
+      "+def add_tag(tag: str, tags: list[str] = []) -> list[str]:",
+      "+    tags.append(tag)",
+      "+    return tags"
+    ],
+    "answer": [
+      {
+        "severity": "HIGH",
+        "rule_id": "mutable_default",
+        "confidence": "high",
+        "file_path": "app/tags.py",
+        "line_number": 3,
+        "title": "Default tag list is shared between calls",
+        "description": "The default [] is created once, when the function is defined. add_tag(\"a\") then add_tag(\"b\") returns [\"a\", \"b\"] on the second call, so tags leak from one import into the next.",
+        "evidence": "def add_tag(tag: str, tags: list[str] = []) -> list[str]:",
+        "suggestion": "Default to None and create the list inside: def add_tag(tag, tags=None): tags = [] if tags is None else tags."
+      }
+    ]
+  },
+  {
+    "about": "an empty list handled correctly: nothing to report",
+    "diff": [
+      "diff --git a/app/lists.py b/app/lists.py",
+      "--- a/app/lists.py",
+      "+++ b/app/lists.py",
+      "@@ -1,1 +1,4 @@",
+      " # Small list helpers.",
+      "+",
+      "+def first_or_none(items: list):",
+      "+    return items[0] if items else None"
+    ],
+    "answer": []
+  },
+  {
+    "about": "a generator read twice, so the second pass is empty",
+    "diff": [
+      "diff --git a/app/reports/invoices.py b/app/reports/invoices.py",
+      "--- a/app/reports/invoices.py",
+      "+++ b/app/reports/invoices.py",
+      "@@ -1,1 +1,7 @@",
+      " from app.db import fetch_invoices",
+      "+",
+      "+def average_paid(customer_id: int) -> float:",
+      "+    paid = (invoice.amount for invoice in fetch_invoices(customer_id) if invoice.paid)",
+      "+    total = sum(paid)",
+      "+    count = sum(1 for _ in paid)",
+      "+    return total / count if count else 0.0"
+    ],
+    "answer": [
+      {
+        "severity": "HIGH",
+        "rule_id": "iterator_exhausted",
+        "confidence": "high",
+        "file_path": "app/reports/invoices.py",
+        "line_number": 6,
+        "title": "Paid amounts are counted after the generator is used up",
+        "description": "paid is a generator, and sum(paid) on line 5 reads it to the end. The second pass on line 6 sees nothing, so count is always 0 and average_paid returns 0.0 for every customer, even one with paid invoices of 10 and 30 (expected 20.0).",
+        "evidence": "count = sum(1 for _ in paid)",
+        "suggestion": "Build a list once and use it twice: paid = [invoice.amount for invoice in fetch_invoices(customer_id) if invoice.paid]; return sum(paid) / len(paid) if paid else 0.0."
+      }
+    ]
+  },
+  {
+    "about": "ceiling division on a page size the type keeps above zero: nothing to report",
+    "diff": [
+      "diff --git a/app/api/pagination.py b/app/api/pagination.py",
+      "--- a/app/api/pagination.py",
+      "+++ b/app/api/pagination.py",
+      "@@ -1,1 +1,8 @@",
+      " from pydantic import BaseModel, Field",
+      "+",
+      "+class Pagination(BaseModel):",
+      "+    page_size: int = Field(gt=0)",
+      "+",
+      "+def pages_needed(item_count: int, pagination: Pagination) -> int:",
+      "+    # Ceiling division: 0 items -> 0 pages, 101 items of 50 -> 3 pages",
+      "+    return -(-item_count // pagination.page_size)"
+    ],
+    "answer": []
+  }
+]

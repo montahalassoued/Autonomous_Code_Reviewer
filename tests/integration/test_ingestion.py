@@ -1,16 +1,3 @@
-"""
-Integration test for rag/ingestion.py
-
-Makes REAL calls to Gemini (contextual_chunker.py) and Voyage AI
-(embedder.py), plus local ChromaDB storage and graph construction, to
-verify ingest_repository() walks a real directory tree end-to-end and
-returns everything agents/graph.py's build_graph() needs.
-
-Writes a tiny throwaway 2-file "repo" to a temp directory (pytest's
-tmp_path fixture) so this test doesn't depend on any specific repo
-being present on disk.
-"""
-
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -38,9 +25,8 @@ EMAIL_FILE = '''def send_welcome_email(user):
 '''
 
 
+# A tiny 2-file repo plus a venv folder that ingestion must skip.
 def build_test_repo(tmp_path):
-    """Writes a tiny 2-file repo layout under tmp_path, including a
-    venv-like directory that must be skipped by ingestion."""
     auth_dir = tmp_path / "auth"
     auth_dir.mkdir()
     (auth_dir / "utils.py").write_text(AUTH_FILE, encoding="utf-8")

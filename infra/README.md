@@ -11,13 +11,14 @@ GitHub (pull_request webhook)
         |  HTTPS POST /webhook/github
         v
 +------------------------------+        +-------------------------------+
-| API Container App            |        | Azure Storage account         |
-| ca-code-reviewer             | claim  |  Table  reviewdedupe          |
-| - verify HMAC signature      |------->|   (one row per PR + head sha) |
-| - claim dedupe row           |        |                               |
-| - enqueue job, return 202    | enqueue|  Queue  review-jobs           |
-| 0.5 vCPU / 1Gi, min 1        |------->|  Queue  review-jobs-poison    |
-+------------------------------+        +---------------+---------------+
+| API Container App            | claim  | Postgres (NOT provisioned yet)|
+| ca-code-reviewer             |------->|  reviews table: one row per   |
+| - verify HMAC signature      |        |  (repo, target, head sha)     |
+| - claim dedupe row           |        +-------------------------------+
+| - enqueue job, return 202    | enqueue| Azure Storage account         |
+| 0.5 vCPU / 1Gi, min 1        |------->|  Queue  review-jobs           |
++------------------------------+        |  Queue  review-jobs-poison    |
+                                        +---------------+---------------+
                                                         | receive (visibility timeout 900s)
                                                         v
                                         +-------------------------------+
@@ -42,8 +43,8 @@ A job is deleted from the queue only after it succeeded. If the worker crashes o
 | Container Registry (ACR, Basic) | A private store for Docker images | The pipeline pushes `autonomous-code-reviewer:<git-sha>` here; Azure pulls from here |
 | Log Analytics workspace | Log storage and search | Container Apps sends both apps' stdout/stderr here |
 | Container Apps environment | The shared hosting boundary for apps | Networking and logging; required before creating apps |
-| User-assigned managed identity | A passwordless identity, shared by both apps | `AcrPull` on the ACR (image pulls), `Storage Queue Data Contributor` and `Storage Table Data Contributor` on the storage account (queue and dedupe access). No keys or connection strings in the apps |
-| Storage account (StorageV2, Standard_LRS) | Holds the queues and the dedupe table | Queue `review-jobs`, poison queue `review-jobs-poison`, table `reviewdedupe`. Shared-key access is disabled and TLS 1.2 is the minimum, so only Entra identities can reach it |
+| User-assigned managed identity | A passwordless identity, shared by both apps | `AcrPull` on the ACR (image pulls), `Storage Queue Data Contributor` on the storage account (queue access). No keys or connection strings in the apps |
+| Storage account (StorageV2, Standard_LRS) | Holds the queues | Queue `review-jobs`, poison queue `review-jobs-poison`. Shared-key access is disabled and TLS 1.2 is the minimum, so only Entra identities can reach it |
 | API Container App | The webhook endpoint | Public HTTPS URL, health probes, revisions for rollback |
 | Worker Container App | Runs the reviews | Same image, started with `python -m app.worker`; no ingress, no public URL |
 | Entra app registration + federated credential | A trust rule: "tokens from GitHub Actions for this repo's `main` branch may act as this identity" | Lets the pipeline log in to Azure with OIDC, with no stored password |
@@ -52,8 +53,8 @@ A job is deleted from the queue only after it succeeded. If the worker crashes o
 
 **API (`CONTAINER_APP_NAME`, default `ca-code-reviewer`)**
 
-- **0.5 vCPU / 1 GiB.** The API only verifies the signature, writes one table row, enqueues and returns 202. It no longer clones or ingests anything, so it starts in seconds and needs little memory.
-- **Min replicas = 1 (recommended), max 2.** GitHub gives up on a webhook after about 10 seconds. Scale-to-zero is now technically possible because startup is fast, but a cold start still includes allocating a replica, pulling the image and starting Python plus the Azure SDKs. That can take several seconds, close enough to the limit to fail some deliveries, and a failed delivery means a PR that silently never gets reviewed. At 0.5 vCPU / 1Gi the always-on cost is small, so we keep 1. The API is stateless (dedupe and queue are in Storage), so a second replica is safe.
+- **0.5 vCPU / 1 GiB.** The API only verifies the signature, inserts one `reviews` row in Postgres, enqueues and returns 202. It no longer clones or ingests anything, so it starts in seconds and needs little memory.
+- **Min replicas = 1 (recommended), max 2.** GitHub gives up on a webhook after about 10 seconds. Scale-to-zero is now technically possible because startup is fast, but a cold start still includes allocating a replica, pulling the image and starting Python plus the Azure SDKs. That can take several seconds, close enough to the limit to fail some deliveries, and a failed delivery means a PR that silently never gets reviewed. At 0.5 vCPU / 1Gi the always-on cost is small, so we keep 1. The API is stateless (dedupe is in Postgres, the queue in Storage), so a second replica is safe.
 - **Startup probe** is short (5s initial delay, 10s period, 6 failures = about 65s) because the app listens almost immediately. Liveness and readiness use `/health`.
 - Env vars: `JOBS_BACKEND=azure`, `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_CLIENT_ID` (see below), and secret `GITHUB_WEBHOOK_SECRET`. It no longer needs the LLM keys, `GITHUB_TOKEN` or `TARGET_REPO_URL`; re-running the script removes those stale secrets from the API app.
 
@@ -70,7 +71,9 @@ A job is deleted from the queue only after it succeeded. If the worker crashes o
 
 **Identity.** Because both apps use a *user-assigned* identity, the Azure SDK's `DefaultAzureCredential` cannot guess which identity to use. The script sets `AZURE_CLIENT_ID` (the identity's client id) on both apps so it picks the right one.
 
-**Storage.** `allow-shared-key-access` is false, so there are no account keys to leak. Consequences: use `--auth-mode login` with `az storage` commands, and the portal's data browser needs your own data-role assignment (see "Inspecting the queues"). Local development with Azurite uses a connection string and never touches this account. The queues and table are created through the Azure Resource Manager API (`az rest`), which needs only Contributor on the resource group, not a data role. The app also creates them on start if they are missing.
+**Storage.** `allow-shared-key-access` is false, so there are no account keys to leak. Consequences: use `--auth-mode login` with `az storage` commands, and the portal's data browser needs your own data-role assignment (see "Inspecting the queues"). Local development with Azurite uses a connection string and never touches this account. The queues are created through the Azure Resource Manager API (`az rest`), which needs only Contributor on the resource group, not a data role. The app also creates them on start if they are missing.
+
+**Postgres (not provisioned yet).** The API needs `DATABASE_URL` for the `reviews` table, which replaced the Azure Table dedupe (`docs/DECISIONS.md`). This script does not create a Postgres server yet, so until it does, a deployed API fails at startup with "DATABASE_URL is not set". That is deliberate: falling back to in-memory dedupe would let two replicas review the same commit twice. Where to host it (Azure Database for PostgreSQL Flexible Server, tier and cost) is an open decision in `docs/ARCHITECTURE.md`.
 
 ## Prerequisites
 
@@ -129,7 +132,7 @@ Steps in the script:
 3. ACR (Basic, admin user off).
 4. Log Analytics + Container Apps environment.
 5. Managed identity + `AcrPull`.
-6. Storage account, queues, table, and the two storage data roles for the identity (then waits 60 seconds for roles to take effect).
+6. Storage account, queues, and the queue data role for the identity (then waits 60 seconds for roles to take effect).
 7. API Container App: placeholder image, ingress on port 8000, secrets, env vars, probes (generated YAML, deleted afterwards; it contains no secret values).
 8. Worker Container App: placeholder image, no ingress, secrets, env vars, command override and termination grace period (generated YAML).
 9. GitHub OIDC: app registration, service principal, federated credential for `repo:OWNER/REPO:ref:refs/heads/main`, `Contributor` on the resource group (covers updating both apps), `AcrPush` on the ACR.
@@ -254,7 +257,7 @@ Or re-run the pipeline on the old commit. Images are tagged by git SHA, so old v
 Prices change and depend on region, so none are quoted here. Use the **Azure pricing calculator** (<https://azure.microsoft.com/pricing/calculator/>) and enter:
 
 - Container Apps, Consumption plan, two always-on apps: API (0.5 vCPU, 1 GiB, 1 replica) and worker (2 vCPU, 4 GiB, 1 replica). The worker is the main cost. Idle replicas are billed at a reduced rate, but not zero.
-- Storage account (Standard_LRS): billed per GB stored and per operation. The worker polls the queue with a back-off up to 10 seconds, so operations are modest but not zero when idle. Queue and table data here is tiny.
+- Storage account (Standard_LRS): billed per GB stored and per operation. The worker polls the queue with a back-off up to 10 seconds, so operations are modest but not zero when idle. Queue data here is tiny.
 - Container Registry: Basic tier.
 - Log Analytics: pay per GB ingested; the logs are small, but check "Daily cap" if worried.
 

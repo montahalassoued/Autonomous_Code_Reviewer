@@ -1,26 +1,11 @@
-"""
-query_decomposer.py - transforms a raw PR diff into targeted search
-queries for the retrieval pipeline.
-
-This is the missing piece connecting "a PR was opened" to "here's what
-to search for": a diff is raw code, not a search query. A single
-generic query built from the whole diff is often too vague - a diff
-touching authentication AND email AND database access needs queries
-covering each concern, not one blurry average of all three.
-
-Why Groq here, not Gemini (used in contextual_chunker.py): this runs
-ONCE PER REVIEW (a handful of times per PR), not once per function in
-an entire repo. Volume is low, so we use Groq - the model we reserve
-for actual reasoning tasks the agents depend on, as opposed to Gemini
-which we use for high-volume, low-stakes ingestion-time chunking.
-"""
-
-import os
 import json
-from groq import Groq
+import logging
+import os
+
+from groq import APIError, Groq
 
 
-DECOMPOSE_MODEL = "llama-3.3-70b-versatile"
+logger = logging.getLogger(__name__)
 
 DECOMPOSE_PROMPT_TEMPLATE = """You are analyzing a pull request diff to figure out what existing
 code in the repository would be useful context for reviewing it.
@@ -40,12 +25,8 @@ Diff:
 Queries:"""
 
 
+# Reads GROQ_API_KEY from the environment.
 def _build_client() -> Groq:
-    """
-    Reads GROQ_API_KEY from the environment. Same defensive pattern
-    used in rag/contextual_chunker.py and rag/embedder.py: fail early
-    with a clear message instead of a cryptic error mid-call.
-    """
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError(
@@ -56,30 +37,21 @@ def _build_client() -> Groq:
     return Groq(api_key=api_key)
 
 
-def decompose_diff(diff: str) -> list[str]:
-    """
-    Generates 1-3 search queries from a raw PR diff.
-
-    Args:
-        diff: the raw diff text, as it would arrive from a GitHub
-              webhook payload
-
-    Returns:
-        a list of 1-3 query strings, each targeting a different
-        concern found in the diff. Falls back to a single query built
-        from the raw diff if the LLM output is empty, can't be parsed
-        as JSON, or is an empty list, rather than crashing (or silently
-        retrieving nothing) over a formatting hiccup.
-    """
+# Generates 1-3 search queries from a raw PR diff; the caller picks the Groq model.
+def decompose_diff(diff: str, model: str) -> list[str]:
     client = _build_client()
     prompt = DECOMPOSE_PROMPT_TEMPLATE.format(diff=diff)
 
-    response = client.chat.completions.create(
-        model=DECOMPOSE_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,  # low temperature: we want consistent,
-                          # focused queries, not creative variation
-    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,  # consistent, focused queries, not creative variation
+        )
+    except APIError as error:
+        # A Groq outage or rate limit degrades retrieval, never the whole review.
+        logger.warning("Query decomposition failed (%s), searching with the diff itself", type(error).__name__)
+        return [diff[:200]]
 
     # content can be None on an empty or filtered completion - treat it
     # like unparseable output so we reach the fallback below.
