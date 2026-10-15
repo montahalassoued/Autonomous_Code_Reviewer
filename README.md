@@ -32,8 +32,8 @@ An AI code reviewer that runs entirely through GitHub. You push code or open a p
 | Area | Choice |
 | --- | --- |
 | Orchestration | LangGraph |
-| LLMs | Groq, Gemini |
-| RAG | tree-sitter, NetworkX call graph, ChromaDB, BM25 + Voyage embeddings, local reranker |
+| LLMs | Groq (Gemini only in the model benchmark) |
+| Code context | tree-sitter, NetworkX call graph read by bounded agent tools; Postgres code index planned |
 | API | FastAPI + GitHub webhooks (PyGithub) |
 | Tracing & LLM eval | Langfuse |
 | Deploy | Docker, Azure Container Apps |

@@ -24,7 +24,7 @@ Full description: [ARCHITECTURE.md](ARCHITECTURE.md). In short:
 5. **Output**
    - On a PR: inline comments on the changed lines, plus one summary grouped by category, edited in place.
    - On a push to `main`: commit comments.
-6. **Removed:** the judge loop, the query decomposer and `graph_retriever` (after the eval shows structural ≥ legacy), the full re-ingest at worker startup, and the Azure Table dedupe (replaced by the `reviews` table).
+6. **Removed:** the whole semantic retrieval (judge loop, query decomposer, `graph_retriever`, Gemini chunks, Voyage, Chroma, BM25, reranker; done, without waiting for the eval: see DECISIONS), the full re-ingest at worker startup, and the Azure Table dedupe (replaced by the `reviews` table).
 
 ## Verified problems the plan fixes
 
@@ -90,7 +90,7 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
   - a clean refactor
   - docs-only and whitespace-only changes
   - a prompt-injection PR
-- `eval/review_eval.py` (`--label`, `--runs 3`, `--mode legacy|structural`), which writes `eval/results/`.
+- `eval/review_eval.py` (`--label`, `--runs 3`, `--mode tools|structural`: "tools" is today's diff + agent tools, the baseline now that the semantic retrieval is gone), which writes `eval/results/`.
 - Sits next to `eval/llm_benchmark.py` (which compares models on single prompts, not whole reviews). No RAGAS (D4).
 
 **What it measures:**
@@ -131,7 +131,6 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
   - **Langfuse tracing:** one trace per review, with a generation for each LLM call (prompt, output, tokens, latency). It's enabled only when `LANGFUSE_PUBLIC_KEY` is set, and it's a no-op in tests.
 - `review/prompting.py`: `wrap_untrusted()` with nonce delimiters, so untrusted content is treated as data.
 - **Done** (`refactor/three-review-agents`): `review/agents/agent_runner.py` with `AgentSpec(name, prompt_template)` and `run_agent()`, the agents `security`, `logic`, `quality`, strict validation (severity, integer line, non-empty text) with logged drops, `REVIEW_AGENT_MODEL`, and a synthesizer with one section per category. `Finding.agent` is the category, so no separate `category` field was added.
-- Embedder retries and batching, and Gemini retries on 429 too.
 - Delete the old performance, architecture, testing and documentation agents (done).
 
 **Done when:** an eval before and after, reported per category.
@@ -159,12 +158,12 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
 **Graph:** `START → analyze_diff → triage →(skip)→ synthesizer` or `→ build_context → security|logic|quality → join_agents → synthesizer → END`.
 
 **Comparison and cleanup:**
-- `REVIEW_CONTEXT_MODE=legacy|structural` keeps both paths available for A/B evaluation.
-- The decomposer, the judge loop and `graph_retriever` are deleted only after the eval shows structural mode doing at least as well as legacy.
+- `REVIEW_CONTEXT_MODE=tools|structural` keeps today's diff + tools path available for the A/B evaluation.
+- The semantic retrieval is already deleted; the eval compares structural context with diff + tools.
 
 **Agents:** ai-engineer (devops-engineer and docker-expert for Postgres in compose and Azure).
 
-### Phase 4b: Bounded context subagent (M, after the structural-vs-legacy eval)
+### Phase 4b: Bounded context subagent (M, after the structural-vs-tools eval)
 
 **Changes:**
 - A LangGraph subgraph between `build_context` and the agents, run only when gaps exist (unresolved calls touched by the change, a deleted or renamed public symbol, a change spanning several modules). One shared run for all 3 agents.
@@ -227,7 +226,7 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
 | 6 | Incremental Postgres sync, review-before-update, no startup re-ingest | M-L | 4 |
 | 7 | Push reviews as commit comments, push coalescing | M | 4, 5, 6, 2 |
 
-**LLM calls per review** (estimated from the design, not measured): 7-11 today (after Phase 0), 5-9 after Phase 3, 3 after Phase 4 (+1-2 when the subagent runs), 0 for triaged-out changes. **Startup:** N Gemini calls today (one per function), 0 after Phase 6.
+**LLM calls per review** (estimated from the design, not measured): 3 to 12 today (3 agents, up to 3 tool calls each), 3 after Phase 4 when the context builder replaces most tool calls (+1-2 when the subagent runs), 0 for triaged-out changes. **Startup:** no LLM call since the semantic retrieval was removed (tree-sitter parse + call graph only); the in-memory parse is replaced by the incremental sync in Phase 6.
 
 ## Decisions (resolved 2026-10-14)
 

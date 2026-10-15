@@ -20,25 +20,7 @@ Step-by-step for every account.
 
 ---
 
-## 3) Voyage AI (Embeddings)
-
-1. Go to https://voyageai.com/ and sign up.
-2. Create an API key.
-3. Copy it into `VOYAGE_API_KEY`.
-
----
-
-## 4) Qdrant Cloud (Vector DB prod)
-
-1. Go to https://cloud.qdrant.io/ and sign up.
-2. Create a free cluster.
-3. Copy:
-   - `QDRANT_URL`
-   - `QDRANT_API_KEY`
-
----
-
-## 5) Langfuse (tracing + LLM evaluation, open source)
+## 3) Langfuse (tracing + LLM evaluation, open source)
 
 1. Pick where Langfuse runs:
    - **Langfuse Cloud:** sign up at https://cloud.langfuse.com. This is the easiest option.
@@ -49,13 +31,13 @@ Step-by-step for every account.
 
 ---
 
-## 6) Deploy (Azure Container Apps)
+## 4) Deploy (Azure Container Apps)
 
 Follow [infra/README.md](../infra/README.md). It creates the Azure resources and connects the GitHub Actions deploy.
 
 ---
 
-## 7) ngrok (Local webhook testing)
+## 5) ngrok (Local webhook testing)
 
 1. Go to https://ngrok.com/ and sign up.
 2. Install ngrok.

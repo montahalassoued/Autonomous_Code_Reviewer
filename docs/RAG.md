@@ -18,24 +18,16 @@ Semantic retrieval is reduced to one optional job: **similar code** (duplicate d
 | Gaps the rules can't fill | Bounded context subagent returning symbol ids |
 | Similar code (optional) | pgvector over `symbol_embeddings` |
 
-## Current pipeline (legacy, still running)
+## What runs today
 
-Until the Phase 4 eval shows structural context doing at least as well, the worker still uses the semantic pipeline:
+The semantic pipeline (Gemini context sentences, Voyage embeddings in ChromaDB, LLM query decomposition, hybrid BM25 + dense search with RRF, 1-hop graph expansion, a local cross-encoder reranker and an LLM judge loop) was **removed** before the structural-vs-legacy eval; the reasons are in [DECISIONS.md](DECISIONS.md) ("Why drop the legacy semantic retrieval before the structural-vs-legacy eval").
 
-1. tree-sitter parse into function chunks (`rag/ast_parser.py`)
-2. a Gemini context sentence per chunk (`rag/contextual_chunker.py`)
-3. a NetworkX call graph, pickled (`rag/knowledge_graph.py`)
-4. Voyage embeddings in ChromaDB (`rag/embedder.py`, `db/chroma.py`)
-5. LLM query decomposition (`rag/query_decomposer.py`)
-6. hybrid BM25 + dense search fused with RRF (`rag/hybrid_search.py`)
-7. 1-hop caller/callee expansion (`rag/graph_retriever.py`)
-8. cross-encoder reranking (`rag/reranker.py`)
-9. an LLM judge that retries retrieval while quality < `QUALITY_THRESHOLD` (`review/retriever.py`)
+Until the Phase 4 context builder exists:
 
-**Why it is being replaced:** similarity is the wrong signal for review context. A caller that breaks when a signature changes is rarely textually similar to the change. Module-level code (router dependencies, middleware) is not indexed at all, so the security agent can't see whether an endpoint is protected. The worker also re-ingests the whole repo at every startup, with one Gemini call per function.
+1. The worker clones the target repo and parses it with tree-sitter (`rag/ast_parser.py`, via `rag/ingestion.py`). No LLM or embedding call.
+2. It builds an in-memory NetworkX call graph (`rag/knowledge_graph.py`), read by the agents' graph tools (`find_callers`, `find_callees`, `find_return_values`, `find_similar_functions`).
+3. The agents get the diff, an empty `review_context`, and their bounded read-only tools to look at the checkout and the graph ([AGENTS.md](AGENTS.md)).
 
-**What goes, and when** (see [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)):
+**Why similarity was the wrong signal:** a caller that breaks when a signature changes is rarely textually similar to the change, and module-level code (router dependencies, middleware) was not indexed at all.
 
-- The judge loop, the query decomposer and `graph_retriever` are deleted only after the eval shows structural ≥ legacy.
-- The in-memory full re-ingest at startup is replaced by the incremental Postgres sync.
-- ChromaDB and the NetworkX pickle are replaced by Postgres (the graph becomes the `edges` table).
+**What comes next** (see [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), Phase 4): the Postgres index replaces the NetworkX graph (it becomes the `edges` table), the in-memory parse at startup is replaced by the incremental sync, and the context builder fills `review_context`.

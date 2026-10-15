@@ -21,11 +21,11 @@ Every significant design choice, and why it was made. Add new entries with the `
 - Push coalescing over one review per push: fewer LLM calls, one review of the whole range
 - `reviews` table over Azure Table dedupe: dedupe, status and metrics in one row (supersedes the Table claim)
 - psycopg 3 + numbered SQL migrations over SQLAlchemy + Alembic: graph joins read best as SQL; seven tables need no ORM
-- BAAI/bge-reranker-v2-m3: CPU-only, no API cost (legacy path; kept only while the legacy mode exists)
+- Drop the legacy semantic retrieval before an A/B eval: it was never measured and known-buggy; agents use diff + tools until the context builder (supersedes "delete only after the eval")
 
 **Superseded by the structural-context design (kept for history):**
 
-- voyage-code-2 embeddings, contextual chunking, hybrid BM25+dense with RRF, corrective RAG loop: semantic retrieval is now optional "similar code" only
+- voyage-code-2 embeddings, contextual chunking, hybrid BM25+dense with RRF, corrective RAG loop, BAAI/bge-reranker-v2-m3: removed from the code; semantic retrieval may come back only as optional "similar code" (pgvector)
 - NetworkX over Neo4j, ChromaDB dev / Qdrant prod: replaced by the Postgres index (`edges` table)
 - Railway over DigitalOcean: replaced by Azure Container Apps
 
@@ -343,3 +343,24 @@ calls per agent per review, each resending the prompt; tool outputs are a
 prompt-injection surface (wrapped and marked as data); tools read the checkout
 cloned at worker start, not the PR head. Whether tools improve findings is
 measured with the benchmark before raising the limit.
+
+## Why drop the legacy semantic retrieval before the structural-vs-legacy eval
+
+The plan kept the semantic pipeline (Gemini context sentences, Voyage embeddings
+in Chroma, BM25 + dense with RRF, graph expansion, a local cross-encoder
+reranker and an LLM judge loop) alive until an A/B eval showed structural
+context doing at least as well. That eval harness was never built, so the
+baseline was never measured, and the pipeline had known defects (V3-V7 in
+`docs/IMPLEMENTATION_PLAN.md`). Keeping it cost torch and sentence-transformers
+in the image, one Gemini call per function at every worker start, up to 6 extra
+Groq calls per review, and a second pipeline to maintain. It is removed:
+`START` fans out straight to the three agents, which get the diff, a
+`review_context` that stays empty until the Phase 4 context builder fills it,
+and their bounded tools. `rag/ingestion.py` now only clones, parses with
+tree-sitter and builds the NetworkX call graph the graph tools read.
+Alternatives: keep the legacy path for the A/B (rigorous, but measures a buggy
+baseline and keeps both costs for weeks), or remove only the Gemini chunker
+that contradicted D1. Trade-off: the structural context is compared against
+"diff + tools" instead of semantic retrieval, so there is no "beats RAG" number.
+Supersedes "deleted only after the eval shows structural >= legacy" in "Why
+structural context over semantic retrieval".

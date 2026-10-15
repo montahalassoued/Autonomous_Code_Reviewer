@@ -6,12 +6,11 @@
 ## Graph
 
 ```text
-START → retriever ─(quality < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL_ATTEMPTS)─► retriever
-                  └─(otherwise)─► security | logic | quality  (parallel)
+START → security | logic | quality  (parallel, each with its bounded tools)
       → join_agents (barrier) → synthesizer → END
 ```
 
-The graph is forward-only, so it always terminates (`review/graph.py`). In the target design the retriever is replaced by `build_context` and an optional context subagent; the three agents and the synthesizer stay.
+The graph is forward-only, so it always terminates (`review/graph.py`). In the target design a `build_context` node (and an optional context subagent) runs before the agents to fill `review_context`; the three agents and the synthesizer stay.
 
 ## The three review agents
 
@@ -58,9 +57,9 @@ The implementations shared by several agents (and later by the context subagent)
 
 **Finding fields:** `agent`, `severity` (CRITICAL / HIGH / MEDIUM / LOW / INFO), `rule_id` (from the agent's `rules.py`, else `other`), `confidence` (high / medium / low; a low-confidence finding never blocks), `file_path`, `line_number`, `title`, `description`, `evidence`, `suggestion`.
 
-## Retriever (legacy, `review/retriever.py`)
+## Context
 
-Runs the semantic RAG pipeline (query decomposition, hybrid search, graph expansion, reranking) and an LLM judge that retries while the context score is below `QUALITY_THRESHOLD`, at most `MAX_RETRIEVAL_ATTEMPTS` times. Kept until the eval shows structural context is at least as good; see [RAG.md](RAG.md).
+There is no retriever node any more: `START` fans out straight to the three agents. `review_context` stays empty until the Phase 4 context builder fills it, so the prompt tells the agents to use their tools to look outside the diff; see [RAG.md](RAG.md).
 
 ## Synthesizer (`review/synthesizer.py`)
 
