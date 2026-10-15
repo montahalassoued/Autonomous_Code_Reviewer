@@ -35,7 +35,18 @@ review/agents/<category>/
   prompts/NN_*.md  the prompt, split by topic, read in number order (add a prompt = add a file)
   rules.py         closed list of rule_id the agent may report (Security: with the CWE)
   examples.json    few-shot: one finding to imitate, one trap that must give []
+  tools.py         the agent's toolset, plus the tools only it uses
 ```
+
+**Tools.** Each agent can call a few read-only tools to look outside the diff, at most `max_tool_calls` (3) per review; at the limit it must answer (`tool_choice="none"`).
+
+| Agent | Tools | Agent-specific |
+| --- | --- | --- |
+| Security | `read_file`, `search_code`, `find_auth_guards` | `find_auth_guards` (router dependencies, `Depends`, middleware) in `security/tools.py` |
+| Logic | `read_file`, `find_callers`, `find_callees` | none |
+| Quality | `read_file`, `search_code`, `find_tests` | none |
+
+The implementations shared by several agents (and later by the context subagent) live in `review/agents/tools/`: `tool_definition.py` (the `Tool` type, `ToolContext`, and `execute_tool_call`, which never raises, caps output at 4000 characters and wraps it in a nonce), `repo_files.py`, `code_graph.py` (legacy NetworkX graph) and `related_tests.py`. A tool declares the resource it needs (`repo` or `graph`) and is only offered when that resource exists. Safety: paths are resolved inside the checkout, symlinks are never followed, secret files (`.env*`, `*.pem`, `*.key`, `.git/`) are never read, and search is literal (no regex). Limitation: the checkout is cloned once at worker start, so tools see that version, not the PR's.
 
 `review/agents/prompt_assembler.py` builds the prompt once at import: the agent's `prompts/*.md` → its rules → its examples → the shared `review/agents/prompts/*.md` (the diff and context, then the JSON output contract). Everything else is shared:
 

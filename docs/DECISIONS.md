@@ -15,6 +15,7 @@ Every significant design choice, and why it was made. Add new entries with the `
 - Postgres code index over Chroma + NetworkX pickle: one store for symbols, edges, reviews and findings, incremental updates
 - Structural context over semantic retrieval: review relevance comes from calls, tests and module code, not similarity
 - Bounded context subagent returning ids over free-form summaries: exact code, capped cost, safe fallback
+- Bounded per-agent tools (max 3 calls) over a prepared context only: agents can check guards, callers and tests
 - Index mirrors `main` only, PR code is an in-memory overlay: no cleanup, no cross-PR leakage
 - Review before index update: the review sees the true "before", a failed review never corrupts the index
 - Push coalescing over one review per push: fewer LLM calls, one review of the whole range
@@ -319,3 +320,24 @@ or posted review is never forgotten. `DEDUPE_BACKEND` defaults to postgres when
 instead of silently deduping in memory per replica. Trade-off: the API now
 depends on Postgres being up, and Azure has no Postgres server provisioned yet.
 Supersedes the Table Storage part of "Why a durable queue + separate worker".
+
+## Why bounded per-agent tools over a prepared context only
+
+The target design gave tools only to one shared context subagent, and the
+three review agents a prepared context. The agents could not check what they
+could not see: whether an endpoint is protected by a router-level dependency,
+who calls a changed function, whether a test already exists. Each agent now has
+a small read-only toolset in its folder (`review/agents/<category>/tools.py`):
+Security `find_auth_guards`, Logic `find_callers` / `find_callees`, Quality
+`find_tests`, plus `read_file` / `search_code`. The runner allows at most
+`max_tool_calls` (3) per agent, then forces an answer with `tool_choice="none"`.
+Shared implementations live in `review/agents/tools/`, so path, symlink and
+secret-file checks, output caps and nonce wrapping exist in one place, and the
+future context subagent reuses the same tools. Alternatives: no agent tools
+(cheapest, but the agents guess), an unbounded loop per agent (cost and Groq
+tokens-per-minute grow with every turn, less reproducible), every tool copied
+into each agent folder (three places to secure). Trade-offs: up to 3 extra
+calls per agent per review, each resending the prompt; tool outputs are a
+prompt-injection surface (wrapped and marked as data); tools read the checkout
+cloned at worker start, not the PR head. Whether tools improve findings is
+measured with the benchmark before raising the limit.

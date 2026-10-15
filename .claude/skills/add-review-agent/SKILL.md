@@ -16,6 +16,7 @@ review/agents/<name>/
   prompts/         01_role.md, 02_<topic>.md, ... read in number order
   rules.py         <NAME>_RULES = {rule_id: short description}
   examples.json    [{"about", "diff": [lines], "answer": [findings]}], one real finding + one trap ([])
+  tools.py         <NAME>_TOOLS = (READ_FILE, ...) + any tool only this agent uses
 ```
 
 ## Change an existing agent
@@ -23,6 +24,7 @@ review/agents/<name>/
 - **What it looks for:** edit or add a file in `prompts/` (`NN_topic.md`). Keep the number order meaningful: role first, scope last.
 - **What it may report:** add a rule to `rules.py`. The rules are listed in the prompt automatically, and an unknown `rule_id` from the model becomes `other`.
 - **How it answers:** add or fix an example in `examples.json`. Line numbers must be new-file lines from the hunk header. Never reuse a case from `eval/dataset/llm_benchmark_cases.json`, or the benchmark measures memorization.
+- **Which tools it may call:** edit `tools.py`. A tool only this agent needs is defined there; a tool two agents (or the future context subagent) need goes in `review/agents/tools/`. Every tool is read-only, declares `requires="repo"` or `"graph"`, returns text, and runs through `execute_tool_call` (caps, nonce wrapping, never raises). Never read files outside the checkout or secret files: reuse `resolve_inside_repo` / `search_lines`.
 - Never put `{diff}` or `{context_summary}` in an agent's files: they live once, in the shared `review/agents/prompts/90_review_input.md`. `assemble_prompt` fails at import otherwise.
 
 ## Add a new agent
