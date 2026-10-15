@@ -30,7 +30,7 @@ review/agents/<name>/
 ## Add a new agent
 
 1. Copy `review/agents/logic/` to `review/agents/<name>/` and rewrite `prompts/`, `rules.py`, `examples.json`. In `agent.py`, rename the spec (`<NAME>_AGENT`, `name="<name>"`) and the node (`<name>_node`). Its role prompt says what the other agents cover, so issues are not reported twice.
-2. Wire it into `review/graph.py` (the orchestrator): import `<name>_node` from `review.agents.<name>.agent`, add `"<name>"` to `REVIEW_AGENTS`, and `graph.add_node("<name>", <name>_node)`. It routes only to `join_agents`: the graph stays forward-only.
+2. Wire it into `review/graph.py` (the orchestrator): import `<name>_node` from `review.agents.<name>.agent`, add `"<name>"` to `REVIEW_AGENTS`, and `graph.add_node("<name>", partial(<name>_node, tool_context=tool_context))` so its tools can reach the checkout and the call graph. It routes only to `join_agents`: the graph stays forward-only.
 3. Add `"<name>": "<emoji> <Title>"` to `CATEGORY_TITLES` in `review/synthesizer.py`.
 4. Tests (follow the `write-tests` skill):
    - `tests/unit/test_agent_runner.py`: add the spec to `test_every_agent_prompt_keeps_placeholders_and_output_contract` and the node to `test_agent_nodes_use_their_own_client_seam`.
