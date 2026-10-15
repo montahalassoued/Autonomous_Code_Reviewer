@@ -31,4 +31,4 @@ def build_review_graph():
 
     repo_path = resolve_repo_path()
     collection, all_documents, all_ids, graph_index = ingest_repository(repo_path)
-    return build_graph(collection, all_documents, all_ids, graph_index)
+    return build_graph(collection, all_documents, all_ids, graph_index, repo_path)

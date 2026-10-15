@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from groq import Groq
 
 from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
+from review.agents.tools.tool_definition import Tool, ToolContext, execute_tool_call
 from review.state import ReviewState, Finding, RetrievedChunk
 
 
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_REVIEW_AGENT_MODEL = "openai/gpt-oss-120b"
 AGENT_TEMPERATURE = 0.1  # consistency over creativity for analysis
+# Each extra call resends the whole prompt, so tool use is capped per agent and per review.
+DEFAULT_MAX_TOOL_CALLS = 3
+FINAL_ANSWER_REQUEST = "Tool call limit reached. Answer now with the JSON array only."
 VALID_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
 REQUIRED_TEXT_FIELDS = ("file_path", "title", "description", "suggestion")
 VALID_CONFIDENCES = {"high", "medium", "low"}
@@ -25,6 +29,8 @@ class AgentSpec:
     name: str
     prompt_template: str
     rule_ids: frozenset[str]
+    tools: tuple[Tool, ...] = ()
+    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS
 
 
 # Returns the Groq model the review agents call.
@@ -129,16 +135,57 @@ def build_prompt(spec: AgentSpec, state: ReviewState) -> str:
     return fill_prompt(spec.prompt_template, state["pr_diff"], format_context(state["retrieved_context"]))
 
 
-# Run one agent: prompt -> Groq -> validated findings.
-def run_agent(spec: AgentSpec, state: ReviewState, client: Groq) -> dict:
-    response = client.chat.completions.create(
-        model=review_agent_model(),
-        messages=[{"role": "user", "content": build_prompt(spec, state)}],
-        temperature=AGENT_TEMPERATURE,
-    )
+def _ask_model(client: Groq, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
+    request = {"model": review_agent_model(), "messages": messages, "temperature": AGENT_TEMPERATURE}
+    if tool_schemas:
+        request["tools"] = tool_schemas
+        request["tool_choice"] = tool_choice
+    return client.chat.completions.create(**request).choices[0].message
 
-    # content can be None (a filtered or empty completion): no findings.
-    raw_output = response.choices[0].message.content or ""
+
+def _assistant_turn(message, tool_calls) -> dict:
+    return {
+        "role": "assistant",
+        "content": message.content or "",
+        "tool_calls": [
+            {"id": call.id, "type": "function", "function": {"name": call.function.name, "arguments": call.function.arguments}}
+            for call in tool_calls
+        ],
+    }
+
+
+# Let the model call its tools up to the limit, then make it answer with tool_choice="none".
+def _converse(spec: AgentSpec, prompt: str, client: Groq, tool_context: ToolContext | None) -> str:
+    tools = {tool.name: tool for tool in spec.tools if tool_context is not None and tool.is_available(tool_context)}
+    tool_schemas = [tool.to_groq_schema() for tool in tools.values()]
+    messages = [{"role": "user", "content": prompt}]
+    calls_left = spec.max_tool_calls if tools else 0
+
+    while True:
+        message = _ask_model(client, messages, tool_schemas, "auto" if calls_left > 0 else "none")
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if not tool_calls or calls_left == 0:
+            if tools and not message.content:
+                logger.warning("%s returned no answer after using its tools", spec.name)
+            # content can be None (a filtered or empty completion): no findings.
+            return message.content or ""
+
+        messages.append(_assistant_turn(message, tool_calls))
+        for call in tool_calls:
+            # Every tool_call_id needs a reply, even the calls made past the limit.
+            if calls_left > 0:
+                output = execute_tool_call(tools, call.function.name, call.function.arguments, tool_context)
+                calls_left -= 1
+            else:
+                output = "Not run: tool call limit reached."
+            messages.append({"role": "tool", "tool_call_id": call.id, "content": output})
+        if calls_left == 0:
+            messages.append({"role": "user", "content": FINAL_ANSWER_REQUEST})
+
+
+# Run one agent: prompt -> Groq (with bounded tool calls) -> validated findings.
+def run_agent(spec: AgentSpec, state: ReviewState, client: Groq, tool_context: ToolContext | None = None) -> dict:
+    raw_output = _converse(spec, build_prompt(spec, state), client, tool_context)
     raw_findings = parse_findings(raw_output)
 
     findings = []

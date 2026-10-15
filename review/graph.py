@@ -1,4 +1,8 @@
+from functools import partial
+from pathlib import Path
+
 from langgraph.graph import StateGraph, START, END
+from review.agents.tools.tool_definition import ToolContext
 from review.state import ReviewState
 from review.retriever import (
     retriever_node as _run_retriever_node,
@@ -33,7 +37,7 @@ def route_after_retriever(state: ReviewState) -> list[str] | str:
 
 
 # Assembles and compiles the StateGraph.
-def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_index):
+def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_index, repo_path: str | None = None):
     # Bind the repo-wide RAG objects (too big for ReviewState) into the retriever node.
     def retriever_node(state: ReviewState) -> dict:
         return _run_retriever_node(state, collection, all_documents, all_ids, graph_index)
@@ -42,9 +46,11 @@ def build_graph(collection, all_documents: list[str], all_ids: list[str], graph_
 
     # Register every node
     graph.add_node("retriever", retriever_node)
-    graph.add_node("security", security_node)
-    graph.add_node("logic", logic_node)
-    graph.add_node("quality", quality_node)
+    # The agents' tools read the checkout and the call graph; both stay out of ReviewState.
+    tool_context = ToolContext(repo_root=Path(repo_path) if repo_path else None, code_graph=graph_index)
+    graph.add_node("security", partial(security_node, tool_context=tool_context))
+    graph.add_node("logic", partial(logic_node, tool_context=tool_context))
+    graph.add_node("quality", partial(quality_node, tool_context=tool_context))
     graph.add_node("join_agents", join_agents_node)
     graph.add_node("synthesizer", synthesizer_node)
 
