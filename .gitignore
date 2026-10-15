@@ -16,7 +16,6 @@ dist/
 *.log
 .idea/
 .vscode/
-chroma/
 qdrant_storage/
 postgres_data/
 redis_data/
@@ -27,5 +26,3 @@ htmlcov/
 .claude/settings.local.json
 .claude/handoff.md
 
-# Local Chroma data written by integration tests
-test_chroma_data/

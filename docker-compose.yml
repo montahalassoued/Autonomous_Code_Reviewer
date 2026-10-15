@@ -80,7 +80,6 @@ services:
     environment:
       <<: *jobs-env
     volumes:
-      - chroma_data:/app/chroma_data
       - target_repo:/app/target_repo
     depends_on:
       azurite:
@@ -95,5 +94,4 @@ services:
 volumes:
   azurite_data:
   postgres_data:
-  chroma_data:
   target_repo:

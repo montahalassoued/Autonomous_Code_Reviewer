@@ -60,14 +60,14 @@ A job is deleted from the queue only after it succeeded. If the worker crashes o
 
 **Worker (`WORKER_APP_NAME`, default `ca-code-reviewer-worker`)**
 
-- **2 vCPU / 4 GiB** (a valid Consumption combination). The worker loads the torch reranker, Chroma and the in-memory graph. Lower it if real usage (metrics) shows far less.
+- **2 vCPU / 4 GiB** (a valid Consumption combination). Sized for the removed semantic retrieval (torch reranker, Chroma); the worker now only holds the parsed repo and its call graph, so lower it once real usage (metrics) confirms.
 - **Command override.** The container runs `python -m app.worker` instead of the image's default (uvicorn). The script sets `command: ["python"]` and `args: ["-m", "app.worker"]` in YAML. Later `az containerapp update --image ...` keeps this command; only the image changes.
 - **No ingress and no probes.** It has no HTTP port. If the process dies, Container Apps restarts it and the unfinished message reappears on the queue.
-- **Min = max = 1 replica.** The index is built in memory when the worker starts (clone, contextualize, embed). Each extra replica would repeat that work (more Gemini/Voyage usage and more vCPU cost). Scaling out is correct but costly; do it only if the queue backs up. A KEDA queue-length scale rule is included, commented out, at the end of step 8 in the script. Do not set min replicas to 0: every cold start would re-ingest for minutes before the first job.
+- **Min = max = 1 replica.** The call graph is built in memory when the worker starts (clone, parse). Each extra replica would repeat that work (more vCPU cost). Scaling out is correct but costly; do it only if the queue backs up. A KEDA queue-length scale rule is included, commented out, at the end of step 8 in the script. Do not set min replicas to 0: every cold start would re-clone and re-parse before the first job.
 - **Termination grace period 600s.** On a new revision or restart, Container Apps sends SIGTERM and waits up to this long. The worker finishes its current job before exiting. As far as I know 600 seconds is the platform maximum (default 30); verify with the command below. If a review is killed mid-way, nothing is lost: it is retried after the visibility timeout.
 - `REVIEW_VISIBILITY_TIMEOUT_S=900` must be longer than the longest review. If it is shorter, a second worker (or the same one after a restart) could receive the same message while the first is still running.
-- Secrets: `TARGET_REPO_URL`, `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, optional `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` (plus plain `LANGFUSE_HOST`).
-- **No persistent volume.** Chroma data and the cloned repo are on the container's temporary disk. Every worker restart or new revision re-clones and re-ingests (slow, uses API quota). Queued jobs just wait meanwhile. An Azure Files volume would avoid that but is not set up yet.
+- Secrets: `TARGET_REPO_URL`, `GROQ_API_KEY`, `GITHUB_TOKEN`, optional `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` (plus plain `LANGFUSE_HOST`).
+- **No persistent volume.** The cloned repo is on the container's temporary disk. Every worker restart or new revision re-clones and re-parses it (no API quota). Queued jobs just wait meanwhile. An Azure Files volume would avoid that but is not set up yet.
 
 **Identity.** Because both apps use a *user-assigned* identity, the Azure SDK's `DefaultAzureCredential` cannot guess which identity to use. The script sets `AZURE_CLIENT_ID` (the identity's client id) on both apps so it picks the right one.
 
@@ -106,8 +106,6 @@ export GITHUB_WEBHOOK_SECRET='choose-a-long-random-string'
 # Worker
 export TARGET_REPO_URL='https://github.com/owner/repo-to-review.git'
 export GROQ_API_KEY='...'
-export GOOGLE_API_KEY='...'
-export VOYAGE_API_KEY='...'
 export GITHUB_TOKEN='...'
 # optional (worker)
 export LANGFUSE_PUBLIC_KEY='...'
@@ -261,7 +259,7 @@ Prices change and depend on region, so none are quoted here. Use the **Azure pri
 - Container Registry: Basic tier.
 - Log Analytics: pay per GB ingested; the logs are small, but check "Daily cap" if worried.
 
-Outside Azure: Groq, Gemini and Voyage usage. Every worker restart or deploy re-ingests the repo (Gemini contextualization and Voyage embeddings), and each retried job repeats its LLM calls. Set a budget alert under Cost Management, Budgets.
+Outside Azure: Groq usage. Each retried job repeats its LLM calls; a worker restart only re-parses the repo, with no LLM call. Set a budget alert under Cost Management, Budgets.
 
 ## Tear everything down
 

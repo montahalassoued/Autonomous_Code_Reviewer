@@ -1,6 +1,5 @@
 # File purpose: Multi-stage container image for the FastAPI review service.
 # Inputs: Repository source code (filtered by .dockerignore) and requirements.txt.
-#         Optional build arg PRELOAD_RERANKER=true bakes the reranker model into the image.
 # Outputs: A non-root runtime image that serves the app on $PORT (default 8000).
 #          Secrets are NOT in the image; pass them as env vars at runtime.
 # Build requires BuildKit (default in current Docker): cache mounts are used.
@@ -21,11 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# CPU-only torch FIRST, so sentence-transformers sees it as already
-# satisfied and does not pull the multi-GB CUDA wheels from PyPI.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install torch --index-url https://download.pytorch.org/whl/cpu
-
 # Dependency layer: only re-runs when requirements.txt changes.
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -36,12 +30,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 
-ARG PRELOAD_RERANKER=false
-
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    HF_HOME=/app/.cache/huggingface \
     PORT=8000
 
 # git is required by rag/ingestion.py (GitPython clones TARGET_REPO_URL).
@@ -54,19 +45,13 @@ RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin app
 
 WORKDIR /app
 
-# Writable runtime dirs: Chroma data, cloned repo, Hugging Face model cache.
-RUN mkdir -p /app/chroma_data /app/target_repo "$HF_HOME" \
+# Writable runtime dir: the cloned target repo the agents' tools read.
+RUN mkdir -p /app/target_repo \
     && chown -R app:app /app
 
 COPY --from=builder /opt/venv /opt/venv
 
 USER app
-
-# Optional: bake the reranker model in so cold starts don't download it.
-# Placed before the source COPY so code changes don't invalidate this layer.
-RUN if [ "$PRELOAD_RERANKER" = "true" ]; then \
-      python -c "from sentence_transformers import CrossEncoder; CrossEncoder('BAAI/bge-reranker-v2-m3')"; \
-    fi
 
 # Source last (changes most often). .dockerignore keeps .env, tests, docs out.
 COPY --chown=app:app . .

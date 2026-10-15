@@ -17,8 +17,6 @@ htmlcov/
 coverage.xml
 
 # Local runtime state (recreated or mounted at runtime)
-chroma_data/
-test_chroma_data/
 target_repo/
 
 # VCS and editor/tooling

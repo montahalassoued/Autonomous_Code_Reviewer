@@ -28,7 +28,7 @@
 #        export GITHUB_WEBHOOK_SECRET='...'
 #        # Worker needs:
 #        export TARGET_REPO_URL='https://github.com/owner/repo.git'
-#        export GROQ_API_KEY='...'  GOOGLE_API_KEY='...'  VOYAGE_API_KEY='...'
+#        export GROQ_API_KEY='...'
 #        export GITHUB_TOKEN='...'
 #        # optional (Langfuse tracing, worker only):
 #        export LANGFUSE_PUBLIC_KEY='...' LANGFUSE_SECRET_KEY='...'
@@ -80,9 +80,10 @@ API_MIN_REPLICAS=1
 API_MAX_REPLICAS=2   # stateless (state is in Storage), so it can scale out safely
 TARGET_PORT=8000
 
-# Worker sizing: torch reranker + Chroma + embeddings need the memory.
-# Min=max=1: the index is built in memory at worker start, so each extra replica
-# would re-clone and re-embed the repo (more API quota and more vCPU). Raising
+# Worker sizing: kept from the semantic-retrieval days (torch reranker, Chroma); the worker now
+# only parses the repo and builds a call graph, so lower it once metrics confirm.
+# Min=max=1: the call graph is built in memory at worker start, so each extra replica
+# would re-clone and re-parse the repo (more vCPU). Raising
 # max later is safe (the queue hands each message to one worker), just costly.
 WORKER_CPU="2.0"
 WORKER_MEMORY="4.0Gi"
@@ -112,7 +113,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 # App secrets are read from YOUR shell environment, split per app. Required ones
 # must be set, because Container Apps refuses empty secret values.
 API_REQUIRED_SECRETS=(GITHUB_WEBHOOK_SECRET)
-WORKER_REQUIRED_SECRETS=(TARGET_REPO_URL GROQ_API_KEY GOOGLE_API_KEY VOYAGE_API_KEY GITHUB_TOKEN)
+WORKER_REQUIRED_SECRETS=(TARGET_REPO_URL GROQ_API_KEY GITHUB_TOKEN)
 WORKER_OPTIONAL_SECRETS=(LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY)
 missing=0
 for v in "${API_REQUIRED_SECRETS[@]}" "${WORKER_REQUIRED_SECRETS[@]}"; do

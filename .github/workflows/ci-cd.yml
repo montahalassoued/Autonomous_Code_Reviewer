@@ -51,11 +51,6 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      # CPU-only torch first, so sentence-transformers finds it already installed
-      # and does not pull the multi-GB CUDA wheels.
-      - name: Install CPU-only torch
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-
       - name: Install project requirements
         run: pip install -r requirements.txt
 
@@ -84,9 +79,6 @@ jobs:
           context: .
           push: false
           tags: autonomous-code-reviewer:${{ github.sha }}
-          # Optional, OFF for now: to bake the reranker model into the image, add the line
-          #   PRELOAD_RERANKER=true
-          # under build-args below. The image gets bigger and the build slower.
           build-args: |
             PYTHON_VERSION=3.11
           cache-from: type=gha,scope=build

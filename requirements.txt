@@ -10,31 +10,17 @@
 langgraph>=1.2.0
 langchain>=0.3.0
 langchain-core>=0.3.0
-google-genai>=1.0.0                # Gemini Flash SDK, used directly in rag/contextual_chunker.py
+google-genai>=1.0.0                # Gemini SDK, used by eval/llm_benchmark.py to compare models
 
 langchain-groq>=0.2.0              # Groq - REVIEW_AGENT_MODEL, free tier
-langchain-google-genai>=2.0.0      # Gemini Flash - free tier, used for contextual chunking
 
-# --- RAG: AST parsing (Step 3) ---
+# --- Code parsing (tree-sitter) ---
 tree-sitter>=0.23.0
 tree-sitter-python>=0.23.0
 tree-sitter-javascript>=0.23.0
 
-# --- RAG: knowledge graph (Step 5) ---
+# --- Call graph read by the agents' graph tools (replaced by the Postgres edges table in Phase 4) ---
 networkx>=3.3
-
-# --- RAG: embeddings (Step 6) ---
-voyageai>=0.2.0                    # voyage-code-2, free tier (50M tokens)
-
-# --- RAG: vector storage (Step 6) ---
-chromadb>=0.5.0                    # local dev vector store
-qdrant-client>=1.10.0              # production vector store (Qdrant Cloud, free tier)
-
-# --- RAG: hybrid search (Step 7) ---
-rank-bm25>=0.2.2                   # BM25 keyword search, fused with dense search via RRF
-
-# --- RAG: reranking (Step 9) ---
-sentence-transformers>=3.0.0       # BAAI/bge-reranker-v2-m3, runs locally on CPU
 
 # --- Backend API (Step 13) ---
 fastapi>=0.115.0
@@ -54,7 +40,7 @@ azure-identity>=1.17.0             # managed identity auth (DefaultAzureCredenti
 
 # --- GitHub integration (Step 13) ---
 PyGithub>=2.3.0
-gitpython>=3.1.40                  # clone repos for ingestion
+gitpython>=3.1.40                  # clone the target repo the agents' tools read
 
 # --- Evaluation (Step 15) ---
 ragas>=0.1.0
