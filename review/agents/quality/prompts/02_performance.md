@@ -1,6 +1,12 @@
-Performance:
-- Database queries inside loops (N+1)
-- Quadratic work, such as membership tests on a list inside a loop
-- Work repeated inside a loop that could be done once outside it (compiling a regex, opening a connection, reading config)
-- Blocking I/O inside async code (requests, time.sleep, sync database drivers in an async def)
-- Unbounded work: a query or endpoint that returns every row with no limit or pagination, a cache, list or listener registry that only grows
+Performance - patterns to look for in the changed lines:
+- N+1: a query or ORM lookup per item of a loop (.get, .filter, .execute, .first() inside a for) where one query with a join, IN (...) or prefetch would do
+- I/O per item: an HTTP call, cache or queue call, or file write per item where a batch API, bulk insert or one call before the loop exists
+- Blocking calls inside async def: requests.*, time.sleep, open() or Path.read_text, subprocess.run, a sync DB driver (psycopg2, sqlite3, pymysql); each one stalls every request on that event loop
+- Unbounded result sets: .all(), fetchall(), SELECT with no LIMIT, an endpoint returning a whole collection with no pagination, on a table that grows with users or time
+- Whole data in memory: read() or json.load of an upload or export, pandas.read_csv without chunksize, a full list where a generator or streaming response would do
+- Quadratic work on input-sized data: `x in some_list`, list.index or list.remove inside a loop, nested loops matching two collections, string += in a loop
+- Repeated work per iteration or per call: re.compile, schema or config parsing, sorting the same list
+- Heavy objects per request: an ML model or tokenizer, a DB engine or connection pool, an HTTP session, a cloud SDK client created inside a handler instead of once per process
+- No timeout on outbound calls: requests.* without timeout= and urllib urlopen wait forever by default, so one slow dependency holds a worker
+- A new filter, join or ORDER BY on a column with no index in the model or migration (index=True, Index(...), CREATE INDEX)
+- Caches with no bound or expiry: a module-level dict filled per request, functools.cache or lru_cache(maxsize=None) on arguments with unbounded variety (user ids, URLs)

@@ -188,7 +188,7 @@ def test_every_agent_has_its_own_tool_and_unique_names():
     for spec, own_tools in (
         (SECURITY_AGENT, ("find_auth_guards", "find_input_guards", "find_security_settings", "find_sql_queries")),
         (LOGIC_AGENT, ("find_exception_handlers",)),
-        (QUALITY_AGENT, ("find_similar_functions",)),
+        (QUALITY_AGENT, ("find_similar_functions", "find_loop_queries", "find_blocking_calls_in_async")),
     ):
         names = [tool.name for tool in spec.tools]
         for own_tool in own_tools:

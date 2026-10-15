@@ -1,0 +1,12 @@
+Do NOT report these - they look costly or messy but are not worth a comment:
+- A loop over a small constant collection (a literal list, tuple, dict or Enum of a few items), even when each iteration queries or calls an API.
+- Code that runs once: migrations, one-off scripts, management or CLI commands, startup and bootstrap code, module-level setup - unless it cannot finish or exhausts memory on realistic data.
+- Tests, fixtures and benchmarks: queries in a loop, sync I/O or large data there are not a production cost (flaky tests are a separate rule).
+- The efficient version already in place: a set or dict built before the loop, select_related, prefetch_related, joinedload or selectinload, IN (...), bulk_create, executemany, a module-level regex, client or model, lru_cache with a maxsize, .limit(), paginate, a LIMIT clause or a cursor; a Django queryset that is sliced, counted or iterated with .iterator() is not unbounded.
+- Calls that do not block the event loop: an awaited async client, asyncio.to_thread, run_in_executor, aiofiles, httpx.AsyncClient; and sync code in a plain def FastAPI route, which runs in a thread pool.
+- httpx calls with no explicit timeout: httpx has a 5 second default. Only requests and urllib wait forever by default.
+- Premature optimization: list comprehension versus loop, f-string versus format, caching len(), a generator over a list of a few items, any micro-change with no growth behind it.
+- Style a linter or formatter catches, and naming nitpicks: short names in a small scope (i, k, v, df, db), a name that follows the codebase's existing convention.
+- Well-known literals: 0, 1, -1, 2, 100 for a percentage, 60, 24, 1024, HTTP status codes.
+- Missing docs on private helpers or tests; a missing test for a rename, a config change, a log line or a trivial getter.
+- Duplication of two or three trivial lines, or of code you cannot point to.

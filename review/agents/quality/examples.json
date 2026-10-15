@@ -40,5 +40,56 @@
       "+    return [user.id for user in users if user.id not in banned]"
     ],
     "answer": []
+  },
+  {
+    "about": "a model loaded inside a request handler",
+    "diff": [
+      "diff --git a/app/api/embeddings.py b/app/api/embeddings.py",
+      "--- a/app/api/embeddings.py",
+      "+++ b/app/api/embeddings.py",
+      "@@ -1,4 +1,9 @@",
+      " from fastapi import APIRouter",
+      " from sentence_transformers import SentenceTransformer",
+      " ",
+      " router = APIRouter()",
+      "+",
+      "+@router.post(\"/embed\")",
+      "+def embed(texts: list[str]) -> list[list[float]]:",
+      "+    model = SentenceTransformer(\"all-MiniLM-L6-v2\")",
+      "+    return model.encode(texts).tolist()"
+    ],
+    "answer": [
+      {
+        "severity": "HIGH",
+        "rule_id": "heavy_object_per_call",
+        "confidence": "high",
+        "file_path": "app/api/embeddings.py",
+        "line_number": 8,
+        "title": "Embedding model loaded on every request",
+        "description": "Each call to /embed reads the model weights from disk and initializes them before encoding, so the load cost is paid once per request instead of once per process, and concurrent requests each hold their own copy in memory.",
+        "evidence": "model = SentenceTransformer(\"all-MiniLM-L6-v2\")",
+        "suggestion": "Load it once at module level or in the app lifespan: MODEL = SentenceTransformer(\"all-MiniLM-L6-v2\"), then return MODEL.encode(texts).tolist()."
+      }
+    ]
+  },
+  {
+    "about": "one lookup per key of a 3-item constant dict, run once at startup: nothing to report",
+    "diff": [
+      "diff --git a/app/startup.py b/app/startup.py",
+      "--- a/app/startup.py",
+      "+++ b/app/startup.py",
+      "@@ -1,2 +1,10 @@",
+      " # Runs once when the application starts.",
+      " from app.db import Setting, session",
+      "+",
+      "+DEFAULT_SETTINGS = {\"theme\": \"light\", \"language\": \"en\", \"page_size\": \"50\"}",
+      "+",
+      "+def ensure_default_settings():",
+      "+    for key, value in DEFAULT_SETTINGS.items():",
+      "+        if session.get(Setting, key) is None:",
+      "+            session.add(Setting(key=key, value=value))",
+      "+    session.commit()"
+    ],
+    "answer": []
   }
 ]

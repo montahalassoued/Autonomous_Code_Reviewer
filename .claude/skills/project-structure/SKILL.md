@@ -16,7 +16,7 @@ description: Decide where new code, tests and docs go and how to name them, so e
 | `app/` (top level) | Process entry points | `main.py` (API), `worker.py` (worker), `bootstrap.py` (shared startup) |
 | `review/` | Review pipeline | `graph.py` (LangGraph orchestrator), `state.py`, `synthesizer.py`, legacy `retriever.py` |
 | `review/agents/` | The review agents | `agent_runner.py` (executes any agent), `prompt_assembler.py`, shared `prompts/`, and one folder per category |
-| `review/agents/<category>/` | One review agent | `agent.py`, `prompts/NN_topic.md`, `rules.py`, `examples.json`, `tools/` (`toolset.py` + one `find_*.py` per tool only this agent uses) |
+| `review/agents/<category>/` | One review agent | `agent.py`, `prompts/NN_topic.md`, `rules.py`, `examples.json`, `tools/` (`toolset.py` + one `find_*.py` per tool only this agent uses, + a role-named helper shared by those tools, e.g. `python_source_scan.py`) |
 | `review/agents/tools/` | Read-only tools shared by agents | `tool_definition.py` (Tool, ToolContext, safe execution), one module per tool family |
 | `rag/` | Retrieval | Parsing, chunking, call graph, embeddings, search, reranking |
 | `tools/` | External service clients | One module per service: `github_tools.py` and so on |

@@ -1,0 +1,7 @@
+How to decide that a performance issue is real - name what grows and where it runs:
+1. What grows: loop iterations, rows in a table, items in a request, requests per second, file size. If nothing in the changed code grows with users, data or traffic (a loop over a constant tuple, a fixed list of settings), it is not a performance issue.
+2. Where it runs: a request handler, a worker job or a function they call (hot path), versus a one-off script, a migration, a CLI command, startup code or a test (runs once). Report hot-path issues; for run-once code report only what cannot finish or exhausts memory on realistic data. When you cannot see who calls the function, say so and lower the confidence.
+3. Evidence: "evidence" quotes the exact costly line from the diff - the query or call inside the loop, the blocking call inside async def, the .all() with no limit, the constructor inside the handler - and the finding is reported on that line.
+4. Cost: "description" states the growth as an order of magnitude read from the code, e.g. "one query per order, so N+1 queries for N orders", "the list scan makes this O(n*m)", "every request reloads the model". Never invent timings, latencies or percentages.
+5. Fix: "suggestion" gives the concrete change (a join or prefetch, IN (...), a set built before the loop, an async client, a module-level instance, a limit and offset, timeout=).
+One finding per root cause: when one loop causes several issues, report the most expensive one.
