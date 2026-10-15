@@ -5,12 +5,15 @@ import pytest
 
 from rag.ast_parser import parse_file
 from rag.knowledge_graph import build_knowledge_graph
-from review.agents.agent_runner import run_agent
+from review.agents.agent_runner import FINAL_ANSWER_REQUEST, run_agent
 from review.agents.logic.agent import LOGIC_AGENT
+from review.agents.logic.tools.find_exception_handlers import find_exception_handlers
+from review.agents.quality.agent import QUALITY_AGENT
+from review.agents.quality.tools.find_similar_functions import find_similar_functions
 from review.agents.security.agent import SECURITY_AGENT
-from review.agents.security.tools import find_auth_guards
+from review.agents.security.tools.find_auth_guards import find_auth_guards
+from review.agents.security.tools.find_sql_queries import find_sql_queries
 from review.agents.tools.code_graph import find_callees, find_callers
-from review.agents.agent_runner import FINAL_ANSWER_REQUEST
 from review.agents.tools.related_tests import find_tests
 from review.agents.tools.repo_files import read_file, resolve_inside_repo, search_code
 from review.agents.tools.tool_definition import MAX_TOOL_OUTPUT_CHARS, Tool, ToolContext, execute_tool_call
@@ -105,6 +108,56 @@ def test_auth_guard_prefix_matches_whole_folders(repo):
 
     assert "app/admin.py:4:" in output and "appx/" not in output
     print("OK - path_prefix 'app' does not match 'appx'")
+
+
+def test_find_sql_queries_shows_how_queries_are_built(repo):
+    (repo.repo_root / "app" / "orders.py").write_text(
+        "def get(cursor, order_id):\n    cursor.execute(f\"SELECT * FROM orders WHERE id = {order_id}\")\n",
+        encoding="utf-8",
+    )
+
+    output = find_sql_queries(repo, {"path_prefix": "app"})
+
+    assert output == 'app/orders.py:2: cursor.execute(f"SELECT * FROM orders WHERE id = {order_id}")'
+    assert "No SQL query found." == find_sql_queries(repo, {"path_prefix": "tests"})
+    print("OK - the security agent can follow input into the SQL it reaches")
+
+
+def test_find_exception_handlers_filters_by_exception(repo):
+    (repo.repo_root / "app" / "service.py").write_text(
+        "def load(key):\n    raise KeyError(key)\n\n\ndef safe(key):\n    try:\n        return load(key)\n"
+        "    except KeyError:\n        return None\n    except ValueError:\n        pass\n",
+        encoding="utf-8",
+    )
+
+    output = find_exception_handlers(repo, {"exception": "KeyError"})
+
+    assert output.splitlines() == ["app/service.py:2: raise KeyError(key)", "app/service.py:8: except KeyError:"]
+    assert "No raise or except of 'OSError'" in find_exception_handlers(repo, {"exception": "OSError"})
+    print("OK - the logic agent sees who raises an exception and who catches it")
+
+
+def test_find_similar_functions_finds_an_existing_helper():
+    source = "def parse_date(text):\n    return text\n\n\ndef parse_date_utc(text):\n    return text\n"
+    graph = build_knowledge_graph(parse_file("app/dates.py", source) + parse_file("app/new.py", "def parse_dates(t):\n    return t\n"))
+    context = ToolContext(code_graph=graph)
+
+    output = find_similar_functions(context, {"name": "parse_date", "exclude_file": "app/new.py"})
+
+    assert "- parse_date (app/dates.py:1)" in output and "- parse_date_utc (app/dates.py:5)" in output
+    assert "app/new.py" not in output
+    assert "at least" in find_similar_functions(context, {"name": "pd"})
+    print("OK - the quality agent can check whether a new helper already exists")
+
+
+def test_every_agent_has_its_own_tool_and_unique_names():
+    for spec, own_tool in (
+        (SECURITY_AGENT, "find_sql_queries"), (LOGIC_AGENT, "find_exception_handlers"), (QUALITY_AGENT, "find_similar_functions"),
+    ):
+        names = [tool.name for tool in spec.tools]
+        assert own_tool in names, f"{spec.name} is missing {own_tool}"
+        assert len(names) == len(set(names)), f"{spec.name} offers a tool twice"
+    print("OK - each agent's toolset has its own tool and no duplicate name")
 
 
 def test_tool_resource_must_be_repo_or_graph():
@@ -226,7 +279,7 @@ def test_no_tools_are_offered_without_their_resource(repo):
 
     assert "tools" not in no_context.requests[0], "without a ToolContext the agent is a single plain call"
     offered = [tool["function"]["name"] for tool in repo_only.requests[0]["tools"]]
-    assert offered == ["read_file"], "graph tools are hidden when there is no call graph"
+    assert offered == ["read_file", "find_exception_handlers"], "graph tools are hidden when there is no call graph"
     print("OK - only tools whose repo or graph exists are offered")
 
 

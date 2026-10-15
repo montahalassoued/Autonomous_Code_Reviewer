@@ -3,7 +3,7 @@ from pathlib import Path
 from review.agents.agent_runner import AgentSpec, build_groq_client as _build_groq_client, run_agent
 from review.agents.prompt_assembler import assemble_prompt
 from review.agents.quality.rules import QUALITY_RULES
-from review.agents.quality.tools import QUALITY_TOOLS
+from review.agents.quality.tools.toolset import QUALITY_TOOLS
 from review.agents.tools.tool_definition import ToolContext
 from review.state import ReviewState
 

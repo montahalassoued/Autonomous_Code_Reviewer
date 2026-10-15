@@ -1,4 +1,4 @@
-from review.agents.tools.repo_files import READ_FILE, SEARCH_CODE, search_lines, under_prefix
+from review.agents.tools.repo_files import search_lines, under_prefix
 from review.agents.tools.tool_definition import Tool, ToolContext
 
 
@@ -37,5 +37,3 @@ FIND_AUTH_GUARDS = Tool(
     run=find_auth_guards,
     requires="repo",
 )
-
-SECURITY_TOOLS = (READ_FILE, SEARCH_CODE, FIND_AUTH_GUARDS)

@@ -68,7 +68,12 @@ def read_file(context: ToolContext, arguments: dict) -> str:
 
 
 # Lines containing any of the texts, literal (not regex) so a pattern from the model can never hang.
-def search_lines(context: ToolContext, texts: tuple[str, ...], path_filter: Callable[[str], bool] | None = None) -> list[str]:
+def search_lines(
+    context: ToolContext,
+    texts: tuple[str, ...],
+    path_filter: Callable[[str], bool] | None = None,
+    line_filter: Callable[[str], bool] | None = None,
+) -> list[str]:
     root = _require_repo(context)
     hits = []
     for path in iter_repo_files(root):
@@ -76,7 +81,7 @@ def search_lines(context: ToolContext, texts: tuple[str, ...], path_filter: Call
         if path_filter and not path_filter(relative):
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
-            if any(text in line for text in texts):
+            if any(text in line for text in texts) and (line_filter is None or line_filter(line)):
                 hits.append(f"{relative}:{number}: {line.strip()}")
                 if len(hits) >= MAX_SEARCH_HITS:
                     return hits + [f"... stopped after {MAX_SEARCH_HITS} hits"]

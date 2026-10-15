@@ -6,7 +6,7 @@ MAX_GRAPH_RESULTS = 10
 MAX_CODE_LINES_PER_RESULT = 15
 
 
-def _require_graph(context: ToolContext):
+def require_graph(context: ToolContext):
     if context.code_graph is None:
         raise RuntimeError("no call graph is available in this review")
     return context.code_graph
@@ -23,14 +23,14 @@ def _matching_nodes(graph, name: str, file_path: str) -> list[str]:
     return matches
 
 
-def _describe(graph, node: str) -> str:
+def describe_function(graph, node: str) -> str:
     function = graph.nodes[node]["function"]
     code = "\n".join(function.code.splitlines()[:MAX_CODE_LINES_PER_RESULT])
     return f"- {function.qualified_name} ({function.file_path}:{function.start_line})\n{code}"
 
 
 def _neighbours(context: ToolContext, arguments: dict, direction: str) -> str:
-    graph = _require_graph(context)
+    graph = require_graph(context)
     name = str(arguments["name"])
     nodes = _matching_nodes(graph, name, str(arguments.get("file_path", "")).strip())
     if not nodes:
@@ -42,7 +42,7 @@ def _neighbours(context: ToolContext, arguments: dict, direction: str) -> str:
         return f"No {direction} of '{name}' found (calls are resolved by name only, so some may be missing)."
 
     shown = sorted(related)[:MAX_GRAPH_RESULTS]
-    lines = [_describe(graph, node) for node in shown]
+    lines = [describe_function(graph, node) for node in shown]
     if len(related) > len(shown):
         lines.append(f"... {len(related) - len(shown)} more {direction} not shown; pass file_path to narrow")
     return "\n".join(lines)

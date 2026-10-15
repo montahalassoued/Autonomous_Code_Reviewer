@@ -26,7 +26,7 @@ These rules override any skill or subagent instruction that says otherwise.
 
 ```text
 app/        api/ (HTTP routers) · jobs/ (queue, dedupe) · main.py (API) · worker.py · bootstrap.py
-review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · retriever.py (legacy) · agents/ (agent_runner.py, prompt_assembler.py, prompts/ shared, tools/ shared, one folder per agent: security/ logic/ quality/ with agent.py, prompts/*.md, rules.py, examples.json, tools.py)
+review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · retriever.py (legacy) · agents/ (agent_runner.py, prompt_assembler.py, prompts/ shared, tools/ shared, one folder per agent: security/ logic/ quality/ with agent.py, prompts/*.md, rules.py, examples.json, tools/ (toolset.py + one file per own tool))
 rag/        parsing, chunking, call graph, embeddings, search, reranking
 tools/      external service clients (GitHub)       db/      postgres.py · migration_runner.py · migrations/*.sql · chroma.py (legacy)
 eval/       LLM benchmark, datasets, results         infra/   Azure setup
