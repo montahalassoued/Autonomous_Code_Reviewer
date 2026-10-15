@@ -42,7 +42,7 @@ review/agents/<category>/
 
 | Agent | Tools | Agent-specific |
 | --- | --- | --- |
-| Security | `read_file`, `search_code`, `find_auth_guards`, `find_sql_queries` | `security/tools/find_auth_guards.py` (router dependencies, `Depends`, middleware), `security/tools/find_sql_queries.py` (where SQL is built or run) |
+| Security | `read_file`, `search_code`, `find_auth_guards`, `find_input_guards`, `find_security_settings`, `find_sql_queries` | `security/tools/find_auth_guards.py` (router dependencies, `Depends`, middleware), `find_input_guards.py` (validation and escaping by sink kind: path, html, shell, url, xml, schema), `find_security_settings.py` (CORS, CSRF, cookies, DEBUG, TLS, JWT settings, tests excluded), `find_sql_queries.py` (where SQL is built or run) |
 | Logic | `read_file`, `find_callers`, `find_callees`, `find_exception_handlers` | `logic/tools/find_exception_handlers.py` (who raises or catches an exception) |
 | Quality | `read_file`, `search_code`, `find_tests`, `find_similar_functions` | `quality/tools/find_similar_functions.py` (an existing helper with a similar name, from the call graph) |
 

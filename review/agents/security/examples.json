@@ -41,5 +41,53 @@
       "+    return cursor.fetchone()"
     ],
     "answer": []
+  },
+  {
+    "about": "the server fetches any URL the caller sends and returns the body",
+    "diff": [
+      "diff --git a/app/api/previews.py b/app/api/previews.py",
+      "--- a/app/api/previews.py",
+      "+++ b/app/api/previews.py",
+      "@@ -1,5 +1,11 @@",
+      " import httpx",
+      " from fastapi import APIRouter, Depends",
+      " from app.auth import get_current_user",
+      " ",
+      " router = APIRouter(prefix=\"/previews\")",
+      "+",
+      "+@router.get(\"/\")",
+      "+async def link_preview(url: str, current_user=Depends(get_current_user)):",
+      "+    async with httpx.AsyncClient(follow_redirects=True, timeout=5) as client:",
+      "+        response = await client.get(url)",
+      "+    return {\"status\": response.status_code, \"body\": response.text[:500]}"
+    ],
+    "answer": [
+      {
+        "severity": "HIGH",
+        "rule_id": "ssrf",
+        "confidence": "high",
+        "file_path": "app/api/previews.py",
+        "line_number": 10,
+        "title": "CWE-918: server-side request forgery in link_preview",
+        "description": "The url query parameter goes straight to client.get(). Any logged-in user can send http://localhost:8080/admin or a private 10.x address and read the response body, so internal services become reachable from the internet. follow_redirects=True also lets a public URL redirect to an internal one.",
+        "evidence": "response = await client.get(url)",
+        "suggestion": "Allow only http/https, resolve the host and reject private, loopback and link-local addresses (ipaddress.ip_address(ip).is_global), or check it against an allowlist of domains, and set follow_redirects=False so a redirect cannot bypass the check."
+      }
+    ]
+  },
+  {
+    "about": "md5 used as a cache key, not for security: nothing to report",
+    "diff": [
+      "diff --git a/app/cache/keys.py b/app/cache/keys.py",
+      "--- a/app/cache/keys.py",
+      "+++ b/app/cache/keys.py",
+      "@@ -1,1 +1,5 @@",
+      " import hashlib",
+      "+",
+      "+def page_cache_key(url_path: str, locale: str) -> str:",
+      "+    # Key for the rendered-page cache",
+      "+    return hashlib.md5(f\"{locale}:{url_path}\".encode(), usedforsecurity=False).hexdigest()"
+    ],
+    "answer": []
   }
 ]

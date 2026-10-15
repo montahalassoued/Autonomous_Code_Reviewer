@@ -329,7 +329,7 @@ could not see: whether an endpoint is protected by a router-level dependency,
 who calls a changed function, whether a test already exists. Each agent now has
 a small read-only toolset in its folder (`review/agents/<category>/tools/`,
 one file per tool it owns, listed in `toolset.py`): Security `find_auth_guards`
-/ `find_sql_queries`, Logic `find_exception_handlers` plus the shared
+/ `find_input_guards` / `find_security_settings` / `find_sql_queries`, Logic `find_exception_handlers` plus the shared
 `find_callers` / `find_callees`, Quality `find_similar_functions` plus the
 shared `find_tests`, and `read_file` / `search_code`. The runner allows at most
 `max_tool_calls` (3) per agent, then forces an answer with `tool_choice="none"`.

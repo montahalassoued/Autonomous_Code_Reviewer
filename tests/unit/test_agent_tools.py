@@ -12,6 +12,8 @@ from review.agents.quality.agent import QUALITY_AGENT
 from review.agents.quality.tools.find_similar_functions import find_similar_functions
 from review.agents.security.agent import SECURITY_AGENT
 from review.agents.security.tools.find_auth_guards import find_auth_guards
+from review.agents.security.tools.find_input_guards import find_input_guards
+from review.agents.security.tools.find_security_settings import find_security_settings
 from review.agents.security.tools.find_sql_queries import find_sql_queries
 from review.agents.tools.code_graph import find_callees, find_callers
 from review.agents.tools.related_tests import find_tests
@@ -123,6 +125,38 @@ def test_find_sql_queries_shows_how_queries_are_built(repo):
     print("OK - the security agent can follow input into the SQL it reaches")
 
 
+def test_find_input_guards_skips_tests_and_filters_by_kind(repo):
+    (repo.repo_root / "app" / "uploads.py").write_text(
+        "from werkzeug.utils import secure_filename\n\n\ndef save(upload):\n"
+        "    name = secure_filename(upload.filename)\n    return html.escape(name)\n",
+        encoding="utf-8",
+    )
+    (repo.repo_root / "tests" / "test_uploads.py").write_text("def test_save():\n    assert secure_filename('a')\n", encoding="utf-8")
+
+    path_guards = find_input_guards(repo, {"kind": "path"})
+    html_guards = find_input_guards(repo, {"kind": "HTML"})
+
+    assert path_guards == "app/uploads.py:5: name = secure_filename(upload.filename)", "test files are not guards"
+    assert html_guards == "app/uploads.py:6: return html.escape(name)"
+    assert "Unknown kind 'sql'" in find_input_guards(repo, {"kind": "sql"})
+    assert find_input_guards(repo, {"path_prefix": "tests"}) == "No input validation or escaping code found."
+    print("OK - the security agent sees production input guards, by sink kind, never test helpers")
+
+
+def test_find_security_settings_ignores_test_settings_and_docs(repo):
+    cors_line = "app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_credentials=True)"
+    (repo.repo_root / "app" / "main.py").write_text(cors_line + "\n", encoding="utf-8")
+    (repo.repo_root / "tests" / "settings.py").write_text("WTF_CSRF_ENABLED = False\n", encoding="utf-8")
+    (repo.repo_root / "tests" / "config.yaml").write_text("verify=False\n", encoding="utf-8")
+    (repo.repo_root / "README.md").write_text("Set DEBUG = True locally\n", encoding="utf-8")
+
+    output = find_security_settings(repo, {})
+
+    assert output == f"app/main.py:1: {cors_line}", "test settings and docs must not look like production config"
+    assert find_security_settings(repo, {"path_prefix": "tests"}).startswith("No CORS, CSRF")
+    print("OK - the security agent sees app-wide CORS/CSRF/cookie settings, not test overrides")
+
+
 def test_find_exception_handlers_filters_by_exception(repo):
     (repo.repo_root / "app" / "service.py").write_text(
         "def load(key):\n    raise KeyError(key)\n\n\ndef safe(key):\n    try:\n        return load(key)\n"
@@ -151,13 +185,16 @@ def test_find_similar_functions_finds_an_existing_helper():
 
 
 def test_every_agent_has_its_own_tool_and_unique_names():
-    for spec, own_tool in (
-        (SECURITY_AGENT, "find_sql_queries"), (LOGIC_AGENT, "find_exception_handlers"), (QUALITY_AGENT, "find_similar_functions"),
+    for spec, own_tools in (
+        (SECURITY_AGENT, ("find_auth_guards", "find_input_guards", "find_security_settings", "find_sql_queries")),
+        (LOGIC_AGENT, ("find_exception_handlers",)),
+        (QUALITY_AGENT, ("find_similar_functions",)),
     ):
         names = [tool.name for tool in spec.tools]
-        assert own_tool in names, f"{spec.name} is missing {own_tool}"
+        for own_tool in own_tools:
+            assert own_tool in names, f"{spec.name} is missing {own_tool}"
         assert len(names) == len(set(names)), f"{spec.name} offers a tool twice"
-    print("OK - each agent's toolset has its own tool and no duplicate name")
+    print("OK - each agent's toolset has its own tools and no duplicate name")
 
 
 def test_tool_resource_must_be_repo_or_graph():

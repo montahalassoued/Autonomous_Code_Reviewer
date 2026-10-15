@@ -1,12 +1,16 @@
-Look for:
-- SQL injection (string-built queries, unparameterized input)
-- Cross-site scripting (XSS) (unescaped output rendered as HTML)
-- Command injection (unsanitized input passed to a shell/subprocess)
-- Insecure deserialization (pickle, yaml.load, unsafe unmarshalling)
-- Hardcoded secrets, API keys, or credentials
-- Server-side request forgery (SSRF)
-- Path traversal (unsanitized file paths from user input, archive extraction without path checks)
-- Insecure cryptography (weak hashing, hardcoded salts/IVs, ECB mode)
-- Sensitive data exposure (CWE-200): a response that returns a whole database record or object (e.g. user.__dict__, a raw ORM model) and leaks fields such as password hashes, tokens or emails; stack traces or internal details sent to the client
+Look for these, grouped by the dangerous operation (the sink) the untrusted input reaches:
+- Queries: SQL built with f-strings, +, % or .format() and run by execute(), .raw(), text() or extra() (CWE-89); a request dict passed as a MongoDB filter, so the caller can send operators like {"$ne": null} (CWE-943)
+- Shell and code: subprocess with shell=True or os.system / os.popen on a built string (CWE-78); eval, exec, compile, __import__ or importlib.import_module on input (CWE-94); render_template_string or jinja2.Template built from input (CWE-1336)
+- HTML: Markup(), |safe, mark_safe, autoescape=False or an HTMLResponse built from input (CWE-79)
+- Parsers: pickle, marshal, shelve, dill, jsonpickle, yaml.load / yaml.unsafe_load or torch.load on data the caller controls (CWE-502); lxml with resolve_entities left on, or xml.sax / xml.dom.pulldom on untrusted XML, where defusedxml is the fix (CWE-611)
+- Outbound requests: requests, httpx, urllib or aiohttp fetching a URL or host taken from the request, including webhooks and "import from URL" features; the risk is reaching internal services and cloud metadata (CWE-918)
+- Redirects: RedirectResponse, redirect() or a Location header set to a "next", "return_to" or "url" parameter with no allowlist or same-host check (CWE-601)
+- Files: open(), send_file, FileResponse, os.path.join or Path / joining a name from the request; tarfile / zipfile extractall without a member check (CWE-22); an upload saved under its client filename or with no type and size limit (CWE-434)
+- Crypto: MD5, SHA1, DES, RC4 or ECB for signatures, tokens or encryption; a hardcoded key, salt or IV (CWE-327); passwords hashed with a fast hash instead of bcrypt, scrypt, argon2 or PBKDF2 with many iterations (CWE-916); random.random / randint / choice used for tokens, reset codes, session ids or passwords instead of the secrets module (CWE-338); a secret, token or HMAC compared with == instead of hmac.compare_digest (CWE-208)
+- TLS: verify=False, ssl._create_unverified_context, CERT_NONE or check_hostname=False on a real connection (CWE-295)
+- Regex: a pattern with nested or overlapping quantifiers such as (a+)+ or (\w+\s?)* run on request input (CWE-1333)
+- Secrets: a key, password, token or connection string with credentials written in code or config (CWE-798)
+- Data exposure (CWE-200): a response that returns a whole database record or object (e.g. user.__dict__, a raw ORM model) and leaks fields such as password hashes, tokens or emails; stack traces or internal details sent to the client
 - Secrets in logs or error messages (CWE-532): tokens, passwords, API keys or personal data written to a log line or an exception text
+- Configuration: debug=True, DEBUG = True, app.run(debug=True) or a Werkzeug debugger reachable in production code (CWE-489)
 - New dependencies (only if the diff changes requirements.txt, pyproject.toml, package.json or similar): an unpinned version, a typosquatted or unknown package name, a package with known vulnerabilities
