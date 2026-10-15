@@ -28,7 +28,7 @@ target_repo/
 .idea/
 
 # Not needed at runtime (CI runs the tests separately)
-test/
+tests/
 docs/
 eval/results/
 *.png

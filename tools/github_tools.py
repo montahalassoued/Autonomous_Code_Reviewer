@@ -4,18 +4,22 @@ review comments.
 
 Inputs: repo_full_name ("owner/repo"), pr_number, and (for posting) the
 final review markdown produced by agents/synthesizer.py.
-Outputs: the raw PR diff text (for get_pr_diff) or a posted issue
-comment on the PR (for post_review_comment).
+Outputs: the raw PR diff text (for get_pr_diff) or a created/updated issue
+comment on the PR (for upsert_summary_comment).
 
-Kept as a thin wrapper deliberately: app/api/webhook.py calls
-get_pr_diff() to build the initial ReviewState, and (after the graph
-finishes) post_review_comment() to publish final_review_markdown. All
+Kept as a thin wrapper deliberately: app/worker.py calls get_pr_diff()
+to build the initial ReviewState, and (after the graph finishes)
+upsert_summary_comment() to publish final_review_markdown. All
 GitHub API specifics live here so the rest of the app only deals with
 plain strings.
 """
 
 import os
 from github import Github, Auth
+
+
+# Hidden HTML comment that tags the bot's summary so a retry can find and edit it.
+SUMMARY_MARKER = "<!-- acr:summary -->"
 
 
 def _build_github_client() -> Github:
@@ -66,23 +70,44 @@ def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
     return "\n\n".join(diff_parts)
 
 
-def post_review_comment(repo_full_name: str, pr_number: int, markdown: str) -> None:
+def upsert_summary_comment(repo_full_name: str, pr_number: int, markdown: str) -> None:
     """
-    Posts the final review as an issue comment on the pull request.
+    Creates the review summary comment, or edits it if one already exists.
+
+    Why: the review job is retried (at-least-once delivery), so posting must
+    be idempotent. The body starts with a hidden marker; an existing issue
+    comment containing the marker AND written by the authenticated user is
+    edited in place. Comments with the marker from other users are ignored,
+    so nobody can hijack the slot by pasting the marker.
 
     Args:
         repo_full_name: the repository in "owner/repo" form
         pr_number: the pull request number
-        markdown: the final review markdown produced by
-                  agents/synthesizer.py
+        markdown: the final review markdown produced by agents/synthesizer.py
 
     Returns:
         None - this is a side-effecting call against the GitHub API.
-        A plain issue comment is used (not a formal PR review) since
-        the synthesizer produces one consolidated comment rather than
-        per-line review comments tied to specific diff positions.
+        A plain issue comment is used (not a formal PR review) since the
+        synthesizer produces one consolidated comment.
+
+    TODO (Phase 5): inline review comments will need a per-comment
+    fingerprint marker for the same idempotency.
     """
+    body = markdown if markdown.startswith(SUMMARY_MARKER) else f"{SUMMARY_MARKER}\n{markdown}"
+
     client = _build_github_client()
     repo = client.get_repo(repo_full_name)
     pull_request = repo.get_pull(pr_number)
-    pull_request.create_issue_comment(markdown)
+    bot_login = client.get_user().login
+
+    for comment in pull_request.get_issue_comments():
+        if SUMMARY_MARKER in (comment.body or "") and comment.user.login == bot_login:
+            comment.edit(body)
+            return
+
+    pull_request.create_issue_comment(body)
+
+
+def post_review_comment(repo_full_name: str, pr_number: int, markdown: str) -> None:
+    """Thin alias for upsert_summary_comment(), kept for older callers."""
+    upsert_summary_comment(repo_full_name, pr_number, markdown)

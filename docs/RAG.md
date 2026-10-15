@@ -1,111 +1,41 @@
-# RAG
+# Retrieval
 
-This document explains each of the 8 RAG layers used by the reviewer.
+**File purpose:** what retrieval does in the reviewer, before and after the structural-context redesign.
+**Target design:** [ARCHITECTURE.md](ARCHITECTURE.md) (code index, context assembly, context subagent).
 
----
+## New role of retrieval
 
-## Layer 1 — Clone repo → tree-sitter AST parse → function-level chunks
+Context for a review is **structural**: the changed code plus its callers, callees, tests and module-level code, read from the Postgres code index of `main` and filled into a token budget by a deterministic builder. Nothing is "searched for" by similarity in the core path.
 
-**Goal:** Convert source code into a structured unit that matches how code review is performed.
+Semantic retrieval is reduced to one optional job: **similar code** (duplicate detection, project conventions), via pgvector embeddings in `symbol_embeddings`, used only when enabled and when the context budget still has room (priority 7 in the context builder).
 
-**Why function-level chunks:** Review risks and design intents usually live inside functions/methods/helpers rather than arbitrary text spans.
+| Need | Target mechanism |
+| --- | --- |
+| What the change touches | Symbol diff (`content_hash` / `norm_hash`, matched by `qualified_name`) |
+| Who is affected | `edges` (`calls`, `imports`, `inherits`) |
+| What tests cover it | `edges` (`tested_by`) |
+| Config and non-Python references | grep over `files.content` |
+| Gaps the rules can't fill | Bounded context subagent returning symbol ids |
+| Similar code (optional) | pgvector over `symbol_embeddings` |
 
-**Output:** Function/class/module representations and extracted boundaries.
+## Current pipeline (legacy, still running)
 
----
+Until the Phase 4 eval shows structural context doing at least as well, the worker still uses the semantic pipeline:
 
-## Layer 2 — Contextual chunking (prepend 50–100 tokens)
+1. tree-sitter parse into function chunks (`rag/ast_parser.py`)
+2. a Gemini context sentence per chunk (`rag/contextual_chunker.py`)
+3. a NetworkX call graph, pickled (`rag/knowledge_graph.py`)
+4. Voyage embeddings in ChromaDB (`rag/embedder.py`, `db/chroma.py`)
+5. LLM query decomposition (`rag/query_decomposer.py`)
+6. hybrid BM25 + dense search fused with RRF (`rag/hybrid_search.py`)
+7. 1-hop caller/callee expansion (`rag/graph_retriever.py`)
+8. cross-encoder reranking (`rag/reranker.py`)
+9. an LLM judge that retries retrieval while quality < `QUALITY_THRESHOLD` (`agents/retriever.py`)
 
-**Goal:** Improve embedding quality by adding symbol/file context before embedding.
+**Why it is being replaced:** similarity is the wrong signal for review context. A caller that breaks when a signature changes is rarely textually similar to the change. Module-level code (router dependencies, middleware) is not indexed at all, so the security agent can't see whether an endpoint is protected. The worker also re-ingests the whole repo at every startup, with one Gemini call per function.
 
-**Example context fields:**
+**What goes, and when** (see [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)):
 
-- file path, symbol name, symbol type
-- brief signature/context
-- parent class/module name
-
-**Why it helps:** It reduces embedding ambiguity (e.g., common function names) and makes retrieved chunks more specific.
-
----
-
-## Layer 3 — AST Knowledge Graph (NetworkX)
-
-**Goal:** Model code entities and relationships so the system can do multi-hop reasoning.
-
-**Graph nodes:** File / Class / Function.
-
-**Graph edges:**
-
-- calls (function→function)
-- imports (module→module)
-- inherits / contains (class→class)
-
-**Why it matters:** Pure vector search often fails when the relevant evidence is not textually similar but is structurally connected (call chain, inheritance tree, composition).
-
----
-
-## Layer 4 — Dual storage (Qdrant vectors + NetworkX graph pickle)
-
-**Goal:** Keep both dense retrieval and structural reasoning available.
-
-- Qdrant stores contextual vectors for hybrid retrieval.
-- NetworkX graph is persisted for traversal and multi-hop expansion.
-
----
-
-## Layer 5 — Hybrid retrieval (BM25 0.4 + dense 0.6 → RRF → top 150)
-
-**Goal:** Maximize recall using lexical + semantic signals.
-
-- **BM25 (0.4):** exact matches for identifiers, symbols, constants, error messages.
-- **Dense (0.6):** semantic intent matches.
-
-**RRF fusion:** Merges candidate rankings from both retrieval styles.
-
-**Why top 150:** Enough breadth so reranking can focus on precision.
-
----
-
-## Layer 6 — Graph traversal (multi-hop fn→callers→importers)
-
-**Goal:** Expand candidates using structural context.
-
-Instead of only retrieving “similar text”, the system traverses:
-
-- from a touched function to its callers/callees
-- across imports to find the relevant modules
-
-This recovers architectural and systemic issues.
-
----
-
-## Layer 7 — Reranking (cross-encoder → top 20 → top 5)
-
-**Goal:** Improve precision.
-
-Pipeline:
-
-1. Cross-encoder scores candidates from the top fused set.
-2. Select **top 20**.
-3. Select **top 5** with **position-aware assembly** (best chunk first+last).
-
-**Why position-aware assembly:** LLMs exhibit recency/bias; assembling the most informative evidence at edges improves grounding.
-
----
-
-## Layer 8 — Corrective loop (LLM-as-judge; score<0.5 → reformulate; max 3 rounds)
-
-**Goal:** Avoid “thin-context reviews”.
-
-Process:
-
-1. Judge evidence quality for the current review question.
-2. If score < 0.5, reformulate queries using missing parent symbols, imports, and callers.
-3. Retry retrieval and reranking.
-4. Cap at 3 rounds to bound latency.
-
----
-
-## Net effect
-
-The system produces compact, high-signal evidence snippets that reduce retrieval failures and improve reviewer confidence.
+- The judge loop, the query decomposer and `graph_retriever` are deleted only after the eval shows structural ≥ legacy.
+- The in-memory full re-ingest at startup is replaced by the incremental Postgres sync.
+- ChromaDB and the NetworkX pickle are replaced by Postgres (the graph becomes the `edges` table).

@@ -28,7 +28,7 @@ This job installs Python 3.11 (the same version as the Docker image), CPU-only P
 | `test_webhook.py` | The GitHub webhook endpoint:<ul><li>rejects a missing or invalid HMAC signature (401)</li><li>ignores non-PR events and actions</li><li>schedules a review for `opened` and `synchronize`</li><li>returns 400 for a malformed payload</li></ul> |
 | `test_main.py` | App startup and `GET /health`, with indexing mocked |
 
-The other tests in `test/` call real APIs (Groq, Gemini, Voyage, GitHub) and use quota. They run only on demand, through the separate **integration-tests** workflow (Actions tab, then "Run workflow").
+The other tests in `tests/` call real APIs (Groq, Gemini, Voyage, GitHub) and use quota. They run only on demand, through the separate **integration-tests** workflow (Actions tab, then "Run workflow").
 
 ## Job 2: Docker build
 
@@ -36,11 +36,13 @@ This job builds the production image from the [`Dockerfile`](../Dockerfile) to p
 
 ## Job 3: Deploy
 
-This job runs only on `main`, and only once the Azure variables exist in GitHub. Until then it shows as **skipped**, not failed. When it does run:
+This job runs only on `main`, and only once the Azure variables exist in GitHub. Until then it shows as **skipped**, not failed. Two Container Apps run the same image: the **API** (`CONTAINER_APP_NAME`) verifies webhooks and enqueues reviews, and the **worker** (`WORKER_APP_NAME`) ingests the repo and runs the reviews from the queue. When it does run:
 
 1. Log in to Azure with OIDC, so no password is stored in GitHub.
 2. Push the image to Azure Container Registry, tagged with the commit SHA.
-3. Update the Azure Container App to that image.
-4. Wait up to 12 minutes until the **new** version's `/health` returns `ok`.
+3. Update the **worker** to that image and wait until its new revision is running (up to 5 minutes). It has no public URL, so there is no HTTP check.
+4. Update the **API** to that image and wait up to 3 minutes until the **new** revision's `/health` returns `ok`.
+
+The worker goes first, so a consumer exists before the API starts enqueueing. The worker's "running" check does not wait for ingestion, which takes minutes. Reviews queued in that time wait in the queue.
 
 The setup is in [`infra/README.md`](../infra/README.md).

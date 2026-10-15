@@ -73,10 +73,11 @@ COPY --chown=app:app . .
 
 EXPOSE 8000
 
-# Startup clones and ingests the repo before /health reports "ok", hence the
-# long start-period. Reads PORT in Python (exec form has no shell expansion).
+# The API starts instantly (no ingestion; the worker does that), so a short
+# start-period is enough. Reads PORT in Python (exec form has no shell expansion).
+# The worker has no HTTP server: compose disables this check for it.
 # Note: Azure Container Apps ignores this and uses its own probes.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '8000'), timeout=4)"]
 
 # sh -c + exec: expands $PORT, then uvicorn replaces the shell and becomes

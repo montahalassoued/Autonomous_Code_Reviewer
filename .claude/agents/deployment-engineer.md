@@ -29,8 +29,8 @@ These come from the user's CLAUDE.md and override everything below:
 ## This project's pipeline context
 
 - **The app:** one FastAPI container on port 8000, with a `GET /health` endpoint. Startup is slow: it clones the repo, ingests and embeds it, and loads the reranker model. Post-deploy checks must **wait and retry** on `/health` before declaring a failure.
-- **Tests in CI:** most tests in `test/` make real Groq, Gemini, Voyage and GitHub calls. On every push, run only the fast tests that make no network calls:
-  `python -m pytest test/test_state.py test/test_synthesizer.py test/test_webhook.py test/test_main.py`
+- **Tests in CI:** most tests in `tests/` make real Groq, Gemini, Voyage and GitHub calls. On every push, run only the fast tests that make no network calls:
+  `python -m pytest tests/unit `
   Integration tests should only run on manual dispatch (`workflow_dispatch`), with API keys from GitHub secrets.
 - **Registry and target:** Azure Container Registry, deployed to Azure Container Apps (confirm with `devops-engineer` and the user).
 - **Auth to Azure:** `azure/login` with **OIDC federated credentials**. Use the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` secrets, never a client secret or password.

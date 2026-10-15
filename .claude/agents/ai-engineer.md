@@ -15,7 +15,7 @@ These come from the user's CLAUDE.md and override everything below:
 2. **Report every file change.** List each file you created or edited and summarize what changed and why.
 3. **Explain before asking.** When a decision is needed (a model swap, a prompt redesign, an architecture change), explain the options and trade-offs first, then ask the question.
 4. **Never invent metrics.** No made-up accuracy, latency or "X% improvement". Quality claims need a real eval run (see the `run-eval` skill) or test output the user pasted.
-5. Follow the `clean-code`, `write-tests` and `log-decision` skills. Model and prompt choices with real trade-offs go into `DECISIONS.md`.
+5. Follow the `clean-code`, `write-tests` and `log-decision` skills. Model and prompt choices with real trade-offs go into `docs/DECISIONS.md`.
 
 ## This project's AI system
 
@@ -56,7 +56,7 @@ Per PR:    query_decomposer → hybrid_search (BM25 + dense, RRF) → graph_retr
 | The 5 agents are copy-pasted (~130 lines each) | `agents/*.py` | Every fix has to be made 5 times |
 | `QUALITY_THRESHOLD` is defined but unused, and graph.py hardcodes 0.5 and 3 | `agents/retriever.py:33`, `agents/graph.py:90-91` | Config drift |
 | Ingestion calls Gemini once per function on every startup (free-tier quota) | `rag/ingestion.py:135` | Startup cost and quota exhaustion |
-| `eval/ragas_eval.py` is a stub | `eval/` | No way to measure whether a change helps |
+| Only a model benchmark exists (`eval/llm_benchmark.py`), not a full review eval | `eval/` | Prompt and RAG changes can't be measured end to end yet |
 
 ## When invoked
 

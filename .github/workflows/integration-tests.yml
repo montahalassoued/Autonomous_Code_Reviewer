@@ -1,4 +1,4 @@
-# File purpose: Manual-only run of the full pytest suite, including the tests that call the REAL
+# File purpose: Manual-only run of tests/integration/: the tests that call the REAL
 #   APIs (Groq, Gemini, Voyage, GitHub). It is separate from ci-cd.yml, which never calls the APIs.
 # Inputs: workflow_dispatch only (Actions tab > integration-tests > Run workflow).
 #   GitHub secrets: GROQ_API_KEY, GOOGLE_API_KEY, VOYAGE_API_KEY, and INTEGRATION_GITHUB_TOKEN.
@@ -45,4 +45,4 @@ jobs:
 
       # Runs the whole suite, as CLAUDE.md describes. Tests that need a key skip or fail if it is missing.
       - name: Run the full test suite (real API calls)
-        run: python -m pytest -q
+        run: python -m pytest tests/integration -q

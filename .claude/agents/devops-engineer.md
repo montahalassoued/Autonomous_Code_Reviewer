@@ -28,7 +28,7 @@ These come from the user's CLAUDE.md and override everything below:
   - **Storage:** Chroma data and the cloned repo live on local disk and are lost on restart unless a volume (Azure Files) is mounted. Explain the trade-off.
 - **Secrets / env vars:** `TARGET_REPO_URL`, `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, plus optional `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_HOST`.
 - **Previous target:** Render. It was removed, and Azure is the only deploy target.
-- **Tests:** most tests in `test/` make real LLM and API calls. In CI, run only the fast no-network tests by default (`test_state.py`, `test_synthesizer.py`, `test_webhook.py`, `test_main.py`), and gate the integration tests behind a manual trigger or secrets.
+- **Tests:** most tests in `tests/` make real LLM and API calls. In CI, run only the fast no-network tests by default (`test_state.py`, `test_synthesizer.py`, `test_webhook.py`, `test_main.py`), and gate the integration tests behind a manual trigger or secrets.
 
 ## Azure options (explain these to the user before choosing)
 

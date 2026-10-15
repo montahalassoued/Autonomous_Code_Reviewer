@@ -1,35 +1,37 @@
 ---
 name: run-eval
-description: Build or run the RAGAS evaluation of the RAG pipeline (eval/ragas_eval.py) and compare results before/after a change to retrieval, chunking, reranking, or agent prompts. Use when the user asks to evaluate, benchmark, or measure the quality of retrieval/reviews.
+description: Run or extend the evaluation of this project's LLMs and review quality (eval/llm_benchmark.py today, the Phase 1 review eval harness later) and compare results before/after a change to prompts, models, retrieval or agents. Use when the user asks to evaluate, benchmark, or compare models or quality.
 ---
 
-# RAG evaluation
+# Evaluation
 
-The entrypoint is `eval/ragas_eval.py` (Step 15 in `docs/PROGRESS.md`). **It's currently a stub**, so the first time you use this skill you'll need to build it with the user.
+## What exists today: `eval/llm_benchmark.py`
 
-## If the eval isn't built yet
+It compares free LLMs on the 4 LLM jobs (agents, decomposer, judge, chunker) using the **real production prompts** and deterministic scoring (no LLM grader).
+- **Dataset:** `eval/dataset/llm_benchmark_cases.json`. Each case has a known right answer.
+- **Results:** `eval/results/llm_benchmark_<timestamp>.json` and `.md`
+- **Unit tests:** `tests/unit/test_llm_benchmark.py` (offline)
 
-Confirm the plan with the user first, then implement it (following the `clean-code` skill):
+```bash
+venv/Scripts/python.exe -m eval.llm_benchmark --list-models   # what your keys can call
+venv/Scripts/python.exe -m eval.llm_benchmark --tasks agents,judge --models groq:<m>,gemini:<m> --runs 3
+```
 
-1. **Dataset:** `eval/dataset.json`, a small hand-written set (start with 10-20 items). Each item has:
-   - `question`: a retrieval query, e.g. "where is the webhook signature verified?"
-   - `ground_truth`: the expected answer in one or two sentences
-   - `expected_files` (optional): the files that should be retrieved
-2. **Run the retrieval pipeline** for each question: ingest the target repo once with `rag/ingestion.py`, then run the same path as `agents/retriever.py` (hybrid_search → graph_retriever → reranker).
-3. **Score with RAGAS** (`ragas` and `datasets` are in `requirements.txt`). Use `context_precision`, `context_recall`, plus `faithfulness` and `answer_relevancy` if an answer is generated. Configure RAGAS to use the project's Groq or Gemini LLM rather than OpenAI's default.
-4. **Output:** print a metric table, and save `eval/results/<YYYY-MM-DD>_<label>.json` with the per-item scores and the averages.
-5. Add a CLI entry: `venv/Scripts/python.exe -m eval.ragas_eval --label baseline`.
+Every run makes **real API calls**, so the user runs it. Before giving the command, tell the user roughly how many calls it makes (cases × models × runs).
 
-## Running a before/after comparison
+## What's planned: the review eval harness (Phase 1 of `docs/IMPLEMENTATION_PLAN.md`)
 
-1. Tell the user that the eval makes many real LLM and embedding calls (quota and cost).
-2. Run a baseline on the current code: `--label before-<change>`.
-3. Apply the change, then run it again: `--label after-<change>`.
-4. Report a table of each metric (before, after, delta), plus the items that got noticeably worse.
-5. If a metric drops, say so plainly. Don't present a regression as a win.
+Golden PRs with planted bugs, measuring:
+- context recall and precision
+- findings per category
+- false positives on clean PRs
+- calls per review
 
-## Tips
+The metrics are custom and deterministic, not RAGAS. Scores are pushed to **Langfuse** as dataset runs.
 
-- Keep the dataset fixed between the two runs, or the comparison means nothing.
-- Results vary a little between runs. Treat differences under ~0.02 as noise.
-- Commit `eval/dataset.json`, and decide with the user whether to commit `eval/results/`.
+## Comparing before and after a change
+
+1. Keep the dataset fixed between the runs.
+2. Run a baseline with `--runs 3`, make the change, then run again.
+3. Report a table of each metric: before, after, and the delta. Treat differences of about 0.02 or less as noise.
+4. Say so plainly when a metric gets worse. Never present a regression as an improvement.

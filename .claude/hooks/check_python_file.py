@@ -12,7 +12,7 @@ What it checks:
 2. Lint errors via ruff, only if ruff is installed - so the hook works
    today and gets stricter automatically after `pip install ruff`.
 
-Why not run pytest here: most tests in test/ make real Groq/Gemini/
+Why not run pytest here: most tests in tests/ make real Groq/Gemini/
 Voyage calls, which would burn API quota on every single edit. Tests
 are run on demand by the test-runner subagent instead.
 """

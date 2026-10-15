@@ -1,11 +1,11 @@
 ---
 name: write-tests
-description: Write pytest tests for this project following its conventions (integration vs unit tests, mocking Groq/Gemini/Voyage/GitHub, .env isolation). Use when adding or fixing tests in test/, or after implementing new code in agents/, rag/, tools/, app/.
+description: Write pytest tests for this project following its conventions (integration vs unit tests, mocking Groq/Gemini/Voyage/GitHub, .env isolation). Use when adding or fixing tests in tests/, or after implementing new code in agents/, rag/, tools/, app/.
 ---
 
 # Writing tests
 
-Tests live in `test/` as `test_<module>.py` (see `pytest.ini`). Run them with `venv/Scripts/python.exe -m pytest`.
+Tests live in `tests/unit/` (offline, run in CI) and `tests/integration/` (real APIs, auto-marked `integration` by `tests/conftest.py`, run manually). Name files `test_<module>.py`. Run unit tests with `venv/Scripts/python.exe -m pytest tests/unit`.
 
 ## Step 1: Decide which kind of test you need
 
@@ -44,7 +44,7 @@ if __name__ == "__main__":
 
 - Name tests after the **behavior**: `test_webhook_rejects_missing_signature`, not `test_webhook_1`.
 - Use a module docstring that explains the test's purpose. That's the `clean-code` skill, applied to tests.
-- Use a `build_state()` helper with **every** `ReviewState` field filled in (copy from `test/test_security.py`).
+- Use a `build_state()` helper with **every** `ReviewState` field filled in (copy from `tests/integration/test_security.py`).
 - Assert messages explain the expectation: `assert len(findings) > 0, "Should detect the SQL injection"`.
 - Use `print("OK - ...")` lines. The suite is often run with `-s` to read them.
 - The `if __name__ == "__main__":` block lets you run the file directly.
@@ -56,7 +56,7 @@ if __name__ == "__main__":
   monkeypatch.setattr("app.api.webhook.get_pr_diff", lambda repo, pr: FAKE_DIFF)
   ```
 - To test an agent without Groq, monkeypatch its `_build_groq_client` to return a fake object whose `chat.completions.create(...)` returns a canned JSON string. Then test `_parse_findings` and `_to_finding` with malformed inputs: fenced JSON, prose around the array, missing fields, a non-int `line_number`.
-- Build FastAPI tests with a minimal app plus the router under test and `TestClient` (see `make_app()` in `test/test_webhook.py`).
+- Build FastAPI tests with a minimal app plus the router under test and `TestClient` (see `make_app()` in `tests/unit/test_webhook.py`).
 
 ## Environment isolation (an important rule)
 
@@ -77,4 +77,4 @@ Or use `monkeypatch.setenv(...)` inside the test.
 
 ## Before finishing
 
-Run the new file: `venv/Scripts/python.exe -m pytest test/test_<module>.py -s`. Report the real result. If it fails, show the failure.
+Run the new file: `venv/Scripts/python.exe -m pytest tests/<unit or integration>/test_<module>.py -s`. Report the real result. If it fails, show the failure.

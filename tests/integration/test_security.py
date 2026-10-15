@@ -10,7 +10,7 @@ than just returning valid-but-empty output.
 from dotenv import load_dotenv
 load_dotenv()
 
-from agents.security import security_node
+from agents.security import security_node  # noqa: E402 - must load .env before the agent reads its keys
 
 
 SQL_INJECTION_DIFF = """
@@ -60,6 +60,35 @@ def test_security_node_detects_sql_injection():
         assert f["suggestion"]
 
     print("OK - security agent detected the SQL injection issue with valid Finding shape")
+
+
+IDOR_DIFF = """
++@router.get("/invoices/{invoice_id}")
++def get_invoice(invoice_id: int, current_user=Depends(get_current_user)):
++    invoice = session.get(Invoice, invoice_id)
++    if invoice is None:
++        raise HTTPException(status_code=404)
++    return invoice
+"""
+
+
+def test_security_node_detects_missing_authorization():
+    """An authenticated endpoint that loads a resource by id with no
+    ownership check (IDOR / missing authorization) must be reported."""
+    state = build_state(IDOR_DIFF)
+
+    result = security_node(state)
+
+    findings = result["findings"]
+    print(f"\nDetected {len(findings)} finding(s) on the IDOR diff:")
+    for f in findings:
+        print(f"  - [{f['severity']}] {f['title']}")
+
+    text = " ".join(f"{f['title']} {f['description']}".lower() for f in findings)
+    assert any(word in text for word in ("authoriz", "idor", "owner", "cwe-639", "cwe-862")), (
+        "Should report the missing ownership/authorization check"
+    )
+    print("OK - security agent detected the missing authorization check")
 
 
 def test_security_node_handles_empty_context():

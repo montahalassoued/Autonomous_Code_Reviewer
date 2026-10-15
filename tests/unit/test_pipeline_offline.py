@@ -229,7 +229,7 @@ def build_index() -> tuple:
 
 
 def build_state() -> dict:
-    """Builds the same initial ReviewState app/api/webhook.py passes to the graph."""
+    """Builds the same initial ReviewState app/worker.py passes to the graph."""
     return {
         "pr_number": 7,
         "repo_full_name": "test-owner/test-repo",
