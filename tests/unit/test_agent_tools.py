@@ -187,7 +187,7 @@ def test_find_similar_functions_finds_an_existing_helper():
 def test_every_agent_has_its_own_tool_and_unique_names():
     for spec, own_tools in (
         (SECURITY_AGENT, ("find_auth_guards", "find_input_guards", "find_security_settings", "find_sql_queries")),
-        (LOGIC_AGENT, ("find_exception_handlers",)),
+        (LOGIC_AGENT, ("find_return_values", "find_call_sites", "find_exception_handlers")),
         (QUALITY_AGENT, ("find_similar_functions", "find_loop_queries", "find_blocking_calls_in_async")),
     ):
         names = [tool.name for tool in spec.tools]
@@ -316,7 +316,7 @@ def test_no_tools_are_offered_without_their_resource(repo):
 
     assert "tools" not in no_context.requests[0], "without a ToolContext the agent is a single plain call"
     offered = [tool["function"]["name"] for tool in repo_only.requests[0]["tools"]]
-    assert offered == ["read_file", "find_exception_handlers"], "graph tools are hidden when there is no call graph"
+    assert offered == ["read_file", "find_call_sites", "find_exception_handlers"], "graph tools are hidden when there is no call graph"
     print("OK - only tools whose repo or graph exists are offered")
 
 

@@ -39,5 +39,52 @@
       "+    return items[0] if items else None"
     ],
     "answer": []
+  },
+  {
+    "about": "a generator read twice, so the second pass is empty",
+    "diff": [
+      "diff --git a/app/reports/invoices.py b/app/reports/invoices.py",
+      "--- a/app/reports/invoices.py",
+      "+++ b/app/reports/invoices.py",
+      "@@ -1,1 +1,7 @@",
+      " from app.db import fetch_invoices",
+      "+",
+      "+def average_paid(customer_id: int) -> float:",
+      "+    paid = (invoice.amount for invoice in fetch_invoices(customer_id) if invoice.paid)",
+      "+    total = sum(paid)",
+      "+    count = sum(1 for _ in paid)",
+      "+    return total / count if count else 0.0"
+    ],
+    "answer": [
+      {
+        "severity": "HIGH",
+        "rule_id": "iterator_exhausted",
+        "confidence": "high",
+        "file_path": "app/reports/invoices.py",
+        "line_number": 6,
+        "title": "Paid amounts are counted after the generator is used up",
+        "description": "paid is a generator, and sum(paid) on line 5 reads it to the end. The second pass on line 6 sees nothing, so count is always 0 and average_paid returns 0.0 for every customer, even one with paid invoices of 10 and 30 (expected 20.0).",
+        "evidence": "count = sum(1 for _ in paid)",
+        "suggestion": "Build a list once and use it twice: paid = [invoice.amount for invoice in fetch_invoices(customer_id) if invoice.paid]; return sum(paid) / len(paid) if paid else 0.0."
+      }
+    ]
+  },
+  {
+    "about": "ceiling division on a page size the type keeps above zero: nothing to report",
+    "diff": [
+      "diff --git a/app/api/pagination.py b/app/api/pagination.py",
+      "--- a/app/api/pagination.py",
+      "+++ b/app/api/pagination.py",
+      "@@ -1,1 +1,8 @@",
+      " from pydantic import BaseModel, Field",
+      "+",
+      "+class Pagination(BaseModel):",
+      "+    page_size: int = Field(gt=0)",
+      "+",
+      "+def pages_needed(item_count: int, pagination: Pagination) -> int:",
+      "+    # Ceiling division: 0 items -> 0 pages, 101 items of 50 -> 3 pages",
+      "+    return -(-item_count // pagination.page_size)"
+    ],
+    "answer": []
   }
 ]

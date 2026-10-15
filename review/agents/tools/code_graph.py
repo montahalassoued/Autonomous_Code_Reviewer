@@ -13,7 +13,7 @@ def require_graph(context: ToolContext):
 
 
 # Nodes named `name` ("login" also matches "AuthService.login"), optionally only in one file.
-def _matching_nodes(graph, name: str, file_path: str) -> list[str]:
+def matching_nodes(graph, name: str, file_path: str) -> list[str]:
     matches = []
     for node, data in graph.nodes(data=True):
         function = data["function"]
@@ -32,7 +32,7 @@ def describe_function(graph, node: str) -> str:
 def _neighbours(context: ToolContext, arguments: dict, direction: str) -> str:
     graph = require_graph(context)
     name = str(arguments["name"])
-    nodes = _matching_nodes(graph, name, str(arguments.get("file_path", "")).strip())
+    nodes = matching_nodes(graph, name, str(arguments.get("file_path", "")).strip())
     if not nodes:
         return f"No function named '{name}' in the call graph."
     related = set()
@@ -56,7 +56,7 @@ def find_callees(context: ToolContext, arguments: dict) -> str:
     return _neighbours(context, arguments, "callees")
 
 
-_NAME_PARAMETERS = {
+FUNCTION_NAME_PARAMETERS = {
     "type": "object",
     "properties": {
         "name": {"type": "string", "description": "function or Class.method name, e.g. login or AuthService.login"},
@@ -68,7 +68,7 @@ _NAME_PARAMETERS = {
 FIND_CALLERS = Tool(
     name="find_callers",
     description="List the functions that call the given function, with their code. Use it to check who breaks when a signature or return value changes.",
-    parameters=_NAME_PARAMETERS,
+    parameters=FUNCTION_NAME_PARAMETERS,
     run=find_callers,
     requires="graph",
 )
@@ -76,7 +76,7 @@ FIND_CALLERS = Tool(
 FIND_CALLEES = Tool(
     name="find_callees",
     description="List the functions the given function calls, with their code. Use it to check what can return None or raise.",
-    parameters=_NAME_PARAMETERS,
+    parameters=FUNCTION_NAME_PARAMETERS,
     run=find_callees,
     requires="graph",
 )
