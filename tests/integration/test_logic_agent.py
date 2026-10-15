@@ -21,12 +21,9 @@ def build_state(diff: str) -> dict:
         "repo_full_name": "test/repo",
         "pr_diff": diff,
         "changed_files": ["lists/slicing.py"],
-        "retrieved_context": [],
-        "retrieval_quality_score": 1.0,
-        "retrieval_attempts": 1,
+        "review_context": "",
         "findings": [],
         "final_review_markdown": "",
-        "next_step": "parallel_agents",
     }
 
 

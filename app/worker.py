@@ -27,12 +27,9 @@ def review_pull_request(compiled_graph, job: ReviewJob) -> None:
         "repo_full_name": job.repo_full_name,
         "pr_diff": diff,
         "changed_files": [],
-        "retrieved_context": [],
-        "retrieval_quality_score": 0.0,
-        "retrieval_attempts": 0,
+        "review_context": "",
         "findings": [],
         "final_review_markdown": "",
-        "next_step": "retriever",
     }
 
     final_state = compiled_graph.invoke(initial_state)

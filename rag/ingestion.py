@@ -1,9 +1,9 @@
 import os
+
 import git
+import networkx as nx
+
 from rag.ast_parser import parse_file, ParsedFunction
-from rag.contextual_chunker import contextualize_functions, ContextualChunk
-from rag.embedder import embed_chunks
-from db.chroma import get_client, get_collection, store_chunks, make_chunk_id
 from rag.knowledge_graph import build_knowledge_graph
 
 
@@ -50,45 +50,11 @@ def _parse_repo(repo_path: str) -> list[ParsedFunction]:
     return functions
 
 
-# Removes chunks that are in the collection but not in this run.
-def delete_stale_ids(collection, current_ids: list[str]) -> list[str]:
-    # include=[] asks Chroma for ids only, not documents or embeddings
-    stored_ids = collection.get(include=[])["ids"]
-    current = set(current_ids)
-    stale_ids = [chunk_id for chunk_id in stored_ids if chunk_id not in current]
-    # Chroma rejects delete(ids=[]), so only call it when there's work
-    if stale_ids:
-        collection.delete(ids=stale_ids)
-    return stale_ids
-
-
-# Runs the full ingestion pipeline over a local repository checkout.
-def ingest_repository(repo_path: str, persist_directory: str = "./chroma_data"):
+# Parses the checkout and builds the call graph the agents' graph tools read; no LLM or embedding call.
+def ingest_repository(repo_path: str) -> nx.DiGraph:
     print(f"Parsing repository at {repo_path}...")
     functions = _parse_repo(repo_path)
-    print(f"Parsed {len(functions)} function(s) total.")
-
-    print("Contextualizing functions (Gemini)...")
-    chunks: list[ContextualChunk] = contextualize_functions(functions)
-
-    print("Embedding chunks (Voyage AI)...")
-    embeddings = embed_chunks(chunks)
-
-    print("Storing chunks in ChromaDB...")
-    client = get_client(persist_directory=persist_directory)
-    collection = get_collection(client)
-    store_chunks(collection, chunks, embeddings)
-
-    all_documents = [chunk.embeddable_text for chunk in chunks]
-    all_ids = [make_chunk_id(chunk) for chunk in chunks]
-
-    stale_ids = delete_stale_ids(collection, all_ids)
-    print(f"Removed {len(stale_ids)} stale chunk(s) from ChromaDB.")
-
-    print("Building knowledge graph...")
     graph = build_knowledge_graph(functions)
-
-    print(f"Ingestion complete: {len(all_ids)} chunks indexed, "
+    print(f"Ingestion complete: {len(functions)} function(s), "
           f"{graph.number_of_nodes()} graph nodes, {graph.number_of_edges()} graph edges.")
-
-    return collection, all_documents, all_ids, graph
+    return graph

@@ -43,18 +43,15 @@ class FakeGroq:
 
 
 # Builds a minimal ReviewState-shaped dict for the node under test.
-def build_state(diff: str = "+ def f():\n+     return 1\n", context: list | None = None) -> dict:
+def build_state(diff: str = "+ def f():\n+     return 1\n", context: str = "") -> dict:
     return {
         "pr_number": 1,
         "repo_full_name": "test/repo",
         "pr_diff": diff,
         "changed_files": [],
-        "retrieved_context": context or [],
-        "retrieval_quality_score": 1.0,
-        "retrieval_attempts": 1,
+        "review_context": context,
         "findings": [],
         "final_review_markdown": "",
-        "next_step": "parallel_agents",
     }
 
 
@@ -152,8 +149,7 @@ def test_run_agent_treats_none_content_as_no_findings():
 
 def test_run_agent_sends_diff_context_model_and_temperature(monkeypatch):
     monkeypatch.setenv("REVIEW_AGENT_MODEL", "groq-test-model")
-    context = [{"function_name": "load_user", "file_path": "app/users.py", "code": "def load_user(): ...",
-                "context": "", "relevance_score": 1.0, "callers": []}]
+    context = "- load_user (app/users.py):\ndef load_user(): ..."
     client = FakeGroq("[]")
 
     run_agent(quality_agent.QUALITY_AGENT, build_state(diff="+ x = compute()\n", context=context), client)
@@ -173,7 +169,7 @@ def test_empty_context_uses_placeholder():
     run_agent(logic_agent.LOGIC_AGENT, build_state(), client)
 
     assert EMPTY_CONTEXT_SUMMARY in client.requests[0]["messages"][0]["content"]
-    print("OK - no retrieved context renders the placeholder line")
+    print("OK - no prepared context renders the placeholder line")
 
 
 def test_review_agent_model_falls_back_to_default(monkeypatch):

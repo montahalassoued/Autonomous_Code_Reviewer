@@ -52,14 +52,11 @@ def test_full_state_initialization():
         "repo_full_name": "Montaha/test-repo",
         "pr_diff": "+ def login(username, password): ...",
         "changed_files": ["auth/login.py"],
-        "retrieved_context": [],
-        "retrieval_quality_score": 0.0,
-        "retrieval_attempts": 0,
+        "review_context": "",
         "findings": [],
         "final_review_markdown": "",
-        "next_step": "retriever",
     }
-    assert state["next_step"] == "retriever"
+    assert set(state) == set(ReviewState.__annotations__), "the test state covers every ReviewState field"
     print("OK - ReviewState initializes correctly")
 
 

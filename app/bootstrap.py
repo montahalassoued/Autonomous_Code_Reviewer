@@ -24,11 +24,10 @@ def resolve_repo_path() -> str:
     )
 
 
-# Clones/locates the repo, ingests it, and compiles the review graph.
+# Clones/locates the repo, builds its call graph, and compiles the review graph.
 def build_review_graph():
     from review.graph import build_graph
     from rag.ingestion import ingest_repository
 
     repo_path = resolve_repo_path()
-    collection, all_documents, all_ids, graph_index = ingest_repository(repo_path)
-    return build_graph(collection, all_documents, all_ids, graph_index, repo_path)
+    return build_graph(ingest_repository(repo_path), repo_path)

@@ -22,12 +22,9 @@ def build_state(findings: list[dict], diff: str = "+ def f(): pass") -> dict:
         "repo_full_name": "test/repo",
         "pr_diff": diff,
         "changed_files": ["some/file.py"],
-        "retrieved_context": [],
-        "retrieval_quality_score": 1.0,
-        "retrieval_attempts": 1,
+        "review_context": "",
         "findings": findings,
         "final_review_markdown": "",
-        "next_step": "synthesizer",
     }
 
 

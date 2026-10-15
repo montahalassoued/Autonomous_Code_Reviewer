@@ -16,16 +16,6 @@ class Finding(TypedDict):
     suggestion: str
 
 
-# A piece of code retrieved by the RAG pipeline.
-class RetrievedChunk(TypedDict):
-    file_path: str
-    function_name: str  # qualified: "Class.method", or "func" at module level
-    code: str
-    context: str
-    relevance_score: float
-    callers: list[str]
-
-
 # The full state that flows through the graph during a review.
 class ReviewState(TypedDict):
 
@@ -35,10 +25,8 @@ class ReviewState(TypedDict):
     pr_diff: str
     changed_files: list[str]
 
-    # Retrieval - populated by review/retriever.py
-    retrieved_context: list[RetrievedChunk]
-    retrieval_quality_score: float
-    retrieval_attempts: int
+    # Repository context for the agents; empty until the structural context builder (Phase 4) fills it
+    review_context: str
 
     # Findings - populated by the review agents IN PARALLEL
     # operator.add concatenates lists instead of overwriting them
@@ -46,8 +34,3 @@ class ReviewState(TypedDict):
 
     # Final output - populated by review/synthesizer.py
     final_review_markdown: str
-
-    # Legacy routing hint. No node reads it any more (review/graph.py
-    # routes on retrieval_quality_score and retrieval_attempts), but
-    # app/api/webhook.py still sets it in the initial state.
-    next_step: Literal["retriever", "parallel_agents", "synthesizer", "end"]

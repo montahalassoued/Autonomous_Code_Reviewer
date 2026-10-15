@@ -1,7 +1,5 @@
 from rag.ast_parser import parse_file
-from rag.contextual_chunker import ContextualChunk
 from rag.knowledge_graph import build_knowledge_graph
-from db.chroma import make_chunk_id
 
 
 FILE_PATH = "app/storage.py"
@@ -113,18 +111,15 @@ def test_two_init_methods_get_distinct_ids():
     assert f"{FILE_PATH}::Repository.__init__" in graph
     assert f"{FILE_PATH}::Cache.__init__" in graph
     assert graph.number_of_nodes() == len(functions), "every function needs its own graph node"
-
-    chunk_ids = [make_chunk_id(ContextualChunk(function=fn, context="")) for fn in functions]
-    assert len(chunk_ids) == len(set(chunk_ids)), f"Duplicate chunk ids: {chunk_ids}"
-    print(f"OK - {len(chunk_ids)} unique chunk ids, both __init__ methods distinct")
+    print(f"OK - {graph.number_of_nodes()} unique node ids, both __init__ methods distinct")
 
 
 def test_same_qualified_name_twice_gets_a_suffix():
     functions = parse_file("app/account.py", PROPERTY_CODE)
     qualified_names = [fn.qualified_name for fn in functions]
 
-    # a @property and its setter share a name; Chroma rejects duplicate
-    # ids in one upsert, so the second one is suffixed
+    # a @property and its setter share a name; the second one is suffixed
+    # so each gets its own call-graph node
     assert qualified_names == ["Account.balance", "Account.balance#2"], qualified_names
     assert all(fn.code.startswith("@") for fn in functions), "both keep their decorators"
     print(f"OK - duplicate names disambiguated: {qualified_names}")

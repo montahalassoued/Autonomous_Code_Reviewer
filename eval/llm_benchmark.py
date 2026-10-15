@@ -17,22 +17,20 @@ from review.agents.prompt_assembler import fill_prompt
 from review.agents.security.agent import SECURITY_AGENT
 from review.agents.logic.agent import LOGIC_AGENT
 from review.agents.quality.agent import QUALITY_AGENT
-from review.retriever import JUDGE_PROMPT_TEMPLATE, QUALITY_THRESHOLD
-from rag.query_decomposer import DECOMPOSE_PROMPT_TEMPLATE
-from rag.contextual_chunker import CONTEXT_PROMPT_TEMPLATE
 
 
 EVAL_DIR = Path(__file__).parent
 DEFAULT_CASES_PATH = EVAL_DIR / "dataset" / "llm_benchmark_cases.json"
 DEFAULT_RESULTS_DIR = EVAL_DIR / "results"
 
-ALL_TASKS = ["agents", "decomposer", "judge", "chunker"]
+# The semantic-retrieval tasks (decomposer, judge, chunker) were removed with that pipeline.
+ALL_TASKS = ["agents"]
 
 # Free-tier candidates. Provider model lists change over time; run with
 # --list-models to see what your keys can call today, and pass --models
 # to override this list. (Groq retired llama-3.3-70b-versatile and
-# llama-3.1-8b-instant; the review agents, the legacy decomposer and the
-# judge read REVIEW_AGENT_MODEL - see review/agents/agent_runner.py.)
+# llama-3.1-8b-instant; the review agents read REVIEW_AGENT_MODEL -
+# see review/agents/agent_runner.py.)
 DEFAULT_MODELS = [
     "groq:openai/gpt-oss-120b",
     "groq:openai/gpt-oss-20b",
@@ -47,10 +45,8 @@ AGENT_PROMPTS = {
     "quality": QUALITY_AGENT.prompt_template,
 }
 
-# Same temperatures production uses for each job, so the benchmark
-# measures the model, not a different sampling setup. None = provider
-# default (contextual_chunker.py doesn't set one).
-TASK_TEMPERATURE = {"agents": 0.1, "decomposer": 0.2, "judge": 0.0, "chunker": None}
+# Same temperature production uses, so the benchmark measures the model, not a different sampling setup.
+TASK_TEMPERATURE = {"agents": 0.1}
 
 # A finding at one of these severities on a clean diff counts as a
 # false positive. LOW/INFO nitpicks are tolerated.
@@ -59,8 +55,6 @@ FALSE_POSITIVE_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM"}
 # How far a reported line may be from the planted bug and still count
 # as "right line" (models often point at the def or the next line).
 LINE_TOLERANCE = 3
-
-MAX_CONTEXT_WORDS = 30  # the chunker prompt asks for "max 30 words"
 
 
 # What one model call returned, in a provider-neutral shape.
@@ -255,26 +249,6 @@ def build_agent_prompt(case: dict) -> str:
     return fill_prompt(AGENT_PROMPTS[case["agent"]], _join_lines(case["diff"]), EMPTY_CONTEXT_SUMMARY)
 
 
-# Production decomposer prompt for a 'decomposer' case.
-def build_decomposer_prompt(case: dict) -> str:
-    return DECOMPOSE_PROMPT_TEMPLATE.format(diff=_join_lines(case["diff"]))
-
-
-# Production judge prompt for a 'judge' case.
-def build_judge_prompt(case: dict) -> str:
-    context_summary = "\n".join(f"- {c['name']} ({c['file']})" for c in case["context"])
-    return JUDGE_PROMPT_TEMPLATE.format(diff=_join_lines(case["diff"]), context_summary=context_summary)
-
-
-# Production chunker prompt for a 'chunker' case.
-def build_chunker_prompt(case: dict) -> str:
-    return CONTEXT_PROMPT_TEMPLATE.format(
-        file_path=case["file_path"],
-        calls=", ".join(case["calls"]) if case["calls"] else "none",
-        code=_join_lines(case["code"]),
-    )
-
-
 # ---------------------------------------------------------------------
 # Scorers (one per task) - each returns {"score": 0..1, "valid": bool, ...}
 # ---------------------------------------------------------------------
@@ -338,66 +312,8 @@ def _line_close(reported, expected_line: int) -> bool:
         return False
 
 
-# score = share of the diff's concerns covered by at least one query.
-def score_decomposer(case: dict, output: str) -> dict:
-    queries = _extract_json(output, "[", "]")
-    if not (isinstance(queries, list) and queries and all(isinstance(q, str) and q.strip() for q in queries)):
-        return {"score": 0.0, "valid": False, "n_queries": 0}
-
-    kept = queries[:3]
-    concerns = case["expected_concerns"]
-    covered = sum(1 for keywords in concerns if any(_contains_any(q, keywords) for q in kept))
-    return {
-        "score": covered / len(concerns),
-        "valid": len(queries) <= 3,
-        "n_queries": len(queries),
-        "queries": kept,
-    }
-
-
-# 1 if the judge's score falls on the right side of QUALITY_THRESHOLD, else 0.
-def score_judge(case: dict, output: str) -> dict:
-    parsed = _extract_json(output, "{", "}")
-    try:
-        judge_score = float(parsed["score"])
-    except (TypeError, KeyError, ValueError):
-        return {"score": 0.0, "valid": False, "judge_score": None}
-
-    correct = judge_score >= QUALITY_THRESHOLD if case["expected"] == "high" else judge_score < QUALITY_THRESHOLD
-    return {
-        "score": 1.0 if correct else 0.0,
-        "valid": 0.0 <= judge_score <= 1.0,
-        "judge_score": judge_score,
-    }
-
-
-# 0.25 each: <= 30 words, one sentence, names the file, uses a keyword.
-def score_chunker(case: dict, output: str) -> dict:
-    # Same post-processing as rag/contextual_chunker.generate_context.
-    sentence = _clean_output(output).strip('"').strip("'")
-    if not sentence:
-        return {"score": 0.0, "valid": False, "words": 0, "sentence": ""}
-
-    words = len(sentence.split())
-    # Count sentence ends that are followed by more text; a trailing
-    # period is fine. Dots inside names like "gateway.py" aren't followed
-    # by a space, so they don't count.
-    extra_sentences = len(re.findall(r"[.!?]\s+\S", sentence))
-    file_name = Path(case["file_path"]).name
-    checks = [
-        words <= MAX_CONTEXT_WORDS,
-        extra_sentences == 0 and "\n" not in sentence,
-        case["file_path"] in sentence or file_name in sentence,
-        _contains_any(sentence, case["keywords"]),
-    ]
-    return {"score": sum(checks) / len(checks), "valid": True, "words": words, "sentence": sentence}
-
-
 TASKS = {
     "agents": (build_agent_prompt, score_agent),
-    "decomposer": (build_decomposer_prompt, score_decomposer),
-    "judge": (build_judge_prompt, score_judge),
-    "chunker": (build_chunker_prompt, score_chunker),
 }
 
 

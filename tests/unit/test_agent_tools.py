@@ -276,8 +276,7 @@ FINDING = {
 def build_state() -> dict:
     return {
         "pr_number": 1, "repo_full_name": "test/repo", "pr_diff": "+ def f(): pass\n", "changed_files": [],
-        "retrieved_context": [], "retrieval_quality_score": 1.0, "retrieval_attempts": 1,
-        "findings": [], "final_review_markdown": "", "next_step": "parallel_agents",
+        "review_context": "", "findings": [], "final_review_markdown": "",
     }
 
 

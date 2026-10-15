@@ -7,7 +7,7 @@ from groq import Groq
 
 from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
 from review.agents.tools.tool_definition import Tool, ToolContext, execute_tool_call
-from review.state import ReviewState, Finding, RetrievedChunk
+from review.state import ReviewState, Finding
 
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,8 @@ VALID_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
 REQUIRED_TEXT_FIELDS = ("file_path", "title", "description", "suggestion")
 VALID_CONFIDENCES = {"high", "medium", "low"}
 DEFAULT_CONFIDENCE = "medium"
-EMPTY_CONTEXT_SUMMARY = "(no related context retrieved)"
+# Until the structural context builder exists, the agents look outside the diff with their tools.
+EMPTY_CONTEXT_SUMMARY = "(no context prepared: use your tools to look at the repository when you need it)"
 
 # What makes one review agent different from the others.
 @dataclass(frozen=True)
@@ -48,17 +49,6 @@ def build_groq_client() -> Groq:
             "in your .env file."
         )
     return Groq(api_key=api_key)
-
-
-# Render the retrieved chunks as '- name (file)' + code blocks for the prompt.
-def format_context(retrieved_context: list[RetrievedChunk]) -> str:
-    if not retrieved_context:
-        return EMPTY_CONTEXT_SUMMARY
-
-    return "\n".join(
-        f"- {chunk['function_name']} ({chunk['file_path']}):\n{chunk['code']}"
-        for chunk in retrieved_context
-    )
 
 
 # Parses the LLM's JSON array response into a list of dicts.
@@ -132,7 +122,7 @@ def to_finding(raw: dict, spec: AgentSpec) -> Finding | None:
 
 # Fills the agent's prompt template from the review state.
 def build_prompt(spec: AgentSpec, state: ReviewState) -> str:
-    return fill_prompt(spec.prompt_template, state["pr_diff"], format_context(state["retrieved_context"]))
+    return fill_prompt(spec.prompt_template, state["pr_diff"], state.get("review_context") or EMPTY_CONTEXT_SUMMARY)
 
 
 def _ask_model(client: Groq, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
