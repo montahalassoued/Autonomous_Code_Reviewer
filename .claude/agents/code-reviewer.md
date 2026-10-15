@@ -33,7 +33,7 @@ These come from the user's CLAUDE.md and override everything below:
 - **Clients:** each API client module has a `_build_*_client()` that raises a clear `RuntimeError` when its key is missing
 - **Agents:** one folder per agent with `agent.py`, `prompts/NN_*.md`, `rules.py`, `examples.json`, `tools/` (`toolset.py` + one file per own tool); `{diff}` and `{context_summary}` only in the shared `review/agents/prompts/90_review_input.md` (`add-review-agent` skill)
 - **Chunk ids:** built with `make_chunk_id`, never by hand
-- **No new work on the legacy semantic retrieval** (`review/retriever.py`, `rag/`); new work moves toward the structural design in `docs/ARCHITECTURE.md`
+- **No semantic retrieval comes back** (embeddings, BM25, rerankers, a judge loop) without a logged decision; new work moves toward the structural design in `docs/ARCHITECTURE.md`
 - **Logging:** `logger`, not `print`, in new code
 
 ### 3. Tests (`write-tests` skill)

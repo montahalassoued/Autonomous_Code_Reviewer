@@ -19,14 +19,14 @@ These come from the user's CLAUDE.md and override everything below:
 
 ## This project's deployment context
 
-- **What gets deployed:** one container, the FastAPI reviewer, port 8000 with `GET /health`. It's built from `Dockerfile`. The `docker-expert` agent owns the image itself.
-- **How it's triggered:** GitHub sends a `pull_request` webhook to `POST /webhook/github`. The server must have a **public HTTPS URL** and answer fast. Review work runs as a FastAPI background task.
-- **Startup is slow and heavy:** it clones `TARGET_REPO_URL`, ingests and embeds the repo, and loads the local reranker model (torch). This affects:
+- **What gets deployed:** one image from `Dockerfile` (owned by `docker-expert`), run as two Azure Container Apps: the API (port 8000, `GET /health`) and the worker (`python -m app.worker`, no ingress).
+- **How it's triggered:** GitHub sends a `pull_request` webhook to `POST /webhook/github`. The API must have a **public HTTPS URL** and answer fast: it verifies, dedupes in Postgres and enqueues to an Azure Storage Queue; the worker does the review.
+- **Worker startup:** it clones `TARGET_REPO_URL` and parses it into a call graph (no LLM call; the torch reranker and embeddings were removed). This affects:
   - **Scale-to-zero:** cold starts may exceed GitHub's ~10s webhook timeout. Discuss min replicas set to 1 against the cost.
-  - **Memory:** plan 2GB or more.
+  - **Memory:** sized at 4 GiB from the old reranker days; lower it from real metrics.
   - **Health probes:** give the startup probe enough time before it fails the container.
-  - **Storage:** Chroma data and the cloned repo live on local disk and are lost on restart unless a volume (Azure Files) is mounted. Explain the trade-off.
-- **Secrets / env vars:** `TARGET_REPO_URL`, `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, plus optional `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_HOST`.
+  - **Storage:** the cloned repo lives on local disk and is lost on restart (it is re-cloned and re-parsed) unless a volume (Azure Files) is mounted. Explain the trade-off.
+- **Secrets / env vars:** `TARGET_REPO_URL`, `GROQ_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `DATABASE_URL`, plus optional `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_HOST`.
 - **Previous target:** Render. It was removed, and Azure is the only deploy target.
 - **Tests:** most tests in `tests/` make real LLM and API calls. In CI, run only the fast no-network tests by default (`test_state.py`, `test_synthesizer.py`, `test_webhook.py`, `test_main.py`), and gate the integration tests behind a manual trigger or secrets.
 

@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: Write pytest tests for this project following its conventions (integration vs unit tests, mocking Groq/Gemini/Voyage/GitHub, .env isolation). Use when adding or fixing tests in tests/, or after implementing new code in review/, rag/, tools/, app/.
+description: Write pytest tests for this project following its conventions (integration vs unit tests, mocking Groq/GitHub, .env isolation). Use when adding or fixing tests in tests/, or after implementing new code in review/, rag/, tools/, app/.
 ---
 
 # Writing tests
@@ -12,9 +12,9 @@ Tests live in `tests/unit/` (offline, run in CI) and `tests/integration/` (real 
 | Kind | When | Example |
 |---|---|---|
 | **Unit** (no network) | Logic you own: parsing, formatting, routing, HTTP plumbing, state reducers | `test_state.py`, `test_synthesizer.py`, `test_webhook.py`, `test_main.py` |
-| **Integration** (real API) | Checking an LLM or API actually behaves as expected | `test_security_agent.py`, `test_hybrid_search.py`, `test_retriever_integration.py` |
+| **Integration** (real API) | Checking an LLM or API actually behaves as expected | `test_security_agent.py`, `test_github_tools.py`, `test_postgres_dedupe.py` |
 
-Prefer unit tests. They're fast, free and deterministic. Write an integration test only when the real external behavior is what you're testing. Integration tests use real Groq, Gemini and Voyage quota, so tell the user before running them.
+Prefer unit tests. They're fast, free and deterministic. Write an integration test only when the real external behavior is what you're testing. Integration tests use real Groq quota, so tell the user before running them.
 
 ## File structure
 

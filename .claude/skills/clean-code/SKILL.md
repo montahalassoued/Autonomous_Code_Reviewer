@@ -41,7 +41,7 @@ A wrong comment is worse than none. When you change code, fix or delete the comm
 - Use full, descriptive names: `retrieved_chunks`, not `rc`; `max_retries`, not `n`.
 - Functions are verbs: `parse_findings()`, `fetch_pr_diff()`.
 - Booleans read like questions: `is_valid`, `has_secret`.
-- Constants are UPPER_CASE at the top of the file: `RERANKER_MODEL = "..."`.
+- Constants are UPPER_CASE at the top of the file: `DEFAULT_REVIEW_AGENT_MODEL = "..."`.
 
 ## 5. Keep code simple
 

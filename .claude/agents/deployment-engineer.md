@@ -28,8 +28,8 @@ These come from the user's CLAUDE.md and override everything below:
 
 ## This project's pipeline context
 
-- **The app:** one FastAPI container on port 8000, with a `GET /health` endpoint. Startup is slow: it clones the repo, ingests and embeds it, and loads the reranker model. Post-deploy checks must **wait and retry** on `/health` before declaring a failure.
-- **Tests in CI:** most tests in `tests/` make real Groq, Gemini, Voyage and GitHub calls. On every push, run only the fast tests that make no network calls:
+- **The app:** one image run as the API (port 8000, `GET /health`) and the worker (no HTTP port). The worker clones and parses the repo at startup (no LLM call). Post-deploy checks must **wait and retry** on `/health` before declaring a failure.
+- **Tests in CI:** the tests in `tests/integration/` make real Groq and GitHub calls. On every push, run only the fast tests that make no network calls:
   `python -m pytest tests/unit `
   Integration tests should only run on manual dispatch (`workflow_dispatch`), with API keys from GitHub secrets.
 - **Registry and target:** Azure Container Registry, deployed to Azure Container Apps (confirm with `devops-engineer` and the user).

@@ -14,7 +14,7 @@ It compares free LLMs on the 4 LLM jobs (agents, decomposer, judge, chunker) usi
 
 ```bash
 venv/Scripts/python.exe -m eval.llm_benchmark --list-models   # what your keys can call
-venv/Scripts/python.exe -m eval.llm_benchmark --tasks agents,judge --models groq:<m>,gemini:<m> --runs 3
+venv/Scripts/python.exe -m eval.llm_benchmark --tasks agents --models groq:<m>,gemini:<m> --runs 3
 ```
 
 Every run makes **real API calls**, so the user runs it. Before giving the command, tell the user roughly how many calls it makes (cases × models × runs).

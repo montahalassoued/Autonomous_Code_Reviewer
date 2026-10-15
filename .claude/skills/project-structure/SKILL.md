@@ -14,13 +14,13 @@ description: Decide where new code, tests and docs go and how to name them, so e
 | `app/api/` | HTTP layer | FastAPI routers only: parse the request, validate it, delegate. No business logic. |
 | `app/jobs/` | Background job infrastructure | Queue, dedupe, job models, backend factory |
 | `app/` (top level) | Process entry points | `main.py` (API), `worker.py` (worker), `bootstrap.py` (shared startup) |
-| `review/` | Review pipeline | `graph.py` (LangGraph orchestrator), `state.py`, `synthesizer.py`, legacy `retriever.py` |
+| `review/` | Review pipeline | `graph.py` (LangGraph orchestrator), `state.py`, `synthesizer.py` |
 | `review/agents/` | The review agents | `agent_runner.py` (executes any agent), `prompt_assembler.py`, shared `prompts/`, and one folder per category |
 | `review/agents/<category>/` | One review agent | `agent.py`, `prompts/NN_topic.md`, `rules.py`, `examples.json`, `tools/` (`toolset.py` + one `find_*.py` per tool only this agent uses, + a role-named helper shared by those tools, e.g. `python_source_scan.py`) |
 | `review/agents/tools/` | Read-only tools shared by agents | `tool_definition.py` (Tool, ToolContext, safe execution), one module per tool family |
-| `rag/` | Retrieval | Parsing, chunking, call graph, embeddings, search, reranking |
+| `rag/` | Code parsing | tree-sitter parsing and the call graph (`ast_parser.py`, `knowledge_graph.py`, `ingestion.py`); becomes the Postgres indexer in Phase 4 |
 | `tools/` | External service clients | One module per service: `github_tools.py` and so on |
-| `db/` | Storage adapters | `postgres.py` (connection pool), `migration_runner.py`, `migrations/NNN_description.sql`, legacy `chroma.py` |
+| `db/` | Storage adapters | `postgres.py` (connection pool), `migration_runner.py`, `migrations/NNN_description.sql` |
 | `eval/` | Quality measurement | Benchmarks and harnesses. Data goes in `eval/dataset/`, outputs in `eval/results/` |
 | `tests/unit/` | Offline tests | No network, no API keys. CI runs this whole folder |
 | `tests/integration/` | Real-API tests | Auto-marked `integration`, run manually |
@@ -48,7 +48,7 @@ If a new piece doesn't fit any folder, **stop and propose a new folder** (its na
 - `tests/<unit|integration>/test_<module>.py`, mirroring the module name.
 - Test functions describe behavior: `test_duplicate_delivery_is_not_enqueued_twice`.
 
-**Constants** (UPPER_CASE) carry their unit: `REVIEW_VISIBILITY_TIMEOUT_S`, `MAX_RERANK_CODE_CHARS`.
+**Constants** (UPPER_CASE) carry their unit: `REVIEW_VISIBILITY_TIMEOUT_S`, `MAX_TOOL_OUTPUT_CHARS`.
 
 **Env vars** (UPPER_CASE) are prefixed by area: `REVIEW_*`, `AZURE_*`, `LANGFUSE_*`, `GITHUB_*`.
 

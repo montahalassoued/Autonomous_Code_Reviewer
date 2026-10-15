@@ -19,12 +19,12 @@ These come from the user's CLAUDE.md and override everything below:
 
 ## This project's container context
 
-- **App:** a FastAPI service (`app.main:app`) on port 8000, with a `GET /health` endpoint for health checks.
-- **Startup is heavy:** it clones `TARGET_REPO_URL` (needs `git` in the image), ingests it into Chroma plus a BM25 corpus and a NetworkX graph, and loads the local reranker model `BAAI/bge-reranker-v2-m3` through sentence-transformers (torch, a few hundred MB, downloaded at first use). Expect a slow cold start and a large image. Don't chase a "<100MB" target here, because torch alone makes that impossible. Optimize what is realistic: CPU-only torch wheels, multi-stage builds, layer caching, and optionally baking the model into the image so cold starts don't download it.
-- **Current files:** `Dockerfile` (single stage, `python:3.11-slim`, build-essential + git, runs as root), `docker-compose.yml` (one `app` service, `.env`, the volumes `chroma_data` and `target_repo`). (Render was the old target and was removed.)
-- **There's no `.dockerignore` yet,** so `COPY . .` copies `venv/`, `.env` (secrets!), `.git/`, `test_chroma_data/` and `__pycache__/` into the image. Fixing this is the first priority.
+- **App:** one image, two processes: the API (`app.main:app`, port 8000, `GET /health`) verifies webhooks and enqueues jobs; the worker (`python -m app.worker`, no HTTP port) runs the reviews.
+- **Worker startup:** it clones `TARGET_REPO_URL` (needs `git` in the image) and parses it into a NetworkX call graph with tree-sitter, with no LLM call. torch, sentence-transformers, Chroma and the reranker were removed, so a much smaller image is now realistic.
+- **Current files:** `Dockerfile` (multi-stage, `python:3.11-slim-bookworm`, git only in the runtime stage, non-root `app` user), `.dockerignore`, `docker-compose.yml` (azurite, postgres `pgvector/pgvector:pg16`, api, worker; volumes `azurite_data`, `postgres_data`, `target_repo`).
+- **`.dockerignore`** keeps `venv/`, `.env` (secrets!), `.git/` and `__pycache__/` out of the image: check it whenever a new generated folder appears.
 - **Local Python is 3.13 but the image uses 3.11.** Point out the mismatch and let the user choose.
-- **Secrets:** `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `TARGET_REPO_URL`. Never bake them into the image. Pass them at runtime as env vars, or in Azure through Key Vault or Container Apps secrets.
+- **Secrets:** `GROQ_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `TARGET_REPO_URL`, `DATABASE_URL`, `AZURE_STORAGE_CONNECTION_STRING`. Never bake them into the image. Pass them at runtime as env vars, or in Azure through Key Vault or Container Apps secrets.
 - **Deployment target: Azure.** Images go to Azure Container Registry (ACR) and most likely run on Azure Container Apps or App Service for Containers. Coordinate with the `devops-engineer` agent on the deployment side.
 
 ## When invoked
@@ -49,7 +49,7 @@ These come from the user's CLAUDE.md and override everything below:
 - Multi-stage build patterns
 - Layer caching strategies
 - .dockerignore optimization
-- Slim or distroless base images (Alpine is a poor fit for torch and numpy wheels)
+- Slim or distroless base images (Alpine is a poor fit for tree-sitter and psycopg wheels)
 - Non-root user execution
 - BuildKit features (cache mounts for pip)
 - ARG/ENV configuration
@@ -101,7 +101,7 @@ These come from the user's CLAUDE.md and override everything below:
 - Vulnerability remediation
 - Registry auth issues (`az acr login`)
 - Startup failure analysis (slow ingestion, model download, missing env vars)
-- Resource exhaustion (the reranker and torch need enough memory, so 2GB+ is a safe floor)
+- Resource exhaustion (the worker holds the parsed repo and its call graph in memory; size it from metrics)
 - Network connectivity debugging
 
 ## Integration with other agents

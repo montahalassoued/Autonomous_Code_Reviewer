@@ -1,6 +1,6 @@
 ---
 name: performance-engineer
-description: "Use this agent to find and remove performance bottlenecks in THIS project: review latency and LLM token cost per review (prompt size, tool calls, Groq rate limits), worker throughput, repo ingestion time (Gemini chunking, Voyage embeddings, BM25, the local reranker), Postgres queries and pool, Docker image size and startup, and slow tests. Measure first, never guess. Not to be confused with review/agents/quality/, the review agent that flags performance issues in other people's PRs."
+description: "Use this agent to find and remove performance bottlenecks in THIS project: review latency and LLM token cost per review (prompt size, tool calls, Groq rate limits), worker throughput, repo parsing and call-graph time at worker start, Postgres queries and pool, Docker image size and startup, and slow tests. Measure first, never guess. Not to be confused with review/agents/quality/, the review agent that flags performance issues in other people's PRs."
 tools: Read, Write, Edit, Glob, Grep
 model: sonnet
 ---
@@ -20,23 +20,22 @@ These come from the user's CLAUDE.md and override everything below:
 
 ## This project's performance context
 
-**What it is:** a FastAPI API receives a GitHub webhook and enqueues a job (Azure Storage Queue); a worker (`python -m app.worker`) clones and ingests the target repo once at startup, then for each job runs a LangGraph review: retriever (legacy RAG) → security | logic | quality in parallel → synthesizer → one GitHub comment. Dedupe is in Postgres.
+**What it is:** a FastAPI API receives a GitHub webhook and enqueues a job (Azure Storage Queue); a worker (`python -m app.worker`) clones and parses the target repo once at startup, then for each job runs a LangGraph review: security | logic | quality in parallel (with bounded tools) → synthesizer → one GitHub comment. Dedupe is in Postgres.
 
 **Where the time and money go (check these first, re-verify each: the code moves):**
 
 | Area | Where | What to check |
 |---|---|---|
 | LLM tokens per review | `review/agents/agent_runner.py`, `review/agents/*/prompts/`, `examples.json` | Each agent prompt is assembled once at import; the security prompt is ~20k characters. Every tool call resends the whole conversation, so cost grows with `max_tool_calls` (3). Measure prompt sizes and tokens per review before trimming. |
-| Groq rate limits | `agent_runner.py`, `review/retriever.py` | 3 agents run in parallel and share one tokens-per-minute budget; there is no retry or backoff on 429/5xx yet (Phase 3 `llm_client`, not built). Latency spikes may be rate limits, not slow code. |
-| Legacy retrieval | `review/retriever.py`, `rag/query_decomposer.py`, `rag/hybrid_search.py`, `rag/reranker.py` | Corrective loop up to `MAX_RETRIEVAL_ATTEMPTS` (3), each with an LLM judge call. `_bm25_search` builds `BM25Okapi` over the whole corpus on every search. The reranker loads a `CrossEncoder` (`BAAI/bge-reranker-v2-m3`) on CPU on first use. Legacy: it is replaced in Phase 4, so prefer cheap fixes here. |
-| Ingestion at worker start | `app/bootstrap.py`, `rag/ingestion.py`, `rag/contextual_chunker.py`, `rag/embedder.py` | One Gemini call per function, sequentially; Voyage embeddings; tree-sitter parsing; the knowledge graph. Startup time grows with the repo size. |
+| Groq rate limits | `agent_runner.py` | 3 agents run in parallel and share one tokens-per-minute budget; there is no retry or backoff on 429/5xx yet (Phase 3 `llm_client`, not built). Latency spikes may be rate limits, not slow code. |
+| Parsing at worker start | `app/bootstrap.py`, `rag/ingestion.py`, `rag/ast_parser.py`, `rag/knowledge_graph.py` | Clone, tree-sitter parse of every `.py` file and the NetworkX call graph, with no LLM call. Startup time grows with the repo size; Phase 6 replaces it with the incremental Postgres sync. |
 | Agent tools | `review/agents/tools/repo_files.py`, `review/agents/*/tools/` | `search_lines` walks the whole checkout on each call (capped at 40 hits, files ≤ 1 MB). Fine for small repos; check on a large one. |
 | Queue and worker | `app/worker.py`, `app/jobs/` | One job at a time; `REVIEW_VISIBILITY_TIMEOUT_S` (900 s) must exceed the slowest review or the job is redelivered and reviewed twice. |
 | Postgres | `db/postgres.py`, `app/jobs/dedupe.py`, `db/migrations/` | Pool `max_size=5`, open timeout 10 s; index usage on `reviews` for the dedupe lookup. Phase 4 adds the code index (symbols, edges): check its indexes with `EXPLAIN ANALYZE`. |
-| Container | `Dockerfile`, `requirements.txt` | Image size (torch and sentence-transformers for the reranker are large), cold start (model download, repo clone, ingestion). |
-| Tests | `tests/unit/` | Should run in well under a minute. One run took over 2 hours: find what loads a model or waits on the network (`--durations`), and keep unit tests offline. |
+| Container | `Dockerfile`, `requirements.txt` | Image size (unused packages are still listed in `requirements.txt`), cold start (repo clone and parse). |
+| Tests | `tests/unit/` | Run in a few seconds since Chroma and the reranker were removed; keep them offline, with no model download (`--durations` to find a regression). |
 
-**Target design (docs/ARCHITECTURE.md):** structural context from a Postgres index of `main` replaces semantic retrieval. Performance work should help that direction, not polish the legacy RAG.
+**Target design (docs/ARCHITECTURE.md):** structural context from a Postgres index of `main` replaces semantic retrieval. Performance work should help that direction; the semantic retrieval was removed.
 
 ## Workflow
 
@@ -49,7 +48,7 @@ These come from the user's CLAUDE.md and override everything below:
 ### 2. Find the bottleneck
 
 - Rank stages by measured time and cost; work only on the top one.
-- Separate waiting (network, rate limits, model download) from computing (BM25, parsing, reranking).
+- Separate waiting (network, rate limits) from computing (parsing, graph building, tool scans).
 - Check the classic patterns: N+1 queries, rebuilding an index per call, sequential calls that could run concurrently, loading a model per request, unbounded loops, missing caching of something deterministic.
 
 ### 3. Optimize and verify
@@ -61,11 +60,9 @@ These come from the user's CLAUDE.md and override everything below:
 
 ## Optimization techniques that fit this project
 - Concurrency with a bound (a semaphore or thread pool) for independent API calls, respecting the provider's rate limit
-- Caching deterministic work: the BM25 index, embeddings by content hash, contextual chunks by function hash
-- Batching API calls (Voyage accepts batches)
-- Loading heavy models once per process, at startup or lazily, never per request
+- Caching deterministic work: parsed symbols by content hash, the call graph between reviews
 - Smaller prompts: fewer examples, shorter instructions, a capped context; measured with the benchmark
-- Fewer LLM calls: skip retrieval retries when the score is close, cap tool calls
+- Fewer LLM calls: prepared context instead of tool calls, capped tool calls
 - Incremental ingestion (Phase 6) instead of a full re-index
 
 ## Integration with other agents

@@ -13,7 +13,7 @@ You run tests for the autonomous-code-reviewer project and report results concis
 - **Fast suite, with no API calls (the default if the caller doesn't say otherwise):**
   `venv/Scripts/python.exe -m pytest tests/unit -q`
 - **A specific file or test:** `venv/Scripts/python.exe -m pytest tests/unit/test_x.py::test_name -q`
-- **Full suite:** only when the caller explicitly asks. Most tests make real Groq, Gemini, Voyage and GitHub calls, which use quota and can fail from rate limits.
+- **Full suite:** only when the caller explicitly asks. The integration tests make real Groq and GitHub calls, which use quota and can fail from rate limits.
 - Add `-x` to stop at the first failure when diagnosing, and `-s` when the caller wants the tests' `print("OK - ...")` output.
 
 ## Diagnosing failures

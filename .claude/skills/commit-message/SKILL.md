@@ -25,7 +25,7 @@ Every commit in this project is a **single title line** that summarizes what was
 4. Commit with a single `-m` and nothing else:
 
 ```bash
-git commit -m "feat(rag): add cross-encoder reranking to retriever"
+git commit -m "feat(rag): resolve self.method() calls in the call graph"
 ```
 
 ## Examples from this repo
@@ -33,6 +33,6 @@ git commit -m "feat(rag): add cross-encoder reranking to retriever"
 ```
 feat(deploy): add Docker build and Render deployment config
 feat(api): clone target repo from TARGET_REPO_URL at startup
-fix(rag): retry Gemini calls on transient server errors
+fix(agents): retry Groq calls on transient server errors
 fix(test): force webhook test secret to avoid .env cross-contamination
 ```

@@ -21,7 +21,7 @@ Read the files you are asked about and report back what is in them clearly and a
 ## What to report
 
 - Answer the question directly first.
-- Give file paths with line numbers, e.g. `rag/reranker.py:42`, so the caller can jump to the code.
+- Give file paths with line numbers, e.g. `rag/ast_parser.py:42`, so the caller can jump to the code.
 - Quote short code snippets only when they matter. Don't paste whole files.
 - When summarizing a module, cover its purpose, main classes and functions, inputs and outputs, and what it depends on in the repo.
 - Keep the report short and structured. The caller sees only your final message.

@@ -20,10 +20,10 @@ These come from the user's CLAUDE.md and override everything below:
 
 ## This project's security context
 
-**What it is:** a public HTTPS service that receives GitHub webhooks, reads PR diffs with a GitHub token, sends code to third-party LLM and embedding APIs (Groq, Google Gemini, Voyage), and posts comments back to GitHub. The API enqueues a job (Azure Storage Queue); a separate worker clones the target repo, runs the LangGraph review and posts the comment. Dedupe is in Postgres (`reviews` table). It will be deployed as Docker containers on **Azure**.
+**What it is:** a public HTTPS service that receives GitHub webhooks, reads PR diffs with a GitHub token, sends code to a third-party LLM API (Groq), and posts comments back to GitHub. The API enqueues a job (Azure Storage Queue); a separate worker clones the target repo, runs the LangGraph review and posts the comment. Dedupe is in Postgres (`reviews` table). It will be deployed as Docker containers on **Azure**.
 
 **Assets to protect:**
-- Secrets: `GROQ_API_KEY`, `GOOGLE_API_KEY`, `VOYAGE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `DATABASE_URL`, `AZURE_STORAGE_CONNECTION_STRING`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`
+- Secrets: `GROQ_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `DATABASE_URL`, `AZURE_STORAGE_CONNECTION_STRING`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`
 - The GitHub token's write access to PRs and comments
 - The source code of the reviewed repo, which is sent to external LLM providers
 - The LLM quota (cost)
@@ -113,7 +113,7 @@ These come from the user's CLAUDE.md and override everything below:
 - Encrypted connections: HTTPS ingress, TLS to Postgres and Azure Storage
 
 ## Incident response (a leaked key or a malicious PR)
-1. **Contain:** revoke or rotate the key at the provider (GitHub, Groq, Google, Voyage, Azure) and stop the worker if it is being abused.
+1. **Contain:** revoke or rotate the key at the provider (GitHub, Groq, Azure) and stop the worker if it is being abused.
 2. **Find the source:** git history (`gitleaks`), image layers, CI logs, PR comments.
 3. **Clean up:** remove the secret from where it leaked, and rewrite history only with the user's explicit approval (it is destructive).
 4. **Learn:** add the control that would have caught it (scan, ignore rule, test) and log it in `docs/DECISIONS.md`.
