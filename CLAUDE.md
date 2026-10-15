@@ -9,7 +9,7 @@ Autonomous multi-agent GitHub PR reviewer. A GitHub webhook hits FastAPI and enq
 These rules override any skill or subagent instruction that says otherwise.
 
 1. **Terminal commands: there are two kinds.**
-   - **Run these yourself, without asking me:** local git work (`git status`, `diff`, `log`, `show`, `add`, `rm`, `restore` on files you changed, `commit` following the `commit-message` skill), local branches (`git switch -c`), the offline unit tests (`pytest tests/unit`), and read-only checks. After each commit, tell me the commit title and which files went into it.
+   - **Run these yourself, without asking me:** local git work (`git status`, `diff`, `log`, `show`, `add`, `rm`, `restore` on files you changed, `commit` on `main` following the `commit-message` skill), the offline unit tests (`pytest tests/unit`), and read-only checks. After each commit, tell me the commit title and which files went into it.
    - **Give these to me to run, because I want to learn them:** Docker (`docker build/run/compose`), Azure (`az ...`), `git push` and any other command that touches GitHub or the cloud, `pip install`, starting servers (`uvicorn`), tests that make real API calls (they use quota), and anything destructive (`git reset --hard`, force-push, deleting branches). For each one:
      - Give the exact command in a code block, ready to copy.
      - Explain what it does, what each important flag means, and what output to expect.
@@ -19,7 +19,7 @@ These rules override any skill or subagent instruction that says otherwise.
    - After editing, list every changed file as a clickable link, with a short summary of what changed in each one.
    - Never change files I didn't expect without telling me.
 3. **Explain before asking.** Before asking me any question, first explain the context: what you found, what the options are, and what each option means for the project. Then ask the question, so I can read the explanation before I answer.
-4. **One branch per piece of work.** Every feature, fix or refactor starts on its own branch off `main` (`feat/…`, `fix/…`, `refactor/…`, `ci/…`, `docs/…`, `chore/…`), and reaches `main` only through a PR. Never commit directly on `main`. Follow the `git-workflow` skill.
+4. **Work directly on `main`, no branches.** Commit each logical step on `main` (unit tests green before every commit), then give me `git push` to run; the CI runs on the push. Don't create feature branches or PRs unless I ask. Follow the `git-workflow` skill.
 5. **Senior-level structure.** Every new file and folder goes in the folder for its role, with a name that says that role (never `utils.py`, `helpers.py`, `new.py`). Follow the `project-structure` skill.
 
 ## Project layout
