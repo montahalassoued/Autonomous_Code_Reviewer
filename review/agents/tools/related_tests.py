@@ -1,10 +1,6 @@
+from rag.file_classifier import is_test_file
 from review.agents.tools.repo_files import search_lines
 from review.agents.tools.tool_definition import Tool, ToolContext
-
-
-def is_test_file(path: str) -> bool:
-    name = path.rsplit("/", 1)[-1]
-    return path.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py") or "/tests/" in f"/{path}")
 
 
 # Test lines that mention a name, so "missing test" is only claimed after looking.

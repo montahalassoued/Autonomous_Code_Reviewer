@@ -1,29 +1,21 @@
 import os
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import Callable
 
+from rag.file_classifier import SKIPPED_DIRS, is_secret_file
 from review.agents.tools.tool_definition import Tool, ToolContext
 
 
 MAX_READ_LINES = 200
 MAX_SEARCH_HITS = 40
 MAX_FILE_BYTES = 1_000_000
-SKIPPED_DIRS = {".git", "venv", ".venv", "node_modules", "__pycache__", ".pytest_cache", "dist", "build"}
 SEARCHED_SUFFIXES = {".py", ".toml", ".cfg", ".ini", ".yaml", ".yml", ".json", ".txt", ".md", ".js", ".ts"}
-
-# Never shown to the model: its output can end up in a public PR comment.
-SECRET_FILE_PATTERNS = (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", ".netrc", ".pypirc", ".npmrc")
 
 
 def _require_repo(context: ToolContext) -> Path:
     if context.repo_root is None:
         raise RuntimeError("no repository checkout is available in this review")
     return context.repo_root.resolve()
-
-
-def _is_secret_file(path: Path) -> bool:
-    return any(fnmatch(path.name, pattern) for pattern in SECRET_FILE_PATTERNS)
 
 
 def _is_inside(root: Path, path: Path) -> bool:
@@ -36,7 +28,7 @@ def resolve_inside_repo(context: ToolContext, relative_path: str) -> Path:
     path = (root / relative_path).resolve()
     if not _is_inside(root, path) or any(part in SKIPPED_DIRS for part in path.relative_to(root).parts):
         raise ValueError(f"path '{relative_path}' is outside the repository")
-    if _is_secret_file(path):
+    if is_secret_file(path.name):
         raise ValueError(f"'{relative_path}' may contain secrets and cannot be read")
     return path
 
@@ -47,7 +39,7 @@ def iter_repo_files(root: Path):
         subdirectories[:] = sorted(name for name in subdirectories if name not in SKIPPED_DIRS)
         for name in sorted(file_names):
             path = Path(directory) / name
-            if path.is_symlink() or path.suffix not in SEARCHED_SUFFIXES or _is_secret_file(path):
+            if path.is_symlink() or path.suffix not in SEARCHED_SUFFIXES or is_secret_file(path.name):
                 continue
             if path.stat().st_size <= MAX_FILE_BYTES:
                 yield path
