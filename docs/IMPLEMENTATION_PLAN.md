@@ -108,7 +108,7 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
 
 ### Phase 2: Webhook reliability for PR events (S-M, can run in parallel with Phase 1)
 
-**Done** (durable job pipeline, `feat/durable-job-pipeline`):
+**Done** (durable job pipeline):
 - Head SHA and `X-GitHub-Delivery` in the job, dedupe claim on (repo, head_sha, target), first in Azure Table Storage, now in the Postgres `reviews` table.
 - Durable Storage Queue + separate worker with logging, retries and a poison queue (instead of the planned in-memory `app/review_registry.py`).
 - Idempotent summary upsert by marker.
@@ -116,7 +116,7 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
 **Remaining:**
 - Repo guard: **done** (`ALLOWED_REPOS`, collaborator check through the GitHub API, drafts skipped, in `app/jobs/trigger_policy.py`).
 - Stale check: **done** (`get_pull_request_head()` before reviewing and before posting; a closed PR or a newer head gives `skipped`, `closed` / `superseded`).
-- The `reviews` status lifecycle (queued → running → posted | failed); today a row stays `queued`.
+- The `reviews` status lifecycle: **done** (queued → running → posted | skipped | failed, in `app/jobs/review_status.py`).
 
 **Tests:** duplicate delivery runs once (done), a wrong repo is ignored, a stale SHA isn't posted, an exception gets logged (done).
 

@@ -99,7 +99,7 @@ Target:       Postgres index of main → deterministic context builder fills rev
 
 ## Integration with other agents
 - `security-engineer`: prompt-injection and output-handling hardening
-- `webhook-engineer`: graph failures surfacing in the background task
+- `webhook-engineer`: graph failures surfacing in the worker (retries, partial reviews, `reviews` status)
 - `docker-expert` and `devops-engineer`: image size and worker memory
 - `test-runner`: running the offline tests after changes
 

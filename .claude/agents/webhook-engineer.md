@@ -1,6 +1,6 @@
 ---
 name: webhook-engineer
-description: "Use this agent for the GitHub webhook path in this project (app/api/webhook.py → background review → PR comment): signature verification, idempotent handling of duplicate/redelivered events, concurrent pushes to the same PR, durable processing instead of in-memory background tasks, retries, and replay/redelivery."
+description: "Use this agent for the GitHub webhook path in this project (app/api/webhook.py → Azure Storage Queue → app/worker.py → PR comment): signature verification, idempotent handling of duplicate/redelivered events, concurrent pushes to the same PR, the job queue, dedupe and review lifecycle, worker retries and the poison queue, and replay/redelivery."
 tools: Read, Write, Edit, Glob, Grep
 model: sonnet
 ---

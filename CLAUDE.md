@@ -2,7 +2,7 @@
 
 Autonomous multi-agent GitHub PR reviewer. A GitHub webhook hits FastAPI and enqueues a job, a worker runs a LangGraph pipeline that gathers repo context, the domain agents analyze the diff in parallel, and a synthesizer posts the review back to GitHub.
 
-**Target design (docs only, not built yet):** context is **structural**, not semantic. A Postgres code index of `main` (symbols, edges, reviews, findings) feeds a deterministic context builder; 3 agents (Security, Logic, Quality); an optional bounded context subagent. See `docs/ARCHITECTURE.md`. New work should move toward it. The legacy semantic retrieval (Gemini chunks, Voyage, Chroma, BM25, reranker, judge loop) was removed: until the context builder exists, the agents get the diff and look outside it with their tools.
+**Target design (partly built: the schema and the indexer CLI exist, not yet wired into the worker):** context is **structural**, not semantic. A Postgres code index of `main` (symbols, edges, reviews, findings) feeds a deterministic context builder; 3 agents (Security, Logic, Quality); an optional bounded context subagent. See `docs/ARCHITECTURE.md`. New work should move toward it. The legacy semantic retrieval (Gemini chunks, Voyage, Chroma, BM25, reranker, judge loop) was removed: until the context builder exists, the agents get the diff and look outside it with their tools.
 
 ## Working with me (these rules come first)
 
@@ -27,7 +27,7 @@ These rules override any skill or subagent instruction that says otherwise.
 ```text
 app/        api/ (HTTP routers) · jobs/ (queue, dedupe) · main.py (API) · worker.py · bootstrap.py
 review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · untrusted_input.py + injection_detector.py (prompt-injection defenses) · output_sanitizer.py + secret_redactor.py (what may be posted) · agents/ (agent_runner.py, prompt_assembler.py, prompts/ shared, tools/ shared, one folder per agent: security/ logic/ quality/ with agent.py, prompts/*.md, rules.py, examples.json, tools/ (toolset.py + one file per own tool))
-rag/        Postgres indexer: file_classifier · symbol_extractor · call_resolver · code_indexer (CLI) · index_writer; legacy ast_parser · knowledge_graph · ingestion (NetworkX graph the agent tools read until they use Postgres)
+rag/        Postgres indexer: file_classifier · symbol_extractor · call_resolver · code_indexer (CLI) · index_writer; worker path today: ast_parser · knowledge_graph · ingestion (NetworkX graph built at worker start, read by the agent tools until they use Postgres)
 tools/      external service clients (GitHub)       db/      postgres.py · migration_runner.py · migrations/*.sql
 eval/       llm_benchmark.py (CLI) · benchmark/ (dataset schema, scoring, metrics, report, call cache) · dataset/ · results/   infra/   Azure setup
 tests/      unit/ (offline, CI) · integration/ (real APIs, manual) · conftest.py
