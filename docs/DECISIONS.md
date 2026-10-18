@@ -29,6 +29,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - Collaborator check through the GitHub API over `author_association`: only collaborators on `ALLOWED_REPOS` spend LLM calls, fail closed on errors
 - Nonce delimiters + a prompt rule + a heuristic detector over a guard model: no extra call, testable, and the review shows suspicious lines
 - Escape and sanitize every LLM field before posting over trusting the model: no mentions, beacons, hidden content, forged marker or leaked secret
+- Review lifecycle in `reviews` + a head check before and after the review + partial reviews over silent `queued` rows and full retries: failures visible and retryable, no stale comments, one failing agent costs one category
 
 **Superseded by the structural-context design (kept for history):**
 
@@ -487,3 +488,25 @@ are not clickable, and a sanitizer cannot see a finding the model was talked
 into leaving out; that is what P1 and the prompt delimiters are for. A GitHub
 App identity, so the bot never posts with owner authority, is planned for
 Phase 5.
+
+## Why the worker records the review lifecycle and checks the PR head twice
+
+A `reviews` row stayed `queued` forever: a failed job was invisible in
+Postgres, and a manual redelivery of the same commit was answered "duplicate"
+and never reviewed. The worker also reviewed the PR's current diff, so a job
+for an older commit could post a review of newer code. Now
+`app/jobs/review_status.py` writes `running`, then `posted` (latency, missing
+categories), `skipped` (`superseded`, `closed`) or `failed` (the exception,
+secrets redacted) to the same row, through an upsert that never moves a posted
+review back. The dedupe claim reopens a `failed` row, so a redelivery retries
+it. `get_pull_request_head()` runs before the LLM calls (an old commit costs
+nothing) and again before posting (a push may land during the 10-60 s
+review). An agent that raises is caught in `review/graph.py`
+(`isolate_agent_failure`): the review is posted without that category and says
+so, which was decision (a) of the security plan; if every agent fails,
+`join_agents` raises `ReviewAgentsUnavailable` so the queue retries instead of
+posting an empty review. Alternatives: retry the whole review when one agent
+fails (three times the quota for one rate-limited call), or compare the head
+only before posting (pays for reviews of commits already replaced). Trade-off:
+two extra GitHub calls per review, and the worker now needs Postgres whenever
+the dedupe uses it.

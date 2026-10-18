@@ -115,7 +115,7 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
 
 **Remaining:**
 - Repo guard: **done** (`ALLOWED_REPOS`, collaborator check through the GitHub API, drafts skipped, in `app/jobs/trigger_policy.py`).
-- `get_pr_head_sha()` for the stale check before posting.
+- Stale check: **done** (`get_pull_request_head()` before reviewing and before posting; a closed PR or a newer head gives `skipped`, `closed` / `superseded`).
 - The `reviews` status lifecycle (queued → running → posted | failed); today a row stays `queued`.
 
 **Tests:** duplicate delivery runs once (done), a wrong repo is ignored, a stale SHA isn't posted, an exception gets logged (done).

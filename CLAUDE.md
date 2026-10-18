@@ -42,8 +42,8 @@ GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storag
         → join_agents (barrier) → synthesizer → END → tools/github_tools.py   (forward-only: always terminates)
 ```
 
-- **Shared state:** `review/state.py` holds `ReviewState`. `findings` uses an `operator.add` reducer so parallel agents don't overwrite each other. `review_context` is empty until the Phase 4 context builder fills it; the prompt then tells the agents to use their tools.
-- **Startup:** the API (`app/main.py`) only creates the job queue (`JOBS_BACKEND=memory|azure`) and the dedupe store (`DEDUPE_BACKEND=memory|postgres`; postgres applies the SQL migrations in `db/migrations/` first and dedupes on the `reviews` table). The worker (`python -m app.worker`) clones `TARGET_REPO_URL` (or uses `REPO_PATH`) via `app/bootstrap.py`, parses it into a call graph (no LLM call), and compiles the graph once.
+- **Shared state:** `review/state.py` holds `ReviewState`. `findings` and `failed_agents` use an `operator.add` reducer so parallel agents don't overwrite each other. An agent that raises is caught in `review/graph.py` (partial review naming its category); if all three fail, `join_agents` raises so the job is retried. `review_context` is empty until the Phase 4 context builder fills it; the prompt then tells the agents to use their tools.
+- **Startup:** the API (`app/main.py`) only creates the job queue (`JOBS_BACKEND=memory|azure`) and the dedupe store (`DEDUPE_BACKEND=memory|postgres`; postgres applies the SQL migrations in `db/migrations/` first and dedupes on the `reviews` table). The worker (`python -m app.worker`) clones `TARGET_REPO_URL` (or uses `REPO_PATH`) via `app/bootstrap.py`, parses it into a call graph (no LLM call), and compiles the graph once. Per job it records the `reviews` lifecycle (`running` → `posted` | `skipped` | `failed`, `app/jobs/review_status.py`, same backend as the dedupe) and checks the PR head before reviewing and before posting, so a closed PR or an older commit is `skipped`, never posted.
 - **No web UI:** reviews are triggered only by the GitHub webhook. The Streamlit dashboard was removed.
 
 ## Commands
