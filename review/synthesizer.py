@@ -78,7 +78,7 @@ def _format_summary_table(groups: dict[str, list[Finding]]) -> str:
 
 
 # A low-confidence finding depends on code the agent could not see, so it never blocks a merge.
-def _label(finding: Finding) -> str:
+def review_label(finding: Finding) -> str:
     label = SEVERITY_LABEL.get(finding["severity"], "nit")
     if label == "blocking" and finding.get("confidence") == "low":
         return "suggestion"
@@ -95,7 +95,7 @@ def _count_changed_lines(diff: str) -> int:
 
 # One line telling the author whether anything must be fixed before merging.
 def _format_verdict(findings: list[Finding]) -> str:
-    blocking = sum(1 for finding in findings if _label(finding) == "blocking")
+    blocking = sum(1 for finding in findings if review_label(finding) == "blocking")
     if blocking:
         return f"⛔ **{blocking} blocking issue(s)** to fix before merging, out of {len(findings)} finding(s)."
     return f"✅ **Nothing blocking.** {len(findings)} suggestion(s) or nit(s) below."
@@ -118,7 +118,7 @@ def _format_finding(finding: Finding, changed_files: frozenset[str] = frozenset(
     if changed_files and finding["file_path"] not in changed_files:
         location += " (file not in this PR)"
     lines = [
-        f"#### {emoji} [{_label(finding)}] {finding['severity']} - {escape_markdown_text(finding['title'], single_line=True)}",
+        f"#### {emoji} [{review_label(finding)}] {finding['severity']} - {escape_markdown_text(finding['title'], single_line=True)}",
         f"**Location:** {location} · **Confidence:** {finding.get('confidence', 'medium')}",
         "",
         escape_markdown_text(finding["description"]),
@@ -139,8 +139,8 @@ def _format_category_section(category: str, findings: list[Finding], changed_fil
     if not findings:
         return f"{heading}\n\nNo issues found. ✅" if not total else f"{heading}\n\nNot shown: see the note below."
 
-    main = [finding for finding in findings if _label(finding) != "nit"]
-    nits = [finding for finding in findings if _label(finding) == "nit"]
+    main = [finding for finding in findings if review_label(finding) != "nit"]
+    nits = [finding for finding in findings if review_label(finding) == "nit"]
     parts = [heading]
     if main:
         parts.append(_join_findings(main, changed_files))
@@ -152,7 +152,7 @@ def _format_category_section(category: str, findings: list[Finding], changed_fil
 
 # The findings that fit in the comment, blocking first: whatever is left out is counted, never cut mid-Markdown.
 def _findings_within_budget(findings: list[Finding], changed_files: frozenset[str], budget_chars: int) -> list[Finding]:
-    ranked = sorted(findings, key=lambda f: (LABEL_ORDER[_label(f)], SEVERITY_ORDER.get(f["severity"], len(SEVERITY_ORDER))))
+    ranked = sorted(findings, key=lambda f: (LABEL_ORDER[review_label(f)], SEVERITY_ORDER.get(f["severity"], len(SEVERITY_ORDER))))
     kept, used = [], 0
     for finding in ranked:
         size = len(_format_finding(finding, changed_files)) + 10

@@ -1,8 +1,9 @@
 import argparse
+import hashlib
 import json
 import os
-import re
-import statistics
+import subprocess
+import sys
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -12,17 +13,20 @@ from typing import Callable
 from dotenv import load_dotenv
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from eval.benchmark.call_cache import CallCache
+from eval.benchmark.dataset_schema import case_fingerprint, file_sha256, load_agent_cases
+from eval.benchmark.metrics import summarize
+from eval.benchmark.report import format_markdown
+from eval.benchmark.scoring import AGENT_SPECS, SCORER_VERSION, score_case
 from review.agents.agent_runner import EMPTY_CONTEXT_SUMMARY
 from review.agents.prompt_assembler import fill_prompt
-from review.agents.security.agent import SECURITY_AGENT
 from review.untrusted_input import DIFF_LABEL, wrap_untrusted
-from review.agents.logic.agent import LOGIC_AGENT
-from review.agents.quality.agent import QUALITY_AGENT
 
 
 EVAL_DIR = Path(__file__).parent
 DEFAULT_CASES_PATH = EVAL_DIR / "dataset" / "llm_benchmark_cases.json"
 DEFAULT_RESULTS_DIR = EVAL_DIR / "results"
+DEFAULT_CACHE_PATH = EVAL_DIR / "cache" / "llm_calls.jsonl"
 
 # The semantic-retrieval tasks (decomposer, judge, chunker) were removed with that pipeline.
 ALL_TASKS = ["agents"]
@@ -40,22 +44,10 @@ DEFAULT_MODELS = [
     "gemini:gemini-2.5-flash",
 ]
 
-AGENT_PROMPTS = {
-    "security": SECURITY_AGENT.prompt_template,
-    "logic": LOGIC_AGENT.prompt_template,
-    "quality": QUALITY_AGENT.prompt_template,
-}
+AGENT_PROMPTS = {name: spec.prompt_template for name, spec in AGENT_SPECS.items()}
 
 # Same temperature production uses, so the benchmark measures the model, not a different sampling setup.
-TASK_TEMPERATURE = {"agents": 0.1}
-
-# A finding at one of these severities on a clean diff counts as a
-# false positive. LOW/INFO nitpicks are tolerated.
-FALSE_POSITIVE_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM"}
-
-# How far a reported line may be from the planted bug and still count
-# as "right line" (models often point at the def or the next line).
-LINE_TOLERANCE = 3
+AGENT_TEMPERATURE = 0.1
 
 
 # What one model call returned, in a provider-neutral shape.
@@ -66,6 +58,7 @@ class CallResult:
     input_tokens: int = 0
     output_tokens: int = 0
     error: str | None = None
+    attempts: int = 1  # 1 + retries after a 429/5xx, so latency can be read honestly
 
 
 # Signature of the function that talks to a model:
@@ -165,16 +158,22 @@ def _call_gemini(model_name: str, prompt: str, temperature: float | None) -> tup
     )
 
 
+def _attempts(call) -> int:
+    return int(getattr(call, "retry", None) and call.retry.statistics.get("attempt_number", 1) or 1)
+
+
 # Call a model and never raise: errors come back in CallResult.error.
 def call_model(model_spec: str, prompt: str, temperature: float | None) -> CallResult:
     start = time.perf_counter()
+    call = None
     try:
         provider, model_name = _split_model_spec(model_spec)
         call = _call_groq if provider == "groq" else _call_gemini
         text, input_tokens, output_tokens = call(model_name, prompt, temperature)
-        return CallResult(text, time.perf_counter() - start, input_tokens, output_tokens)
+        return CallResult(text, time.perf_counter() - start, input_tokens, output_tokens, attempts=_attempts(call))
     except Exception as exc:  # noqa: BLE001 - any failure is a benchmark result
-        return CallResult("", time.perf_counter() - start, error=f"{type(exc).__name__}: {exc}"[:300])
+        return CallResult("", time.perf_counter() - start, error=f"{type(exc).__name__}: {exc}"[:300],
+                          attempts=_attempts(call) if call else 1)
 
 
 # Print the model ids each provider key can call right now.
@@ -204,274 +203,157 @@ def list_available_models() -> None:
 
 
 # ---------------------------------------------------------------------
-# Output parsing
+# Prompts, runs, replay
 # ---------------------------------------------------------------------
 
-# Strip <think> blocks, code fences and a leading 'json' tag from model output.
-def _clean_output(text: str) -> str:
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    return text.strip().strip("`").removeprefix("json").strip()
-
-
-# Parse JSON as-is, else from the outermost opener..closer span; None on failure.
-def _extract_json(text: str, opener: str, closer: str):
-    cleaned = _clean_output(text)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-
-    start, end = cleaned.find(opener), cleaned.rfind(closer)
-    if start != -1 and end > start:
-        try:
-            return json.loads(cleaned[start:end + 1])
-        except json.JSONDecodeError:
-            pass
-    return None
-
-
-# Case-insensitive "does any keyword appear in the text".
-def _contains_any(text: str, keywords: list[str]) -> bool:
-    lowered = text.lower()
-    return any(keyword in lowered for keyword in keywords)
-
-
-# ---------------------------------------------------------------------
-# Prompt builders (one per task) - use the production templates
-# ---------------------------------------------------------------------
-
-# Dataset text fields are stored as lists of lines for readability.
-def _join_lines(value) -> str:
-    return "\n".join(value) if isinstance(value, list) else value
-
-
-# Production agent prompt for an 'agents' case: the diff wrapped as untrusted data, no prepared context.
+# Production agent prompt for a case: the diff wrapped as untrusted data, no prepared context.
 def build_agent_prompt(case: dict) -> str:
-    diff = wrap_untrusted(_join_lines(case["diff"]), DIFF_LABEL)
+    diff = wrap_untrusted(case["diff_text"], DIFF_LABEL)
     return fill_prompt(AGENT_PROMPTS[case["agent"]], diff, EMPTY_CONTEXT_SUMMARY)
 
 
-# ---------------------------------------------------------------------
-# Scorers (one per task) - each returns {"score": 0..1, "valid": bool, ...}
-# ---------------------------------------------------------------------
-
-# A finding matches a planted issue: same file and one of its keywords.
-def _finding_matches(finding: dict, expected: dict) -> bool:
-    # Models sometimes keep the diff's "a/" / "b/" prefix or report a
-    # shorter path, so compare by suffix in both directions.
-    file_path = str(finding.get("file_path", "")).removeprefix("a/").removeprefix("b/").lstrip("/")
-    same_file = bool(file_path) and (
-        file_path.endswith(expected["file"]) or expected["file"].endswith(file_path)
-    )
-    text = " ".join(str(finding.get(k, "")) for k in ("title", "description", "evidence", "suggestion"))
-    return same_file and _contains_any(text, expected["keywords"])
+# The prompt without its random nonce, so the cache key is stable across runs.
+def _cache_prompt(case: dict) -> str:
+    return fill_prompt(AGENT_PROMPTS[case["agent"]], case["diff_text"], EMPTY_CONTEXT_SUMMARY)
 
 
-# Buggy diff: score = share of planted issues found (recall).
-def score_agent(case: dict, output: str) -> dict:
-    findings = _extract_json(output, "[", "]")
-    if not isinstance(findings, list):
-        return {"score": 0.0, "valid": False, "n_findings": 0}
-
-    findings = [f for f in findings if isinstance(f, dict)]
-    required = {"severity", "file_path", "line_number", "title", "description", "evidence", "suggestion"}
-    valid = all(required <= f.keys() for f in findings)
-
-    expected = case["expected_issues"]
-    if not expected:
-        false_positives = sum(
-            1 for f in findings if str(f.get("severity", "")).upper() in FALSE_POSITIVE_SEVERITIES
-        )
-        return {
-            "score": 1.0 if false_positives == 0 else 0.0,
-            "valid": valid,
-            "n_findings": len(findings),
-            "false_positives": false_positives,
-        }
-
-    found = line_hits = 0
-    for issue in expected:
-        matches = [f for f in findings if _finding_matches(f, issue)]
-        if matches:
-            found += 1
-            if any(_line_close(f.get("line_number"), issue["line"]) for f in matches):
-                line_hits += 1
-
-    return {
-        "score": found / len(expected),
-        "valid": valid,
-        "n_findings": len(findings),
-        "found": found,
-        "line_hits": line_hits,
-    }
+def _record(case: dict, model: str, run: int, scored: dict, result: dict, cached: bool) -> dict:
+    return {"task": "agents", "model": model, "agent": case["agent"], "case_id": case["id"], "run": run,
+            "case_fingerprint": case_fingerprint(case), **scored, **result, "cached": cached}
 
 
-# True if the reported line is within LINE_TOLERANCE of the planted bug.
-def _line_close(reported, expected_line: int) -> bool:
-    try:
-        return abs(int(reported) - expected_line) <= LINE_TOLERANCE
-    except (TypeError, ValueError):
-        return False
+def _empty_score(case: dict) -> dict:
+    return score_case(case, "[]") | {"score": 0.0, "legacy_score": 0.0, "passed": False, "valid": False,
+                                     "clean_strict_pass": False}
 
 
-TASKS = {
-    "agents": (build_agent_prompt, score_agent),
-}
-
-
-# ---------------------------------------------------------------------
-# Running and summarizing
-# ---------------------------------------------------------------------
-
-# Load the benchmark cases from the dataset JSON.
-def load_cases(path: Path) -> dict:
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    return {task: data[task] for task in ALL_TASKS if task in data}
-
-
-# Runs every case of every task against every model, `runs` times.
+# Runs every case against every model, `runs` times; answers already in the cache cost no call.
 def run_benchmark(
-    cases: dict,
+    cases: list[dict],
     models: list[str],
-    tasks: list[str],
     runs: int = 1,
     call_fn: CallFn = call_model,
     delay_s: float = 0.0,
+    cache: CallCache | None = None,
 ) -> list[dict]:
     records = []
-    for task in tasks:
-        build_prompt, score = TASKS[task]
-        for model in models:
-            for case in cases.get(task, []):
-                for run in range(1, runs + 1):
-                    result = call_fn(model, build_prompt(case), TASK_TEMPERATURE[task])
-                    scored = score(case, result.text) if result.error is None else {"score": 0.0, "valid": False}
-                    records.append({
-                        "task": task,
-                        "model": model,
-                        "case_id": case["id"],
-                        "run": run,
-                        **scored,
-                        **asdict(result),
-                    })
-                    status = f"error: {result.error}" if result.error else f"score={scored['score']:.2f}"
-                    print(f"  [{task}] {model} {case['id']} run {run}: {status} ({result.latency_s:.1f}s)")
-                    if delay_s:
-                        time.sleep(delay_s)
+    for model in models:
+        for case in cases:
+            for run in range(1, runs + 1):
+                key = CallCache.key(model, AGENT_TEMPERATURE, _cache_prompt(case), run)
+                cached = cache.get(key) if cache else None
+                result = cached or asdict(call_fn(model, build_agent_prompt(case), AGENT_TEMPERATURE))
+                if cache and not cached:
+                    cache.put(key, result)
+                scored = score_case(case, result["text"]) if result["error"] is None else _empty_score(case)
+                records.append(_record(case, model, run, scored, result, cached is not None))
+                status = f"error: {result['error']}" if result["error"] else f"score={scored['score']:.2f}"
+                origin = "cache" if cached else f"{result['latency_s']:.1f}s"
+                print(f"  {model} {case['id']} run {run}: {status} ({origin})")
+                if delay_s and not cached:
+                    time.sleep(delay_s)
     return records
 
 
-# Aggregates records per (task, model).
-def summarize(records: list[dict]) -> list[dict]:
-    groups: dict[tuple[str, str], list[dict]] = {}
-    for record in records:
-        groups.setdefault((record["task"], record["model"]), []).append(record)
-
-    rows = []
-    for (task, model), group in groups.items():
-        ok = [r for r in group if r["error"] is None]
-        latencies = sorted(r["latency_s"] for r in ok) or [0.0]
-        rows.append({
-            "task": task,
-            "model": model,
-            "quality": statistics.mean(r["score"] for r in group),
-            "valid_rate": statistics.mean(1.0 if r["valid"] else 0.0 for r in group),
-            "errors": len(group) - len(ok),
-            "latency_mean_s": statistics.mean(latencies),
-            "latency_p95_s": latencies[min(len(latencies) - 1, int(0.95 * len(latencies)))],
-            "input_tokens_mean": statistics.mean(r["input_tokens"] for r in ok) if ok else 0,
-            "output_tokens_mean": statistics.mean(r["output_tokens"] for r in ok) if ok else 0,
-            "calls": len(group),
-        })
-
-    rows.sort(key=lambda r: (ALL_TASKS.index(r["task"]), -r["quality"], r["latency_mean_s"]))
-    return rows
-
-
-# Summary tables as Markdown.
-def format_markdown(summary: list[dict]) -> str:
-    lines = ["# LLM benchmark results", ""]
-    best = []
-    for task in ALL_TASKS:
-        rows = [r for r in summary if r["task"] == task]
-        if not rows:
+# Re-scores a saved results file with the current scorer and dataset: no API call.
+def replay(results_path: Path, cases: list[dict]) -> list[dict]:
+    by_id = {case["id"]: case for case in cases}
+    saved = json.loads(results_path.read_text(encoding="utf-8"))["records"]
+    records = []
+    for old in saved:
+        case = by_id.get(old["case_id"])
+        if case is None:
+            print(f"  skipped {old['case_id']}: no longer in the dataset")
             continue
-        lines += [
-            f"## {task}",
-            "",
-            "| model | quality | valid | errors | latency avg (s) | latency p95 (s) | tokens in | tokens out | calls |",
-            "|---|---|---|---|---|---|---|---|---|",
-        ]
-        for r in rows:
-            lines.append(
-                f"| {r['model']} | {r['quality']:.2f} | {r['valid_rate']:.0%} | {r['errors']} "
-                f"| {r['latency_mean_s']:.2f} | {r['latency_p95_s']:.2f} "
-                f"| {r['input_tokens_mean']:.0f} | {r['output_tokens_mean']:.0f} | {r['calls']} |"
-            )
-        lines.append("")
-        best.append(f"- **{task}**: {rows[0]['model']} (quality {rows[0]['quality']:.2f})")
-
-    lines += ["## Best per task (quality, then speed)", "", *best, ""]
-    return "\n".join(lines)
+        if old.get("case_fingerprint") and old["case_fingerprint"] != case_fingerprint(case):
+            print(f"  warning: {old['case_id']} changed since this run; it is scored against the current labels")
+        result = {key: old.get(key, default) for key, default in
+                  (("text", ""), ("latency_s", 0.0), ("input_tokens", 0), ("output_tokens", 0), ("error", None), ("attempts", 1))}
+        scored = score_case(case, result["text"]) if result["error"] is None else _empty_score(case)
+        records.append(_record(case, old["model"], old["run"], scored, result, cached=False))
+    return records
 
 
-# Writes the full JSON (every call) and the Markdown summary.
+def _git_commit() -> str | None:
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+# What produced a result: a difference between two files can be traced to the prompt, the dataset, the scorer or the model.
+def provenance(cases_path: Path) -> dict:
+    return {
+        "scorer_version": SCORER_VERSION,
+        "dataset_sha256": file_sha256(cases_path),
+        "prompt_sha256": {name: hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16] for name, prompt in AGENT_PROMPTS.items()},
+        "git_commit": _git_commit(),
+    }
+
+
+# Writes the full JSON (every call, with the raw text for later replays) and the Markdown report.
 def save_results(records: list[dict], summary: list[dict], results_dir: Path, settings: dict) -> Path:
     results_dir.mkdir(parents=True, exist_ok=True)
     stem = f"llm_benchmark_{datetime.now():%Y%m%d_%H%M%S}"
     json_path = results_dir / f"{stem}.json"
-    json_path.write_text(
-        json.dumps({"settings": settings, "summary": summary, "records": records}, indent=2),
-        encoding="utf-8",
-    )
-    (results_dir / f"{stem}.md").write_text(format_markdown(summary), encoding="utf-8")
+    json_path.write_text(json.dumps({"settings": settings, "summary": summary, "records": records}, indent=2), encoding="utf-8")
+    (results_dir / f"{stem}.md").write_text(format_markdown(summary, records, settings), encoding="utf-8")
     return json_path
 
 
 # Command-line arguments.
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Benchmark free LLMs on this project's LLM jobs.")
-    parser.add_argument("--tasks", default=",".join(ALL_TASKS),
-                        help=f"comma-separated subset of {ALL_TASKS}")
+    parser = argparse.ArgumentParser(description="Benchmark LLMs on the review agents' production prompts.")
     parser.add_argument("--models", default=",".join(DEFAULT_MODELS),
                         help="comma-separated 'groq:<model>' / 'gemini:<model>' specs")
-    parser.add_argument("--runs", type=int, default=1, help="repetitions per case (default 1)")
+    parser.add_argument("--runs", type=int, default=1, help="repetitions per case (3 before deciding anything)")
     parser.add_argument("--delay", type=float, default=2.0,
-                        help="seconds to wait between calls, for free-tier rate limits (default 2)")
+                        help="seconds to wait between real calls, for free-tier rate limits (default 2)")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH, help="dataset JSON file")
+    parser.add_argument("--only", default="", help="comma-separated case ids to run (default: all)")
     parser.add_argument("--out", type=Path, default=DEFAULT_RESULTS_DIR, help="results directory")
-    parser.add_argument("--list-models", action="store_true",
-                        help="print the models your keys can call, then exit")
+    parser.add_argument("--fresh", action="store_true", help="ignore the call cache and call every model again")
+    parser.add_argument("--replay", type=Path, help="re-score a saved results JSON with the current scorer, no API call")
+    parser.add_argument("--list-models", action="store_true", help="print the models your keys can call, then exit")
     return parser.parse_args()
 
 
-# CLI entry point: load .env, run the benchmark, print and save results.
+# CLI entry point: load .env, run (or replay) the benchmark, print and save results.
 def main() -> None:
     load_dotenv()
+    # Model titles can hold characters a Windows console cannot encode; never crash after a paid run.
+    sys.stdout.reconfigure(errors="replace")
     args = _parse_args()
-
     if args.list_models:
         list_available_models()
         return
 
-    tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
-    unknown = set(tasks) - set(ALL_TASKS)
-    if unknown:
-        raise SystemExit(f"Unknown task(s) {sorted(unknown)}; choose from {ALL_TASKS}.")
-    models = [m.strip() for m in args.models.split(",") if m.strip()]
-    for model in models:
-        _split_model_spec(model)  # fail fast on a typo, before any API call
+    cases = load_agent_cases(args.cases)
+    only = {case_id.strip() for case_id in args.only.split(",") if case_id.strip()}
+    if only:
+        unknown = only - {case["id"] for case in cases}
+        if unknown:
+            raise SystemExit(f"Unknown case id(s): {sorted(unknown)}")
+        cases = [case for case in cases if case["id"] in only]
+    settings = {"cases": str(args.cases), **provenance(args.cases)}
 
-    cases = load_cases(args.cases)
-    n_calls = sum(len(cases.get(t, [])) for t in tasks) * len(models) * args.runs
-    print(f"Running {n_calls} calls ({len(models)} models x {tasks}, {args.runs} run(s) each).")
+    if args.replay:
+        print(f"Re-scoring {args.replay} with scorer v{SCORER_VERSION} (no API call).")
+        records = replay(args.replay, cases)
+        settings |= {"replay_of": str(args.replay), "runs": max((r["run"] for r in records), default=0),
+                     "models": sorted({r["model"] for r in records})}
+    else:
+        models = [m.strip() for m in args.models.split(",") if m.strip()]
+        for model in models:
+            _split_model_spec(model)  # fail fast on a typo, before any API call
+        cache = None if args.fresh else CallCache(DEFAULT_CACHE_PATH)
+        print(f"Up to {len(cases) * len(models) * args.runs} calls ({len(models)} model(s) x {len(cases)} cases x "
+              f"{args.runs} run(s)); cached answers are reused{' (disabled: --fresh)' if args.fresh else ''}.")
+        records = run_benchmark(cases, models, args.runs, call_model, args.delay, cache)
+        settings |= {"models": models, "runs": args.runs}
 
-    records = run_benchmark(cases, models, tasks, args.runs, call_model, args.delay)
     summary = summarize(records)
-    print("\n" + format_markdown(summary))
-
-    settings = {"tasks": tasks, "models": models, "runs": args.runs, "cases": str(args.cases)}
+    print("\n" + format_markdown(summary, records, settings))
     json_path = save_results(records, summary, args.out, settings)
     print(f"Saved {json_path} and {json_path.with_suffix('.md')}")
 

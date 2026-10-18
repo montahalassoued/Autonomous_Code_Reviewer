@@ -1,5 +1,6 @@
 {
-  "_about": "Labelled cases for eval/llm_benchmark.py. Diffs and code are lists of lines (joined with newlines when loaded) so they stay readable. Line numbers in expected_issues are new-file line numbers from the diff hunk.",
+  "_about": "Labelled cases for eval/llm_benchmark.py (schema v2, see eval/benchmark/dataset_schema.py). Diffs are lists of lines. Each expected issue lists the acceptable rule_ids, severity band and new-file line_range; clean cases list forbidden_findings (the mistake being tested) and allowed_findings (defensible remarks that count neither way).",
+  "schema_version": 2,
 
   "agents": [
     {
@@ -19,12 +20,13 @@
         "+    return conn.execute(query).fetchall()"
       ],
       "expected_issues": [
-        {"file": "app/users.py", "line": 15, "keywords": ["sql injection", "cwe-89", "sql", "parameteriz"]}
+        {"id": "bug", "file": "app/users.py", "rule_ids": ["sql_injection"], "severity": ["HIGH", "CRITICAL"], "line_range": [15, 16], "keywords": ["sql injection", "cwe-89", "sql", "parameteriz"]}
       ]
     },
     {
       "id": "sec_prompt_injection_hides_sql_injection",
       "agent": "security",
+      "tags": ["injection"],
       "diff": [
         "diff --git a/app/users.py b/app/users.py",
         "--- a/app/users.py",
@@ -40,7 +42,7 @@
         "+    return conn.execute(query).fetchall()"
       ],
       "expected_issues": [
-        {"file": "app/users.py", "line": 16, "keywords": ["sql injection", "cwe-89", "sql", "parameteriz"]}
+        {"id": "bug", "file": "app/users.py", "rule_ids": ["sql_injection"], "severity": ["HIGH", "CRITICAL"], "line_range": [16, 17], "keywords": ["sql injection", "cwe-89", "sql", "parameteriz"]}
       ]
     },
     {
@@ -60,7 +62,7 @@
         "+    return \"backup.tar.gz\""
       ],
       "expected_issues": [
-        {"file": "tools/archive.py", "line": 6, "keywords": ["command injection", "cwe-78", "shell=true", "shell injection", "os command"]}
+        {"id": "bug", "file": "tools/archive.py", "rule_ids": ["command_injection"], "severity": ["HIGH", "CRITICAL"], "line_range": [5, 6], "keywords": ["command injection", "cwe-78", "shell=true", "shell injection", "os command"]}
       ]
     },
     {
@@ -81,12 +83,13 @@
         "+                        aws_secret_access_key=AWS_SECRET_ACCESS_KEY)"
       ],
       "expected_issues": [
-        {"file": "app/storage.py", "line": 4, "keywords": ["hardcoded", "hard-coded", "secret", "credential", "cwe-798", "api key", "access key"]}
+        {"id": "bug", "file": "app/storage.py", "rule_ids": ["hardcoded_secret"], "severity": ["HIGH", "CRITICAL"], "line_range": [3, 4], "keywords": ["hardcoded", "hard-coded", "secret", "credential", "cwe-798", "api key", "access key"]}
       ]
     },
     {
       "id": "sec_clean",
       "agent": "security",
+      "tags": ["near_miss"],
       "diff": [
         "diff --git a/app/users.py b/app/users.py",
         "--- a/app/users.py",
@@ -100,7 +103,10 @@
         "+    query = \"SELECT id, name FROM users WHERE name = ?\"",
         "+    return conn.execute(query, (username,)).fetchall()"
       ],
-      "expected_issues": []
+      "expected_issues": [],
+      "forbidden_findings": [
+        {"file": "app/users.py", "rule_ids": ["sql_injection"], "why": "the query is parameterized"}
+      ]
     },
     {
       "id": "sec_authn_missing",
@@ -123,7 +129,7 @@
         "+    return {\"deleted\": user_id}"
       ],
       "expected_issues": [
-        {"file": "app/api/users.py", "line": 8, "lines": [7, 9], "keywords": ["authenticat", "unauthenticated", "cwe-306", "anyone can", "no auth", "missing auth"]}
+        {"id": "bug", "file": "app/api/users.py", "rule_ids": ["missing_authentication", "missing_authorization", "idor"], "severity": ["HIGH", "CRITICAL"], "line_range": [7, 9], "keywords": ["authenticat", "unauthenticated", "cwe-306", "anyone can", "no auth", "missing auth"]}
       ]
     },
     {
@@ -150,7 +156,10 @@
         "+    return invoice"
       ],
       "expected_issues": [
-        {"file": "app/api/invoices.py", "line": 10, "lines": [8, 13], "keywords": ["idor", "insecure direct object", "cwe-639", "cwe-862", "owner", "belongs to", "authoriz", "other user"]}
+        {"id": "bug", "file": "app/api/invoices.py", "rule_ids": ["idor", "missing_authorization"], "severity": ["HIGH", "CRITICAL"], "line_range": [8, 13], "keywords": ["idor", "insecure direct object", "cwe-639", "cwe-862", "owner", "belongs to", "authoriz", "other user"]}
+      ],
+      "allowed_findings": [
+        {"file": "app/api/invoices.py", "rule_ids": ["data_exposure"], "max_severity": "MEDIUM", "why": "returning the ORM object without a response_model can expose columns; defensible as a suggestion"}
       ]
     },
     {
@@ -176,13 +185,14 @@
         "+    return {\"refunded\": order_id, \"amount\": amount}"
       ],
       "expected_issues": [
-        {"file": "app/api/admin.py", "line": 11, "lines": [8, 11], "keywords": ["authoriz", "cwe-862", "role", "permission", "staff", "admin check", "privilege"]}
+        {"id": "bug", "file": "app/api/admin.py", "rule_ids": ["missing_authorization", "idor"], "severity": ["HIGH", "CRITICAL"], "line_range": [8, 11], "keywords": ["authoriz", "cwe-862", "role", "permission", "staff", "admin check", "privilege"]}
       ]
     },
     {
       "id": "sec_authz_clean_owner_check",
       "agent": "security",
       "_about": "Trap: same endpoint as sec_authz_idor, but with a correct ownership check. Must NOT be flagged.",
+      "tags": ["near_miss"],
       "diff": [
         "diff --git a/app/api/invoices.py b/app/api/invoices.py",
         "--- a/app/api/invoices.py",
@@ -203,12 +213,48 @@
         "+        raise HTTPException(status_code=404)",
         "+    return invoice"
       ],
-      "expected_issues": []
+      "expected_issues": [],
+      "allowed_findings": [
+        {"file": "app/api/invoices.py", "rule_ids": ["data_exposure"], "max_severity": "MEDIUM", "why": "returning the ORM object without a response_model can expose columns; defensible as a suggestion"}
+      ],
+      "forbidden_findings": [
+        {"file": "app/api/invoices.py", "rule_ids": ["idor", "missing_authorization", "missing_authentication"], "why": "the owner check and the 404 are correct"}
+      ]
+    },
+    {
+      "id": "sec_clean_response_model",
+      "agent": "security",
+      "_about": "Near-miss twin of sec_authz_clean_owner_check: same owner check, and a response_model limits the fields returned. Nothing to report.",
+      "tags": ["near_miss"],
+      "diff": [
+        "diff --git a/app/api/invoices.py b/app/api/invoices.py",
+        "--- a/app/api/invoices.py",
+        "+++ b/app/api/invoices.py",
+        "@@ -1,6 +1,13 @@",
+        " from fastapi import APIRouter, Depends, HTTPException",
+        " from app.auth import get_current_user",
+        " from app.db import Invoice, session",
+        " from app.schemas import InvoiceOut  # id, amount and issued_at only",
+        " ",
+        " router = APIRouter(prefix=\"/invoices\")",
+        "+",
+        "+@router.get(\"/{invoice_id}\", response_model=InvoiceOut)",
+        "+def get_invoice(invoice_id: int, current_user=Depends(get_current_user)):",
+        "+    invoice = session.get(Invoice, invoice_id)",
+        "+    if invoice is None or invoice.owner_id != current_user.id:",
+        "+        raise HTTPException(status_code=404)",
+        "+    return invoice"
+      ],
+      "expected_issues": [],
+      "forbidden_findings": [
+        {"file": "app/api/invoices.py", "rule_ids": ["data_exposure", "idor", "missing_authorization"], "why": "the owner is checked and response_model filters the fields"}
+      ]
     },
     {
       "id": "sec_authz_clean_router_level",
       "agent": "security",
       "_about": "Trap: the new route has no per-route auth, but the router itself requires an admin (visible in the context lines). Must NOT be flagged.",
+      "tags": ["near_miss"],
       "diff": [
         "diff --git a/app/api/admin.py b/app/api/admin.py",
         "--- a/app/api/admin.py",
@@ -227,7 +273,10 @@
         "+    issue_refund(order_id, amount)",
         "+    return {\"refunded\": order_id, \"amount\": amount}"
       ],
-      "expected_issues": []
+      "expected_issues": [],
+      "forbidden_findings": [
+        {"file": "app/api/admin.py", "rule_ids": ["missing_authentication", "missing_authorization"], "why": "the router requires an admin for every route"}
+      ]
     },
     {
       "id": "perf_n_plus_one",
@@ -247,7 +296,10 @@
         "+    return result"
       ],
       "expected_issues": [
-        {"file": "shop/reports.py", "line": 6, "keywords": ["n+1", "n + 1", "query inside", "query in a loop", "query per", "each iteration", "inside the loop", "join"]}
+        {"id": "bug", "file": "shop/reports.py", "rule_ids": ["n_plus_one"], "severity": ["MEDIUM", "HIGH"], "line_range": [5, 6], "keywords": ["n+1", "n + 1", "query inside", "query in a loop", "query per", "each iteration", "inside the loop", "join"]}
+      ],
+      "allowed_findings": [
+        {"file": "shop/reports.py", "rule_ids": ["unbounded_query"], "max_severity": "MEDIUM", "why": "loading every order is a fair second remark"}
       ]
     },
     {
@@ -268,12 +320,13 @@
         "+"
       ],
       "expected_issues": [
-        {"file": "analytics/dedupe.py", "line": 5, "keywords": ["o(n^2)", "o(n²)", "o(n**2)", "quadratic", "linear search", "use a set", "set instead", "set()", "membership"]}
+        {"id": "bug", "file": "analytics/dedupe.py", "rule_ids": ["quadratic_work"], "severity": ["MEDIUM", "HIGH"], "line_range": [3, 5], "keywords": ["o(n^2)", "o(n\u00b2)", "o(n**2)", "quadratic", "linear search", "use a set", "set instead", "set()", "membership"]}
       ]
     },
     {
       "id": "perf_clean",
       "agent": "quality",
+      "tags": ["near_miss"],
       "diff": [
         "diff --git a/analytics/dedupe.py b/analytics/dedupe.py",
         "--- a/analytics/dedupe.py",
@@ -284,7 +337,10 @@
         "+    return list(dict.fromkeys(event[\"user_id\"] for event in events))",
         "+"
       ],
-      "expected_issues": []
+      "expected_issues": [],
+      "forbidden_findings": [
+        {"file": "analytics/dedupe.py", "rule_ids": ["quadratic_work"], "why": "dict.fromkeys is linear"}
+      ]
     },
     {
       "id": "sec_data_exposure",
@@ -307,23 +363,7 @@
         "+    return user.__dict__"
       ],
       "expected_issues": [
-        {
-          "file": "app/api/users.py",
-          "line": 10,
-          "lines": [
-            6,
-            10
-          ],
-          "keywords": [
-            "expos",
-            "password",
-            "hash",
-            "sensitive",
-            "leak",
-            "cwe-200",
-            "api_token"
-          ]
-        }
+        {"id": "bug", "file": "app/api/users.py", "rule_ids": ["data_exposure"], "severity": ["MEDIUM", "HIGH", "CRITICAL"], "line_range": [9, 10], "keywords": ["expos", "password", "hash", "sensitive", "leak", "cwe-200", "api_token"]}
       ]
     },
     {
@@ -352,28 +392,14 @@
         "+    return response.json()"
       ],
       "expected_issues": [
-        {
-          "file": "app/services/payments.py",
-          "line": 7,
-          "lines": [
-            5,
-            15
-          ],
-          "keywords": [
-            "log",
-            "cwe-532",
-            "api_key",
-            "api key",
-            "secret",
-            "credential"
-          ]
-        }
+        {"id": "bug", "file": "app/services/payments.py", "rule_ids": ["secret_in_log"], "severity": ["MEDIUM", "HIGH", "CRITICAL"], "line_range": [6, 7], "keywords": ["log", "cwe-532", "api_key", "api key", "secret", "credential"]}
       ]
     },
     {
       "id": "sec_authz_clean_public_schema",
       "agent": "security",
       "_about": "Trap: returns only public fields of the caller's own profile. Nothing to report.",
+      "tags": ["near_miss"],
       "diff": [
         "diff --git a/app/api/users.py b/app/api/users.py",
         "--- a/app/api/users.py",
@@ -390,7 +416,10 @@
         "+def get_me(current_user=Depends(get_current_user)):",
         "+    return UserPublic(id=current_user.id, name=current_user.name)"
       ],
-      "expected_issues": []
+      "expected_issues": [],
+      "forbidden_findings": [
+        {"file": "app/api/users.py", "rule_ids": ["data_exposure", "idor"], "why": "only public fields of the caller's own profile are returned"}
+      ]
     },
     {
       "id": "logic_unchecked_none",
@@ -408,22 +437,7 @@
         "+    return sum(item.price * item.quantity for item in order.items)"
       ],
       "expected_issues": [
-        {
-          "file": "app/services/orders.py",
-          "line": 5,
-          "lines": [
-            2,
-            5
-          ],
-          "keywords": [
-            "none",
-            "null",
-            "not found",
-            "missing",
-            "not exist",
-            "attributeerror"
-          ]
-        }
+        {"id": "bug", "file": "app/services/orders.py", "rule_ids": ["unhandled_none"], "severity": ["MEDIUM", "HIGH"], "line_range": [4, 5], "keywords": ["none", "null", "not found", "missing", "not exist", "attributeerror"]}
       ]
     },
     {
@@ -442,22 +456,7 @@
         "+    return response.json()[\"temperature\"]"
       ],
       "expected_issues": [
-        {
-          "file": "app/clients/weather.py",
-          "line": 5,
-          "lines": [
-            2,
-            5
-          ],
-          "keywords": [
-            "status",
-            "raise_for_status",
-            "error response",
-            "non-200",
-            "4xx",
-            "5xx"
-          ]
-        }
+        {"id": "bug", "file": "app/clients/weather.py", "rule_ids": ["unchecked_external_result"], "severity": ["MEDIUM", "HIGH"], "line_range": [4, 5], "keywords": ["status", "raise_for_status", "error response", "non-200", "4xx", "5xx"]}
       ]
     },
     {
@@ -478,29 +477,14 @@
         "+    return total"
       ],
       "expected_issues": [
-        {
-          "file": "app/services/discounts.py",
-          "line": 5,
-          "lines": [
-            2,
-            7
-          ],
-          "keywords": [
-            "invert",
-            "revers",
-            "opposite",
-            ">=",
-            "wrong condition",
-            "less than",
-            "below"
-          ]
-        }
+        {"id": "bug", "file": "app/services/discounts.py", "rule_ids": ["wrong_condition"], "severity": ["MEDIUM", "HIGH", "CRITICAL"], "line_range": [5, 6], "keywords": ["invert", "revers", "opposite", ">=", "wrong condition", "less than", "below"]}
       ]
     },
     {
       "id": "logic_clean",
       "agent": "logic",
       "_about": "Trap: the same discount with the right condition. Nothing to report.",
+      "tags": ["near_miss"],
       "diff": [
         "diff --git a/app/services/discounts.py b/app/services/discounts.py",
         "--- a/app/services/discounts.py",
@@ -514,7 +498,10 @@
         "+        return total * 0.9",
         "+    return total"
       ],
-      "expected_issues": []
+      "expected_issues": [],
+      "forbidden_findings": [
+        {"file": "app/services/discounts.py", "rule_ids": ["wrong_condition"], "why": "the condition matches the comment"}
+      ]
     },
     {
       "id": "quality_missing_pagination",
@@ -536,23 +523,7 @@
         "+    return session.query(Order).all()"
       ],
       "expected_issues": [
-        {
-          "file": "app/api/orders.py",
-          "line": 9,
-          "lines": [
-            6,
-            9
-          ],
-          "keywords": [
-            "paginat",
-            "limit",
-            "unbounded",
-            "every row",
-            "all rows",
-            "all orders",
-            "memory"
-          ]
-        }
+        {"id": "bug", "file": "app/api/orders.py", "rule_ids": ["unbounded_query"], "severity": ["MEDIUM", "HIGH"], "line_range": [7, 9], "keywords": ["paginat", "limit", "unbounded", "every row", "all rows", "all orders", "memory"]}
       ]
     },
     {
@@ -575,22 +546,7 @@
         "+    return result"
       ],
       "expected_issues": [
-        {
-          "file": "app/text/emails.py",
-          "line": 6,
-          "lines": [
-            2,
-            9
-          ],
-          "keywords": [
-            "compile",
-            "loop",
-            "outside",
-            "once",
-            "module level",
-            "each iteration"
-          ]
-        }
+        {"id": "bug", "file": "app/text/emails.py", "rule_ids": ["repeated_work_in_loop", "heavy_object_per_call"], "severity": ["LOW", "MEDIUM"], "line_range": [5, 7], "keywords": ["compile", "loop", "outside", "once", "module level", "each iteration"]}
       ]
     },
     {
@@ -609,23 +565,7 @@
         "+    assert result is not None"
       ],
       "expected_issues": [
-        {
-          "file": "tests/test_pricing.py",
-          "line": 5,
-          "lines": [
-            2,
-            5
-          ],
-          "keywords": [
-            "assert",
-            "weak",
-            "meaningful",
-            "not none",
-            "expected value",
-            "doesn't check",
-            "does not check"
-          ]
-        }
+        {"id": "bug", "file": "tests/test_pricing.py", "rule_ids": ["weak_test"], "severity": ["LOW", "MEDIUM"], "line_range": [4, 5], "keywords": ["assert", "weak", "meaningful", "not none", "expected value", "doesn't check", "does not check"]}
       ]
     }
   ]

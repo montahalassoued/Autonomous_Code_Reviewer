@@ -1,107 +1,77 @@
 import json
 
-from eval.llm_benchmark import (
-    ALL_TASKS,
-    DEFAULT_CASES_PATH,
-    TASKS,
-    CallResult,
-    format_markdown,
-    load_cases,
-    run_benchmark,
-    score_agent,
-    summarize,
-)
+from eval.benchmark.call_cache import CallCache
+from eval.benchmark.dataset_schema import load_agent_cases, normalize_case
+from eval.benchmark.metrics import summarize
+from eval.benchmark.report import format_markdown
+from eval.llm_benchmark import DEFAULT_CASES_PATH, CallResult, build_agent_prompt, provenance, replay, run_benchmark
 
 
-SQL_CASE = {
-    "id": "sql",
-    "agent": "security",
-    "diff": "+ query = f\"SELECT ... {name}\"",
-    "expected_issues": [{"file": "app/users.py", "line": 15, "keywords": ["sql injection"]}],
-}
-CLEAN_CASE = {"id": "clean", "agent": "security", "diff": "+ x = 1", "expected_issues": []}
+SQL_CASE = normalize_case({
+    "id": "sql", "agent": "security",
+    "diff": ["diff --git a/app/users.py b/app/users.py", "--- a/app/users.py", "+++ b/app/users.py", "@@ -1,1 +1,2 @@",
+             " import sqlite3", "+query = f\"SELECT * FROM users WHERE name = '{name}'\""],
+    "expected_issues": [{"file": "app/users.py", "rule_ids": ["sql_injection"], "line_range": [2, 2], "keywords": ["sql"]}],
+})
+GOOD_ANSWER = json.dumps([{
+    "severity": "HIGH", "rule_id": "sql_injection", "confidence": "high", "file_path": "app/users.py", "line_number": 2,
+    "title": "SQL injection", "description": "d", "evidence": "e", "suggestion": "s",
+}])
 
 
-# Builds a complete finding dict, with any field overridden.
-def make_finding(**overrides) -> dict:
-    finding = {
-        "severity": "HIGH",
-        "file_path": "app/users.py",
-        "line_number": 15,
-        "title": "SQL Injection (CWE-89)",
-        "description": "User input is formatted into the query.",
-        "evidence": "f\"SELECT ...\"",
-        "suggestion": "Use a parameterized query.",
-    }
-    finding.update(overrides)
-    return finding
+# A fake model: one model answers well, one always errors; every call is counted.
+class FakeModel:
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, model, prompt, temperature):
+        self.calls += 1
+        if model == "groq:broken":
+            return CallResult("", 0.1, error="NotFoundError: model not found")
+        return CallResult(GOOD_ANSWER, 0.5, input_tokens=100, output_tokens=5)
 
 
-def test_agent_finds_planted_bug():
-    result = score_agent(SQL_CASE, json.dumps([make_finding()]))
-    assert result["score"] == 1.0
-    assert result["valid"] is True
-    assert result["line_hits"] == 1
-
-
-def test_agent_accepts_diff_prefix_and_fenced_output():
-    output = "```json\n" + json.dumps([make_finding(file_path="b/app/users.py", line_number=40)]) + "\n```"
-    result = score_agent(SQL_CASE, output)
-    assert result["score"] == 1.0
-    assert result["line_hits"] == 0  # 40 is too far from 15
-
-
-def test_agent_wrong_file_is_a_miss():
-    result = score_agent(SQL_CASE, json.dumps([make_finding(file_path="other.py")]))
-    assert result["score"] == 0.0
-
-
-def test_agent_unparseable_output_is_invalid():
-    result = score_agent(SQL_CASE, "I could not find anything.")
-    assert result == {"score": 0.0, "valid": False, "n_findings": 0}
-
-
-def test_agent_missing_fields_found_but_invalid():
-    result = score_agent(SQL_CASE, json.dumps([{"file_path": "app/users.py", "title": "SQL injection"}]))
-    assert result["score"] == 1.0
-    assert result["valid"] is False
-
-
-def test_agent_clean_diff_tolerates_low_but_not_medium():
-    assert score_agent(CLEAN_CASE, json.dumps([make_finding(severity="LOW")]))["score"] == 1.0
-    assert score_agent(CLEAN_CASE, "[]")["score"] == 1.0
-    result = score_agent(CLEAN_CASE, json.dumps([make_finding(severity="MEDIUM")]))
-    assert result["score"] == 0.0
-    assert result["false_positives"] == 1
-
-
-# A fake model: one model answers well, one always errors.
-def fake_call(model, prompt, temperature):
-    if model == "groq:broken":
-        return CallResult("", 0.1, error="NotFoundError: model not found")
-    return CallResult(json.dumps([make_finding()]), 0.5, input_tokens=100, output_tokens=5)
-
-
-def test_run_and_summarize_with_fake_model():
-    cases = {"agents": [SQL_CASE]}
-    records = run_benchmark(cases, ["groq:good", "groq:broken"], ["agents"], runs=2, call_fn=fake_call)
-    assert len(records) == 4
-
+def test_run_summarize_and_report_with_a_fake_model():
+    records = run_benchmark([SQL_CASE], ["groq:good", "groq:broken"], runs=2, call_fn=FakeModel())
     summary = summarize(records)
-    assert [row["model"] for row in summary] == ["groq:good", "groq:broken"]  # best first
-    good, broken = summary
-    assert good["quality"] == 1.0 and good["errors"] == 0 and good["input_tokens_mean"] == 100
-    assert broken["quality"] == 0.0 and broken["errors"] == 2
 
-    markdown = format_markdown(summary)
-    assert "## agents" in markdown and "**agents**: groq:good" in markdown
+    overall = {row["model"]: row for row in summary if row["agent"] == "all"}
+    assert overall["groq:good"]["quality"] == 1.0 and overall["groq:good"]["recall"] == 1.0
+    assert overall["groq:broken"]["errors"] == 2 and overall["groq:broken"]["quality"] == 0.0
+    markdown = format_markdown(summary, records, {"scorer_version": 2, "runs": 2})
+    assert "## Overall" in markdown and "## Per agent" in markdown and "error NotFoundError" in markdown
+    print("OK - records, summary rows and the Markdown report")
 
 
-def test_real_dataset_loads_and_builds_prompts():
-    cases = load_cases(DEFAULT_CASES_PATH)
-    assert set(cases) == set(ALL_TASKS)
-    for task, task_cases in cases.items():
-        build_prompt, _ = TASKS[task]
-        assert task_cases, f"no cases for {task}"
-        for case in task_cases:
-            assert build_prompt(case).strip()
+def test_cached_answers_cost_no_call(tmp_path):
+    cache, model = CallCache(tmp_path / "calls.jsonl"), FakeModel()
+
+    run_benchmark([SQL_CASE], ["groq:good"], runs=2, call_fn=model, cache=cache)
+    second = run_benchmark([SQL_CASE], ["groq:good"], runs=2, call_fn=model, cache=cache)
+
+    assert model.calls == 2, "the second benchmark is served from the cache"
+    assert all(record["cached"] for record in second)
+    print("OK - a rerun only pays for answers it does not have")
+
+
+def test_replay_rescores_a_saved_file_without_calls(tmp_path):
+    saved = tmp_path / "old.json"
+    old_records = run_benchmark([SQL_CASE], ["groq:good"], call_fn=FakeModel())
+    saved.write_text(json.dumps({"records": old_records}), encoding="utf-8")
+
+    replayed = replay(saved, [SQL_CASE])
+
+    assert [record["score"] for record in replayed] == [1.0]
+    print("OK - saved answers are scored again with the current scorer")
+
+
+def test_real_dataset_builds_production_prompts_and_provenance():
+    cases = load_agent_cases(DEFAULT_CASES_PATH)
+    for case in cases:
+        prompt = build_agent_prompt(case)
+        assert "<<<PULL_REQUEST_DIFF " in prompt and case["diff_text"].splitlines()[0] in prompt
+
+    settings = provenance(DEFAULT_CASES_PATH)
+    assert settings["scorer_version"] == 2 and set(settings["prompt_sha256"]) == {"security", "logic", "quality"}
+    print(f"OK - {len(cases)} cases build production prompts; results record what produced them")

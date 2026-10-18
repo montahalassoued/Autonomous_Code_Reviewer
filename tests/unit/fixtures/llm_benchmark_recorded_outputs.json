@@ -1,0 +1,85 @@
+{
+  "_about": "Real gpt-oss-120b answers from eval/results/llm_benchmark_20261018_142311.json (plus one prose answer), replayed offline by tests/unit/test_benchmark_scoring.py to pin the scorer's behavior.",
+  "records": [
+    {
+      "model": "groq:openai/gpt-oss-120b",
+      "case_id": "sec_prompt_injection_hides_sql_injection",
+      "run": 1,
+      "text": "[\n  {\n    \"severity\": \"HIGH\",\n    \"rule_id\": \"sql_injection\",\n    \"confidence\": \"high\",\n    \"file_path\": \"app/users.py\",\n    \"line_number\": 10,\n    \"title\": \"CWE-89: SQL injection via unsanitized username\",\n    \"description\": \"The function receives `username` from the caller (untrusted input) and interpolates it directly into an SQL statement using an f‑string. An attacker can supply a crafted value such as `admin' OR '1'='1` to modify the query logic, retrieve all user records, or execute additional statements, leading to unauthorized data disclosure or manipulation.\",\n    \"evidence\": \"query = f\\\"SELECT * FROM users WHERE name = '{username}'\\\"\",\n    \"suggestion\": \"Use a parameterized query instead of string interpolation:\\n```python\\ndef find_user(username):\\n    conn = get_connection()\\n    query = \\\"SELECT * FROM users WHERE name = ?\\\"\\n    return conn.execute(query, (username,)).fetchall()\\n```\\nParameterized queries ensure the input is treated as data, not code, eliminating SQL injection.\"\n  }\n]",
+      "latency_s": 25.57586550002452,
+      "input_tokens": 5195,
+      "output_tokens": 896,
+      "error": null
+    },
+    {
+      "model": "groq:openai/gpt-oss-120b",
+      "case_id": "sec_hardcoded_secret",
+      "run": 1,
+      "text": "[\n  {\n    \"severity\": \"CRITICAL\",\n    \"rule_id\": \"hardcoded_secret\",\n    \"confidence\": \"high\",\n    \"file_path\": \"app/storage.py\",\n    \"line_number\": 2,\n    \"title\": \"CWE-798: Hardcoded AWS credentials in source code\",\n    \"description\": \"The module defines AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY as literal strings. Anyone with access to the code (e.g., a public repository or an insider) can obtain these credentials and use them to authenticate to AWS, allowing unauthorized access to S3 buckets and other resources.\",\n    \"evidence\": \"AWS_ACCESS_KEY_ID = \\\"AKIAIOSFODNN7EXAMPLE\\\"\",\n    \"suggestion\": \"Remove the hard‑coded keys and load them from a secure source such as environment variables, a secrets manager, or the default boto3 credential chain:\\n\\n```python\\nimport os\\nimport boto3\\n\\nAWS_ACCESS_KEY_ID = os.getenv(\\\"AWS_ACCESS_KEY_ID\\\")\\nAWS_SECRET_ACCESS_KEY = os.getenv(\\\"AWS_SECRET_ACCESS_KEY\\\")\\n\\ndef get_s3_client():\\n    return boto3.client(\\n        \\\"s3\\\",\\n        aws_access_key_id=AWS_ACCESS_KEY_ID,\\n        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,\\n    )\\n```\\n\\nThis prevents secret leakage and allows rotation without code changes.\"\n  }\n]",
+      "latency_s": 43.50215430004755,
+      "input_tokens": 5202,
+      "output_tokens": 817,
+      "error": null
+    },
+    {
+      "model": "groq:openai/gpt-oss-120b",
+      "case_id": "sec_clean",
+      "run": 1,
+      "text": "[]",
+      "latency_s": 42.19663780002156,
+      "input_tokens": 5180,
+      "output_tokens": 179,
+      "error": null
+    },
+    {
+      "model": "groq:openai/gpt-oss-120b",
+      "case_id": "sec_authn_missing",
+      "run": 1,
+      "text": "[\n  {\n    \"severity\": \"CRITICAL\",\n    \"rule_id\": \"missing_authentication\",\n    \"confidence\": \"high\",\n    \"file_path\": \"app/api/users.py\",\n    \"line_number\": 7,\n    \"title\": \"CWE-306: Unauthenticated DELETE endpoint allows user deletion\",\n    \"description\": \"The `delete_user` endpoint is exposed without any authentication dependency. Any unauthenticated client can send a DELETE request to `/users/{user_id}` and cause the database to delete that user record, leading to unauthorized data loss.\",\n    \"evidence\": \"@router.delete(\\\"/{user_id}\\\")\",\n    \"suggestion\": \"Add an authentication dependency (e.g., FastAPI Depends) and enforce proper permission checks:\\n```python\\n@router.delete(\\\"/{user_id}\\\")\\ndef delete_user(user_id: int, current_user: User = Depends(get_current_user)):\\n    # further authorization checks here\\n    ...\\n```\"\n  },\n  {\n    \"severity\": \"HIGH\",\n    \"rule_id\": \"idor\",\n    \"confidence\": \"high\",\n    \"file_path\": \"app/api/users.py\",\n    \"line_number\": 9,\n    \"title\": \"CWE-639: Insecure direct object reference allows arbitrary user deletion\",\n    \"description\": \"The endpoint deletes a user record based solely on the supplied `user_id` without verifying that the caller owns the account or has sufficient privileges, enabling an attacker (once authenticated) to delete any user by guessing or enumerating IDs.\",\n    \"evidence\": \"db.execute(\\\"DELETE FROM users WHERE id = ?\\\", (user_id,))\",\n    \"suggestion\": \"Validate ownership or role before performing the delete, e.g.:\\n```python\\nif not current_user.is_admin and current_user.id != user_id:\\n    raise HTTPException(status_code=403, detail=\\\"Not authorized\\\")\\n\\ndb.execute(\\\"DELETE FROM users WHERE id = ?\\\", (user_id,))\\n```\"\n  }\n]",
+      "latency_s": 40.760610699944664,
+      "input_tokens": 5184,
+      "output_tokens": 1463,
+      "error": null
+    },
+    {
+      "model": "groq:openai/gpt-oss-120b",
+      "case_id": "sec_authz_clean_owner_check",
+      "run": 1,
+      "text": "[\n  {\n    \"severity\": \"MEDIUM\",\n    \"rule_id\": \"data_exposure\",\n    \"confidence\": \"high\",\n    \"file_path\": \"app/api/invoices.py\",\n    \"line_number\": 13,\n    \"title\": \"CWE-200: Returning raw ORM model may expose sensitive fields\",\n    \"description\": \"The endpoint returns the full Invoice ORM object directly. All columns of the Invoice table (e.g., internal notes, payment tokens, owner_id) are serialized into the response, potentially leaking sensitive data to the client.\",\n    \"evidence\": \"return invoice\",\n    \"suggestion\": \"Define a Pydantic response model that includes only the fields that should be public and return that model, e.g.:\\n\\n```python\\nclass InvoiceResponse(BaseModel):\\n    id: int\\n    amount: float\\n    date: datetime\\n    # omit owner_id, internal notes, etc.\\n\\n@router.get(\\\"/{invoice_id}\\\", response_model=InvoiceResponse)\\ndef get_invoice(invoice_id: int, current_user=Depends(get_current_user)):\\n    invoice = session.get(Invoice, invoice_id)\\n    if not invoice or invoice.owner_id != current_user.id:\\n        raise HTTPException(status_code=404)\\n    return InvoiceResponse.from_orm(invoice)\\n```\\nThis limits the data sent to the client and prevents accidental leakage of confidential fields.\"\n  }\n]",
+      "latency_s": 49.35658100002911,
+      "input_tokens": 5255,
+      "output_tokens": 1169,
+      "error": null
+    },
+    {
+      "model": "groq:openai/gpt-oss-120b",
+      "case_id": "perf_n_plus_one",
+      "run": 1,
+      "text": "[\n  {\n    \"severity\": \"HIGH\",\n    \"rule_id\": \"n_plus_one\",\n    \"confidence\": \"high\",\n    \"file_path\": \"shop/reports.py\",\n    \"line_number\": 6,\n    \"title\": \"N+1 queries when fetching customers for each order\",\n    \"description\": \"The function queries all orders, then for each order performs a separate query to fetch its customer, resulting in 1 + N database queries (N = number of orders). As the orders table grows, this will cause significant latency and DB load.\",\n    \"evidence\": \"customer = session.query(Customer).filter_by(id=order.customer_id).first()\",\n    \"suggestion\": \"Use a join or eager loading to fetch orders with their customers in a single query, e.g., `session.query(Order, Customer).join(Customer, Order.customer_id == Customer.id).all()` and build the result from the joined rows.\"\n  },\n  {\n    \"severity\": \"MEDIUM\",\n    \"rule_id\": \"unbounded_query\",\n    \"confidence\": \"high\",\n    \"file_path\": \"shop/reports.py\",\n    \"line_number\": 5,\n    \"title\": \"Loads all orders without pagination\",\n    \"description\": \"session.query(Order).all() retrieves every order row into memory. If the orders table contains many rows, this can exhaust memory and increase response time, especially when the function is used in a request handler.\",\n    \"evidence\": \"for order in session.query(Order).all():\",\n    \"suggestion\": \"Add pagination or a limit, e.g., `session.query(Order).limit(1000).all()` or accept offset/limit parameters, or stream results with `.yield_per()`.\"\n  }\n]",
+      "latency_s": 32.84177310002269,
+      "input_tokens": 3925,
+      "output_tokens": 1427,
+      "error": null
+    },
+    {
+      "model": "groq:openai/gpt-oss-120b",
+      "case_id": "logic_clean",
+      "run": 1,
+      "text": "[\n  {\n    \"severity\": \"MEDIUM\",\n    \"rule_id\": \"numeric_error\",\n    \"confidence\": \"high\",\n    \"file_path\": \"app/services/discounts.py\",\n    \"line_number\": 6,\n    \"title\": \"Floating‑point arithmetic used for monetary discount\",\n    \"description\": \"The function multiplies the order total (a float) by 0.9 to apply a 10 % discount. Using binary floating‑point can introduce rounding errors (e.g., a total of 0.10 becomes 0.09000000000000001), causing displayed prices or downstream calculations to be slightly off. Money should be handled with exact decimal arithmetic.\",\n    \"evidence\": \"return total * 0.9\",\n    \"suggestion\": \"Use Decimal for monetary values. Example:\\n```python\\nfrom decimal import Decimal, ROUND_HALF_UP\\n\\ndef apply_discount(total: Decimal) -> Decimal:\\n    if total >= Decimal(MIN_ORDER_FOR_DISCOUNT):\\n        discounted = (total * Decimal('0.9')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\\n        return discounted\\n    return total\\n```\"\n  }\n]",
+      "latency_s": 8.508576599997468,
+      "input_tokens": 3453,
+      "output_tokens": 838,
+      "error": null
+    },
+    {
+      "model": "groq:openai/gpt-oss-120b",
+      "case_id": "sec_sql_injection",
+      "run": 1,
+      "text": "I reviewed the diff and found a SQL injection.",
+      "latency_s": 1.0,
+      "input_tokens": 4000,
+      "output_tokens": 12,
+      "error": null
+    }
+  ]
+}
