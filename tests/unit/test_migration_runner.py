@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import pytest
 
 from db.migration_runner import MIGRATION_LOCK_ID, MIGRATIONS_DIR, apply_migrations, list_migrations
+from review.state import Finding
 
 
 # Records every statement; SELECT version returns the versions marked as already applied.
@@ -69,6 +70,18 @@ def test_initial_schema_creates_every_table():
         assert f"CREATE TABLE {table} (" in schema, f"001_initial_schema.sql must create {table}"
     assert "UNIQUE (repo_id, target, head_sha)" in schema, "the reviews unique key is the dedupe key"
     print("OK - the initial migration creates the 7 tables and the dedupe key")
+
+
+def test_findings_table_stores_every_finding_field():
+    schema = dict(list_migrations(MIGRATIONS_DIR))["001_initial_schema"]
+    table = schema.split("CREATE TABLE findings (", 1)[1].split(");", 1)[0]
+    columns = {line.split()[0] for line in table.splitlines() if line.strip() and not line.strip().startswith("--")}
+
+    # Finding.agent is stored as category; every other field keeps its name.
+    expected = {"category" if field == "agent" else field for field in Finding.__annotations__}
+    missing = expected - columns
+    assert not missing, f"findings cannot store these Finding fields: {missing}"
+    print(f"OK - findings has a column for every Finding field: {sorted(expected)}")
 
 
 if __name__ == "__main__":
