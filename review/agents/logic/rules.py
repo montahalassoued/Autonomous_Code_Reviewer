@@ -15,7 +15,7 @@ LOGIC_RULES = {
     "mutation_during_iteration": "a list, dict or set changed while looping over it",
     "identity_comparison": "is or is not used on strings or numbers instead of ==",
     "float_equality": "floats compared with == or != instead of math.isclose or a tolerance",
-    "numeric_error": "/ vs //, truncation, rounding, or money computed in float",
+    "numeric_error": "/ vs //, truncation or rounding that gives a wrong number, including float money that is compared, summed or rounded wrong",
     "datetime_timezone": "naive and aware datetimes mixed, or local time used where UTC is meant",
     "partial_update": "several writes with no transaction or rollback, left half-done when one fails",
     "broken_caller_contract": "a changed signature, return value or exception that callers don't handle",
