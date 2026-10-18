@@ -18,7 +18,7 @@ from eval.benchmark.dataset_schema import case_fingerprint, file_sha256, load_ag
 from eval.benchmark.metrics import summarize
 from eval.benchmark.report import format_markdown
 from eval.benchmark.scoring import AGENT_SPECS, SCORER_VERSION, score_case
-from review.agents.agent_runner import EMPTY_CONTEXT_SUMMARY
+from review.agents.agent_runner import AGENT_TEMPERATURE, EMPTY_CONTEXT_SUMMARY
 from review.agents.prompt_assembler import fill_prompt
 from review.untrusted_input import DIFF_LABEL, wrap_untrusted
 
@@ -47,7 +47,6 @@ DEFAULT_MODELS = [
 AGENT_PROMPTS = {name: spec.prompt_template for name, spec in AGENT_SPECS.items()}
 
 # Same temperature production uses, so the benchmark measures the model, not a different sampling setup.
-AGENT_TEMPERATURE = 0.1
 
 
 # What one model call returned, in a provider-neutral shape.

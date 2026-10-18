@@ -2,12 +2,10 @@ from dataclasses import dataclass, field
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser, Node
 
+from rag.symbol_extractor import NESTED_SCOPE_TYPES
+
 
 PY_LANGUAGE = Language(tspython.language())
-
-# Node types that open a new scope. Calls inside them belong to that
-# inner scope, not to the function that contains them.
-NESTED_SCOPE_TYPES = {"function_definition", "class_definition", "decorated_definition"}
 
 
 # One function from a source file, with what later steps need.

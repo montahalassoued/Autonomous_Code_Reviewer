@@ -84,6 +84,8 @@ services:
     depends_on:
       azurite:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     # The image HEALTHCHECK probes an HTTP port; the worker has none.
     healthcheck:
       disable: true

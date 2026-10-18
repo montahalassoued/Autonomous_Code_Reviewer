@@ -4,6 +4,7 @@ import git
 import networkx as nx
 
 from rag.ast_parser import parse_file, ParsedFunction
+from rag.file_classifier import SKIPPED_DIRS
 from rag.knowledge_graph import build_knowledge_graph
 
 
@@ -22,11 +23,10 @@ def clone_repository(repo_url: str, target_dir: str) -> str:
 
 # Walks a repo checkout and collects every .py file's path.
 def _find_python_files(repo_path: str) -> list[str]:
-    ignored_dirs = {"venv", ".venv", "env", "node_modules", ".git", "__pycache__"}
     python_files = []
 
     for root, dirs, files in os.walk(repo_path):
-        dirs[:] = [d for d in dirs if d not in ignored_dirs]
+        dirs[:] = [d for d in dirs if d not in SKIPPED_DIRS]
         for filename in files:
             if filename.endswith(".py"):
                 python_files.append(os.path.join(root, filename))
