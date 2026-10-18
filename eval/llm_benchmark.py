@@ -107,10 +107,15 @@ def _split_model_spec(model_spec: str) -> tuple[str, str]:
     return provider, model_name
 
 
-# Rate limits (429) and server errors (5xx) are worth retrying.
+# A 429 on a per-day limit (Groq TPD/RPD): no retry or later call can succeed before the window frees up.
+def is_daily_quota(error: str | BaseException | None) -> bool:
+    return error is not None and "per day" in str(error)
+
+
+# Rate limits (429) and server errors (5xx) are worth retrying, except a spent daily quota.
 def _is_retryable(exc: BaseException) -> bool:
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-    return status in (429, 500, 502, 503, 504)
+    return status in (429, 500, 502, 503, 504) and not is_daily_quota(exc)
 
 
 # One Groq chat completion, retried on 429/5xx.
@@ -237,11 +242,18 @@ def run_benchmark(
 ) -> list[dict]:
     records = []
     for model in models:
+        quota_spent = False
         for case in cases:
             for run in range(1, runs + 1):
                 key = CallCache.key(model, AGENT_TEMPERATURE, _cache_prompt(case), run)
                 cached = cache.get(key) if cache else None
+                if quota_spent and not cached:
+                    continue
                 result = cached or asdict(call_fn(model, build_agent_prompt(case), AGENT_TEMPERATURE))
+                if is_daily_quota(result["error"]):
+                    print(f"  {model}: daily quota spent, its remaining uncached calls are skipped")
+                    quota_spent = True
+                    continue
                 if cache and not cached:
                     cache.put(key, result)
                 scored = score_case(case, result["text"]) if result["error"] is None else _empty_score(case)
@@ -349,7 +361,11 @@ def main() -> None:
         print(f"Up to {len(cases) * len(models) * args.runs} calls ({len(models)} model(s) x {len(cases)} cases x "
               f"{args.runs} run(s)); cached answers are reused{' (disabled: --fresh)' if args.fresh else ''}.")
         records = run_benchmark(cases, models, args.runs, call_model, args.delay, cache)
-        settings |= {"models": models, "runs": args.runs}
+        missing = len(cases) * len(models) * args.runs - len(records)
+        settings |= {"models": models, "runs": args.runs, "missing_calls": missing}
+        if missing:
+            print(f"\nIncomplete: {missing} call(s) skipped on a daily quota. Rerun the same command once it resets; "
+                  "cached answers cost nothing.")
 
     summary = summarize(records)
     print("\n" + format_markdown(summary, records, settings))

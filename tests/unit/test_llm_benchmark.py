@@ -4,7 +4,9 @@ from eval.benchmark.call_cache import CallCache
 from eval.benchmark.dataset_schema import load_agent_cases, normalize_case
 from eval.benchmark.metrics import summarize
 from eval.benchmark.report import format_markdown
-from eval.llm_benchmark import DEFAULT_CASES_PATH, CallResult, build_agent_prompt, provenance, replay, run_benchmark
+from eval.llm_benchmark import (
+    DEFAULT_CASES_PATH, CallResult, _is_retryable, build_agent_prompt, provenance, replay, run_benchmark,
+)
 
 
 SQL_CASE = normalize_case({
@@ -29,6 +31,8 @@ class FakeModel:
         self.calls += 1
         if model == "groq:broken":
             return CallResult("", 0.1, error="NotFoundError: model not found")
+        if model == "groq:spent":
+            return CallResult("", 0.1, error="RateLimitError: Rate limit reached on tokens per day (TPD): Limit 200000")
         return CallResult(GOOD_ANSWER, 0.5, input_tokens=100, output_tokens=5)
 
 
@@ -53,6 +57,26 @@ def test_cached_answers_cost_no_call(tmp_path):
     assert model.calls == 2, "the second benchmark is served from the cache"
     assert all(record["cached"] for record in second)
     print("OK - a rerun only pays for answers it does not have")
+
+
+def test_a_spent_daily_quota_stops_the_model_without_fake_scores():
+    model = FakeModel()
+
+    records = run_benchmark([SQL_CASE], ["groq:spent", "groq:good"], runs=3, call_fn=model)
+
+    assert [record["model"] for record in records] == ["groq:good"] * 3, "no 0.00 record for calls the quota refused"
+    assert model.calls == 4, "one refused call, then the spent model is skipped"
+    print("OK - a daily quota ends that model's run instead of scoring zeros")
+
+
+class QuotaError(Exception):
+    status_code = 429
+
+
+def test_daily_quota_is_not_retried_but_a_minute_limit_is():
+    assert not _is_retryable(QuotaError("Rate limit reached on tokens per day (TPD)"))
+    assert _is_retryable(QuotaError("Rate limit reached on tokens per minute (TPM)"))
+    print("OK - waiting seconds only helps a per-minute limit")
 
 
 def test_replay_rescores_a_saved_file_without_calls(tmp_path):
