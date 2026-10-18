@@ -26,6 +26,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - Drop the legacy semantic retrieval before an A/B eval: it was never measured and known-buggy; agents use diff + tools until the context builder (supersedes "delete only after the eval")
 - Schema fixed before its first use over a 002 ALTER migration: `findings` mirrors `Finding`, `symbols.name` for call resolution, dead columns dropped
 - Static call resolution that stores only provable edges over bare-name matching or a type checker: no false callers in the context, library calls and locals skipped
+- Collaborator check through the GitHub API over `author_association`: only collaborators on `ALLOWED_REPOS` spend LLM calls, fail closed on errors
 
 **Superseded by the structural-context design (kept for history):**
 
@@ -418,3 +419,21 @@ function, V6), or a type checker such as pyright (precise, but a Node runtime
 and seconds per file). Trade-off: lower recall on dynamic code, which the
 context marks as not verifiable instead of guessing. On this repo: 97 Python
 files, 610 symbols, 1106 edges, 3 unresolved calls, 0.3 s.
+
+## Why the webhook checks PR authors with the GitHub collaborator API
+
+Any PR on a repo that sent a signed webhook started 3 to 12 Groq calls, so a
+stranger's fork could spend the free quota or try a prompt injection.
+`app/jobs/trigger_policy.py` now runs before the dedupe: the repo must be in
+`ALLOWED_REPOS` (unset means nothing is reviewed), the PR must not be a draft
+(`ready_for_review` reviews it later), and `GET
+/repos/{repo}/collaborators/{login}` must answer 204 for the author. Cheap
+checks come first and the API call last, a refused event leaves no `reviews`
+row and costs no LLM call, and a GitHub error answers 503 so the delivery can
+be redelivered instead of reviewing an unverified author. The check is injected
+through `app.state.is_collaborator`, like the queue and the dedupe store.
+Alternative: `author_association` from the signed payload (no API call, free),
+but the API answer is always current (access removed since the PR was opened)
+and does not depend on how GitHub classifies org members. Trade-off: one
+GitHub call per accepted event, and the API app now needs `GITHUB_TOKEN`
+(a fine-grained token on the reviewed repo with Metadata read is enough for it).

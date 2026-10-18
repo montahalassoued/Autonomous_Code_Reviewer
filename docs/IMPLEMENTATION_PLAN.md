@@ -28,7 +28,7 @@ Full description: [ARCHITECTURE.md](ARCHITECTURE.md). In short:
 
 ## Verified problems the plan fixes
 
-Status (2026-10-18): V1, V2 and V8 were fixed in Phase 0. V3, V4 and V7 disappeared with the semantic retrieval, and the files they name no longer exist. V5 is fixed except `self.x()` calls, V6 is still open (Phase 4), V10 is fixed except the repo guard, and V12 is fixed (offline graph tests).
+Status (2026-10-18): V1, V2 and V8 were fixed in Phase 0. V3, V4 and V7 disappeared with the semantic retrieval, and the files they name no longer exist. V5 is fixed except `self.x()` calls, V6 is still open (Phase 4), V10 is fixed, and V12 is fixed (offline graph tests).
 
 | # | Problem | Where |
 |---|---|---|
@@ -114,7 +114,7 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
 - Idempotent summary upsert by marker.
 
 **Remaining:**
-- Repo guard.
+- Repo guard: **done** (`ALLOWED_REPOS`, collaborator check through the GitHub API, drafts skipped, in `app/jobs/trigger_policy.py`).
 - `get_pr_head_sha()` for the stale check before posting.
 - The `reviews` status lifecycle (queued → running → posted | failed); today a row stays `queued`.
 
