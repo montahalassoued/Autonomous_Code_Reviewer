@@ -29,3 +29,6 @@ htmlcov/
 
 # SQLTools query scratch files
 *.session.sql
+
+# LLM benchmark call cache (local, reproducible from the API)
+eval/cache/
