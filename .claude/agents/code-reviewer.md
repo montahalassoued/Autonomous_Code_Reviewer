@@ -21,7 +21,7 @@ These come from the user's CLAUDE.md and override everything below:
 
 ### 1. Correctness and safety (blocking)
 - Logic errors, wrong conditions, off-by-one, None handling, missing awaits, exceptions swallowed or escaping
-- The LangGraph graph (`review/graph.py`) stays forward-only: agents → `join_agents` → `synthesizer`; no edge back to the agents or the retriever; routing functions return real node names, and `add_conditional_edges` gets no mapping dict when fanning out to a list
+- The LangGraph graph (`review/graph.py`) stays forward-only: agents → `join_agents` → `synthesizer`; no edge back to the agents; routing functions return real node names, and `add_conditional_edges` gets no mapping dict when fanning out to a list
 - `findings` keeps its `operator.add` reducer (`review/state.py`)
 - LLM output parsing never crashes the pipeline: malformed output gives zero findings, invalid findings are dropped and logged (`parse_findings` / `to_finding`)
 - Agent tools stay read-only, inside the checkout (`resolve_inside_repo`), skip secret files, use literal search and go through `execute_tool_call`

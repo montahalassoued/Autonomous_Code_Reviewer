@@ -18,7 +18,7 @@ You review the uncommitted changes in the autonomous-code-reviewer project befor
 **Correctness (the most important part)**
 - Logic errors, wrong conditions, off-by-one errors, unhandled `None` or empty cases
 - Broken callers: if a function's signature or return shape changed, grep for its uses
-- LangGraph: routing functions must return real node names; the graph stays forward-only (agents → `join_agents` → `synthesizer`, never back to the retriever or agents); chunk ids come from `make_chunk_id`, never built by hand; `findings` updates must be lists (they're merged with `operator.add`)
+- LangGraph: routing functions must return real node names; the graph stays forward-only (agents → `join_agents` → `synthesizer`, never back to the agents); call-graph node ids come from `_node_id` in `rag/knowledge_graph.py`, never built by hand; `findings` updates must be lists (they're merged with `operator.add`)
 - LLM-output parsing must degrade to no findings, never raise
 
 **Security**
@@ -34,7 +34,7 @@ You review the uncommitted changes in the autonomous-code-reviewer project befor
 
 **Hygiene**
 - Unrelated changes mixed together, which should be separate commits
-- Files that shouldn't be committed: `venv/`, `__pycache__/`, `test_chroma_data/`, `.env`, large binaries
+- Files that shouldn't be committed: `venv/`, `__pycache__/`, `target_repo/`, `.env`, large binaries
 
 ## Report format
 

@@ -74,8 +74,8 @@ These come from the user's CLAUDE.md and override everything below:
 
 ## Monitoring and observability
 - Log aggregation (Log Analytics)
-- Metrics collection (`prometheus-client` is in requirements)
-- Distributed tracing (Langfuse)
+- Metrics collection (Container Apps metrics; no metrics library yet)
+- Distributed tracing (Langfuse, planned in Phase 3)
 - Alert management
 - Health endpoints
 

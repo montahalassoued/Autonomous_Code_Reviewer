@@ -73,7 +73,7 @@ These come from the user's CLAUDE.md and override everything below:
 - CIS benchmark compliance
 
 ## Docker Compose orchestration
-- Multi-service definitions (app, plus Redis and Postgres if they're enabled later)
+- Multi-service definitions (azurite, Postgres, api, worker)
 - Service profiles
 - Volume management
 - Network isolation
