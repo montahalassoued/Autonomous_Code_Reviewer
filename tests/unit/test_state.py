@@ -54,6 +54,7 @@ def test_full_state_initialization():
         "changed_files": ["auth/login.py"],
         "review_context": "",
         "findings": [],
+        "failed_agents": [],
         "final_review_markdown": "",
     }
     assert set(state) == set(ReviewState.__annotations__), "the test state covers every ReviewState field"

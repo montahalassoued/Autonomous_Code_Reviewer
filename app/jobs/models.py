@@ -14,6 +14,11 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# The reviews.target of a pull request: one review per commit per target.
+def pr_target(pr_number: int) -> str:
+    return f"pr:{pr_number}"
+
+
 # One request to review one commit of one pull request.
 @dataclass
 class ReviewJob:
@@ -25,6 +30,11 @@ class ReviewJob:
     job_id: str = field(default_factory=_new_job_id)
     event: str = "pull_request"
     enqueued_at: str = field(default_factory=_utc_now_iso)
+
+    # The key of this job's row in the reviews table.
+    @property
+    def dedupe_key(self) -> "DedupeKey":
+        return DedupeKey(self.repo_full_name, self.head_sha, pr_target(self.pr_number))
 
     # Serializes the job to the JSON text stored in the queue.
     def to_json(self) -> str:

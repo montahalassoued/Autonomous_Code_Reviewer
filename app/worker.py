@@ -2,12 +2,15 @@ import logging
 import os
 import signal
 import threading
+import time
 from typing import Callable
 
-from app.jobs.factory import build_queue
+from app.jobs.factory import build_queue, build_review_status
 from app.jobs.models import ReviewJob
 from app.jobs.queue import JobQueue
-from tools.github_tools import changed_files_in_diff, get_pr_diff, upsert_summary_comment
+from app.jobs.review_status import SKIP_CLOSED, SKIP_SUPERSEDED, ReviewStatusStore
+from review.secret_redactor import environment_secret_values, redact_secrets
+from tools.github_tools import changed_files_in_diff, get_pr_diff, get_pull_request_head, upsert_summary_comment
 
 
 logger = logging.getLogger(__name__)
@@ -18,8 +21,34 @@ MIN_POLL_S = 1.0
 MAX_POLL_S = 10.0
 
 
-# Runs the full review for one job and posts the result to GitHub.
-def review_pull_request(compiled_graph, job: ReviewJob) -> None:
+# Why this job's review must not be posted: the PR was closed, or moved past the reviewed commit.
+def stale_reason(job: ReviewJob) -> str | None:
+    state, head_sha = get_pull_request_head(job.repo_full_name, job.pr_number)
+    if state != "open":
+        return SKIP_CLOSED
+    if head_sha != job.head_sha:
+        return SKIP_SUPERSEDED
+    return None
+
+
+# The failure as stored in reviews.status_reason: its type and message, with secrets redacted.
+def failure_reason(error: BaseException) -> str:
+    return redact_secrets(f"{type(error).__name__}: {error}", environment_secret_values())
+
+
+# Runs the full review for one job, records its status and posts the result, unless it went stale.
+def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStatusStore) -> None:
+    key = job.dedupe_key
+    status_store.mark_running(key)
+    started = time.monotonic()
+
+    # Checked before the LLM calls (nothing to pay for) and again before posting (a push may land meanwhile).
+    reason = stale_reason(job)
+    if reason:
+        status_store.mark_skipped(key, reason)
+        logger.info("Skipped job_id=%s pr=%s sha=%s: %s", job.job_id, job.pr_number, job.head_sha, reason)
+        return
+
     diff = get_pr_diff(job.repo_full_name, job.pr_number)
 
     initial_state = {
@@ -29,11 +58,20 @@ def review_pull_request(compiled_graph, job: ReviewJob) -> None:
         "changed_files": changed_files_in_diff(diff),
         "review_context": "",
         "findings": [],
+        "failed_agents": [],
         "final_review_markdown": "",
     }
 
     final_state = compiled_graph.invoke(initial_state)
+    reason = stale_reason(job)
+    if reason:
+        status_store.mark_skipped(key, reason)
+        logger.info("Dropped the finished review job_id=%s pr=%s sha=%s: %s", job.job_id, job.pr_number, job.head_sha, reason)
+        return
+
     upsert_summary_comment(job.repo_full_name, job.pr_number, final_state["final_review_markdown"])
+    latency_ms = int((time.monotonic() - started) * 1000)
+    status_store.mark_posted(key, latency_ms, final_state.get("failed_agents") or [])
 
 
 # Receives at most one message and handles it.
@@ -42,6 +80,7 @@ def process_one(
     review_fn: Callable[[ReviewJob], None],
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     visibility_timeout_s: int = DEFAULT_VISIBILITY_TIMEOUT_S,
+    status_store: ReviewStatusStore | None = None,
 ) -> bool:
     messages = queue.receive(max_messages=1, visibility_timeout_s=visibility_timeout_s)
     if not messages:
@@ -51,7 +90,7 @@ def process_one(
     job = message.job
     try:
         review_fn(job)
-    except Exception:  # any failure must be recorded and retried, never crash the worker
+    except Exception as error:  # any failure must be recorded and retried, never crash the worker
         logger.exception(
             "Review failed job_id=%s repo=%s pr=%s attempt=%s/%s",
             job.job_id, job.repo_full_name, job.pr_number, message.dequeue_count, max_attempts,
@@ -59,12 +98,22 @@ def process_one(
         if message.dequeue_count >= max_attempts:
             queue.dead_letter(message)
             logger.error("Job dead-lettered job_id=%s after %s attempts", job.job_id, message.dequeue_count)
+            if status_store is not None:
+                _record_failure(status_store, job, error)
         # Below the cap we leave the message alone: it reappears after the visibility timeout.
         return True
 
     queue.delete(message)
     logger.info("Review done job_id=%s repo=%s pr=%s sha=%s", job.job_id, job.repo_full_name, job.pr_number, job.head_sha)
     return True
+
+
+# A failed review is visible in Postgres and can be retried by a redelivery; a store outage is only logged.
+def _record_failure(status_store: ReviewStatusStore, job: ReviewJob, error: BaseException) -> None:
+    try:
+        status_store.mark_failed(job.dedupe_key, failure_reason(error))
+    except Exception:  # Postgres down too: the poison queue still holds the job
+        logger.exception("Could not record the failure of job_id=%s", job.job_id)
 
 
 # Polls the queue until stop_event is set.
@@ -76,11 +125,12 @@ def run_forever(
     visibility_timeout_s: int = DEFAULT_VISIBILITY_TIMEOUT_S,
     min_poll_s: float = MIN_POLL_S,
     max_poll_s: float = MAX_POLL_S,
+    status_store: ReviewStatusStore | None = None,
 ) -> None:
     delay = min_poll_s
     while not stop_event.is_set():
         try:
-            handled = process_one(queue, review_fn, max_attempts, visibility_timeout_s)
+            handled = process_one(queue, review_fn, max_attempts, visibility_timeout_s, status_store)
         except Exception:  # queue/storage outage: log and back off, the worker must stay alive
             logger.exception("Queue operation failed")
             handled = False
@@ -112,6 +162,7 @@ def main() -> None:
     visibility_timeout_s = _read_int_env("REVIEW_VISIBILITY_TIMEOUT_S", DEFAULT_VISIBILITY_TIMEOUT_S)
 
     queue = build_queue()
+    status_store = build_review_status()
     compiled_graph = build_review_graph()
 
     stop_event = threading.Event()
@@ -121,11 +172,13 @@ def main() -> None:
     logger.info("Worker started max_attempts=%s visibility_timeout_s=%s", max_attempts, visibility_timeout_s)
     run_forever(
         queue,
-        lambda job: review_pull_request(compiled_graph, job),
+        lambda job: review_pull_request(compiled_graph, job, status_store),
         stop_event,
         max_attempts,
         visibility_timeout_s,
+        status_store=status_store,
     )
+    status_store.close()
     logger.info("Worker stopped")
 
 

@@ -28,6 +28,12 @@ def is_collaborator(repo_full_name: str, login: str) -> bool:
     return repo.has_in_collaborators(login)
 
 
+# The pull request's state ("open" or "closed") and current head commit, to drop stale reviews.
+def get_pull_request_head(repo_full_name: str, pr_number: int) -> tuple[str, str]:
+    pull_request = _build_github_client().get_repo(repo_full_name, lazy=True).get_pull(pr_number)
+    return pull_request.state, pull_request.head.sha
+
+
 # Fetches the unified diff for a pull request.
 def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
     client = _build_github_client()

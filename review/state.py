@@ -32,5 +32,8 @@ class ReviewState(TypedDict):
     # operator.add concatenates lists instead of overwriting them
     findings: Annotated[list[Finding], operator.add]
 
+    # Agents that raised (Groq 429/5xx, timeout): the review is posted without their category
+    failed_agents: Annotated[list[str], operator.add]
+
     # Final output - populated by review/synthesizer.py
     final_review_markdown: str

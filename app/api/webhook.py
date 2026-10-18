@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Header, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.jobs.models import DedupeKey, ReviewJob
+from app.jobs.models import DedupeKey, ReviewJob, pr_target
 from app.jobs.trigger_policy import evaluate_pull_request
 
 
@@ -88,7 +88,7 @@ async def github_webhook(
         return {"status": "ignored", "reason": decision.reason}
     dedupe = request.app.state.dedupe
     queue = request.app.state.job_queue
-    dedupe_key = DedupeKey(repo_full_name, head_sha, target=f"pr:{pr_number}")
+    dedupe_key = DedupeKey(repo_full_name, head_sha, target=pr_target(pr_number))
 
     # The Azure SDK is blocking, so run it off the event loop.
     try:

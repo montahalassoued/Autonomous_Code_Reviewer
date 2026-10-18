@@ -1,5 +1,7 @@
+import logging
 from functools import partial
 from pathlib import Path
+from typing import Callable
 
 from langgraph.graph import StateGraph, START, END
 from review.agents.tools.tool_definition import ToolContext
@@ -14,10 +16,31 @@ from review.synthesizer import synthesizer_node
 # `agent` field of its findings. review/synthesizer.py renders them in this order.
 REVIEW_AGENTS = ["security", "logic", "quality"]
 
+logger = logging.getLogger(__name__)
+
+
+# Raised when no agent could run, so the job is retried instead of posting an empty review.
+class ReviewAgentsUnavailable(RuntimeError):
+    pass
+
+
+# One failing agent costs its category, not the review: it is recorded and the others still post.
+def isolate_agent_failure(name: str, node: Callable[[ReviewState], dict]) -> Callable[[ReviewState], dict]:
+    def run(state: ReviewState) -> dict:
+        try:
+            return node(state)
+        except Exception:  # an API error, a timeout or a bug in one agent must not lose the others
+            logger.exception("Review agent %s failed; the review will be partial", name)
+            return {"findings": [], "failed_agents": [name]}
+    return run
+
 
 # Barrier: LangGraph waits here for all parallel agents, so the synthesizer runs once.
 def join_agents_node(state: ReviewState) -> dict:
-    print(f"[join_agents] all parallel agents finished, {len(state['findings'])} findings total")
+    failed = state.get("failed_agents") or []
+    if len(failed) == len(REVIEW_AGENTS):
+        raise ReviewAgentsUnavailable(f"every review agent failed: {', '.join(failed)}")
+    logger.info("All agents finished: %d findings, failed agents: %s", len(state["findings"]), failed or "none")
     return {}
 
 
@@ -27,9 +50,9 @@ def build_graph(graph_index, repo_path: str | None = None):
 
     # The agents' tools read the checkout and the call graph; both stay out of ReviewState.
     tool_context = ToolContext(repo_root=Path(repo_path) if repo_path else None, code_graph=graph_index)
-    graph.add_node("security", partial(security_node, tool_context=tool_context))
-    graph.add_node("logic", partial(logic_node, tool_context=tool_context))
-    graph.add_node("quality", partial(quality_node, tool_context=tool_context))
+    graph.add_node("security", isolate_agent_failure("security", partial(security_node, tool_context=tool_context)))
+    graph.add_node("logic", isolate_agent_failure("logic", partial(logic_node, tool_context=tool_context)))
+    graph.add_node("quality", isolate_agent_failure("quality", partial(quality_node, tool_context=tool_context)))
     graph.add_node("join_agents", join_agents_node)
     graph.add_node("synthesizer", synthesizer_node)
 

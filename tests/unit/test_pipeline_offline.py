@@ -1,9 +1,11 @@
 from types import SimpleNamespace
 
+import pytest
+
 from rag.ast_parser import parse_file
 from rag.knowledge_graph import build_knowledge_graph
 from review.agents.agent_runner import EMPTY_CONTEXT_SUMMARY
-from review.graph import REVIEW_AGENTS, build_graph
+from review.graph import REVIEW_AGENTS, ReviewAgentsUnavailable, build_graph
 
 
 AUTH_PATH = "auth/service.py"
@@ -76,6 +78,7 @@ def build_state() -> dict:
         "changed_files": [],
         "review_context": "",
         "findings": [],
+        "failed_agents": [],
         "final_review_markdown": "",
     }
 
@@ -143,6 +146,34 @@ def test_none_llm_content_does_not_crash(monkeypatch):
     assert final_state["findings"] == []
     assert "No issues found" in final_state["final_review_markdown"]
     print("OK - None content from every agent degraded gracefully")
+
+
+def test_one_failing_agent_gives_a_partial_review(monkeypatch):
+    install_fakes(monkeypatch, FINDING_REPLY)
+
+    def groq_down():
+        raise RuntimeError("Groq 503")
+
+    monkeypatch.setattr("review.agents.logic.agent._build_groq_client", groq_down)
+
+    final_state = run_review()
+
+    assert final_state["failed_agents"] == ["logic"]
+    assert len(final_state["findings"]) == len(REVIEW_AGENTS) - 1, "security and quality still report"
+    assert "Partial review" in final_state["final_review_markdown"] and "Logic" in final_state["final_review_markdown"]
+    print("OK - a failing agent costs its category, not the review")
+
+
+def test_every_agent_failing_raises_so_the_job_is_retried(monkeypatch):
+    def groq_down():
+        raise RuntimeError("Groq 503")
+
+    for agent in REVIEW_AGENTS:
+        monkeypatch.setattr(f"review.agents.{agent}.agent._build_groq_client", groq_down)
+
+    with pytest.raises(ReviewAgentsUnavailable):
+        run_review()
+    print("OK - an outage is retried instead of posting an empty review")
 
 
 if __name__ == "__main__":

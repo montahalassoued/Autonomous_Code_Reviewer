@@ -218,6 +218,17 @@ def test_synthesizer_warns_about_a_possible_prompt_injection():
     print("OK - suspicious lines are listed, escaped, with or without findings")
 
 
+def test_synthesizer_names_the_missing_categories_of_a_partial_review():
+    state = build_state([])
+    state["failed_agents"] = ["logic"]
+
+    markdown = synthesizer_node(state)["final_review_markdown"]
+
+    assert "Partial review" in markdown and "🧠 Logic" in markdown
+    assert "Nice work" not in markdown and "security, code quality review(s)" in markdown
+    print("OK - a partial review never reads as a clean one")
+
+
 if __name__ == "__main__":
     test_synthesizer_renders_categories_in_fixed_order()
     test_synthesizer_sorts_by_severity_inside_a_category()

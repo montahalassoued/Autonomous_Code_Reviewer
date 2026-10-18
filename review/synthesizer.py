@@ -163,6 +163,21 @@ def _findings_within_budget(findings: list[Finding], changed_files: frozenset[st
     return kept
 
 
+# Names the categories whose agent failed, so a partial review is never read as a clean one.
+def _format_partial_note(failed_agents: list[str]) -> str | None:
+    if not failed_agents:
+        return None
+    names = ", ".join(_category_title(agent) for agent in sorted(set(failed_agents), key=_category_order))
+    return (
+        f"⚠️ **Partial review:** {names} could not run (model or API error), so its findings are missing. "
+        "Push a new commit or redeliver the webhook to retry."
+    )
+
+
+def _category_order(agent: str) -> int:
+    return list(CATEGORY_TITLES).index(agent) if agent in CATEGORY_TITLES else len(CATEGORY_TITLES)
+
+
 # Deterministic warning: lines of the diff that look written for the AI reviewer, so a human checks them.
 def _format_injection_note(diff: str) -> str | None:
     signals = detect_injection(diff)
@@ -182,10 +197,15 @@ def _format_injection_note(diff: str) -> str | None:
 # LangGraph node: findings -> final review comment.
 def synthesizer_node(state: ReviewState) -> dict:
     findings = state["findings"]
-    notes = [note for note in (_format_injection_note(state["pr_diff"]), _format_size_note(state["pr_diff"])) if note]
+    failed_agents = state.get("failed_agents") or []
+    notes = [note for note in (
+        _format_partial_note(failed_agents), _format_injection_note(state["pr_diff"]), _format_size_note(state["pr_diff"]),
+    ) if note]
 
     if not findings:
-        sections = [REVIEW_HEADING, "No issues found by the security, logic and code quality reviews. Nice work! ✅", *notes]
+        reviewed = [CATEGORY_TITLES[agent].split(" ", 1)[1].lower() for agent in CATEGORY_TITLES if agent not in failed_agents]
+        clean = f"No issues found by the {', '.join(reviewed)} review(s)." + ("" if failed_agents else " Nice work! ✅")
+        sections = [REVIEW_HEADING, clean, *notes]
         return {"final_review_markdown": "\n\n".join(sections) + "\n"}
 
     changed_files = frozenset(state.get("changed_files") or ())

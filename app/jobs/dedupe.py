@@ -55,9 +55,12 @@ ON CONFLICT (full_name) DO UPDATE SET full_name = EXCLUDED.full_name
 RETURNING id
 """
 
+# A failed review is reopened, so a manual redelivery retries it; any other existing row is a duplicate.
 INSERT_REVIEW_SQL = """
 INSERT INTO reviews (repo_id, target, head_sha) VALUES (%s, %s, %s)
-ON CONFLICT (repo_id, target, head_sha) DO NOTHING
+ON CONFLICT (repo_id, target, head_sha) DO UPDATE
+SET status = 'queued', status_reason = NULL
+WHERE reviews.status = 'failed'
 RETURNING id
 """
 
@@ -78,7 +81,7 @@ class PostgresDedupeStore:
     def __init__(self, pool) -> None:
         self._pool = pool
 
-    # Inserts a 'queued' review row; False if this commit was already queued for this target.
+    # Inserts a 'queued' review row (or reopens a failed one); False if this commit already has a review.
     def claim(self, key: DedupeKey) -> bool:
         with self._pool.connection() as connection:
             repo_id = connection.execute(UPSERT_REPO_SQL, (key.repo_full_name,)).fetchone()[0]

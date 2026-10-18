@@ -126,6 +126,13 @@ def test_dedupe_backend_defaults(monkeypatch):
     print("OK - memory locally, postgres with the Azure queue, anything else rejected")
 
 
+def test_postgres_claim_reopens_only_a_failed_review():
+    from app.jobs.dedupe import INSERT_REVIEW_SQL
+
+    assert "DO UPDATE" in INSERT_REVIEW_SQL and "WHERE reviews.status = 'failed'" in INSERT_REVIEW_SQL
+    print("OK - a redelivery retries a failed review; queued, running or posted ones stay duplicates")
+
+
 if __name__ == "__main__":
     test_claim_once_then_duplicate_then_release()
     test_different_sha_is_a_different_key()

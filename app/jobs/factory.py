@@ -2,6 +2,7 @@ import os
 
 from app.jobs.dedupe import DedupeStore, InMemoryDedupeStore, PostgresDedupeStore
 from app.jobs.queue import AzureStorageJobQueue, InMemoryJobQueue, JobQueue
+from app.jobs.review_status import InMemoryReviewStatusStore, PostgresReviewStatusStore, ReviewStatusStore
 
 
 DEFAULT_QUEUE_NAME = "review-jobs"
@@ -69,15 +70,26 @@ def _dedupe_backend() -> str:
     return backend
 
 
-# Returns the dedupe store; the postgres one first brings the schema up to date.
-def build_dedupe() -> DedupeStore:
-    if _dedupe_backend() == "memory":
-        return InMemoryDedupeStore()
-
+# A Postgres pool on an up-to-date schema.
+def _migrated_pool():
     from db.migration_runner import apply_migrations
     from db.postgres import build_pool
 
     pool = build_pool()
     with pool.connection() as connection:
         apply_migrations(connection)
-    return PostgresDedupeStore(pool)
+    return pool
+
+
+# Returns the dedupe store; the postgres one first brings the schema up to date.
+def build_dedupe() -> DedupeStore:
+    if _dedupe_backend() == "memory":
+        return InMemoryDedupeStore()
+    return PostgresDedupeStore(_migrated_pool())
+
+
+# The worker's review status store: same backend as the dedupe, since both live in the reviews table.
+def build_review_status() -> ReviewStatusStore:
+    if _dedupe_backend() == "memory":
+        return InMemoryReviewStatusStore()
+    return PostgresReviewStatusStore(_migrated_pool())

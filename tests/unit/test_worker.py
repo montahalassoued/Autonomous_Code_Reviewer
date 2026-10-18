@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 from app.jobs.models import ReviewJob
 from app.jobs.queue import InMemoryJobQueue
+from app.jobs.review_status import InMemoryReviewStatusStore, ReviewStatus
 from app.worker import process_one, review_pull_request, run_forever
 from tools.github_tools import SUMMARY_MARKER, changed_files_in_diff, upsert_summary_comment
 
@@ -96,12 +97,13 @@ def test_run_forever_stops_when_event_is_set():
 def test_review_pull_request_runs_graph_and_upserts(monkeypatch):
     posted = []
     monkeypatch.setattr("app.worker.get_pr_diff", lambda repo, pr: "the diff")
+    monkeypatch.setattr("app.worker.get_pull_request_head", lambda repo, pr: ("open", "abc123"))
     monkeypatch.setattr("app.worker.upsert_summary_comment", lambda repo, pr, md: posted.append((repo, pr, md)))
     graph = MagicMock()
     graph.invoke.return_value = {"final_review_markdown": "# Review"}
     job = ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123")
 
-    review_pull_request(graph, job)
+    review_pull_request(graph, job, InMemoryReviewStatusStore())
 
     state = graph.invoke.call_args.args[0]
     assert state["pr_diff"] == "the diff" and state["pr_number"] == 7
@@ -184,6 +186,98 @@ def test_changed_files_are_read_from_the_diff_headers():
 
     assert changed_files_in_diff(diff) == ["app/x.py"]
     print("OK - a removed line starting with '--' is not mistaken for a file")
+
+
+# Patches GitHub for review_pull_request: each call to the head lookup returns the next (state, sha).
+def fake_review_github(monkeypatch, heads: list[tuple[str, str]]) -> list:
+    posted: list = []
+    answers = iter(heads)
+    monkeypatch.setattr("app.worker.get_pull_request_head", lambda repo, pr: next(answers))
+    monkeypatch.setattr("app.worker.get_pr_diff", lambda repo, pr: "diff --git a/app/x.py b/app/x.py\n+x")
+    monkeypatch.setattr("app.worker.upsert_summary_comment", lambda repo, pr, md: posted.append(md))
+    return posted
+
+
+def finished_graph(failed_agents: list[str] | None = None) -> MagicMock:
+    graph = MagicMock()
+    graph.invoke.return_value = {"final_review_markdown": "# Review", "failed_agents": failed_agents or []}
+    return graph
+
+
+def test_a_superseded_commit_is_skipped_before_any_llm_call(monkeypatch):
+    posted = fake_review_github(monkeypatch, [("open", "newer-sha")])
+    store, graph = InMemoryReviewStatusStore(), finished_graph()
+    job = ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123")
+
+    review_pull_request(graph, job, store)
+
+    graph.invoke.assert_not_called()
+    assert posted == [] and store.statuses[job.dedupe_key] == ReviewStatus("skipped", reason="superseded")
+    print("OK - an old commit costs no LLM call and posts nothing")
+
+
+def test_a_closed_pull_request_is_skipped(monkeypatch):
+    fake_review_github(monkeypatch, [("closed", "abc123")])
+    store = InMemoryReviewStatusStore()
+    job = ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123")
+
+    review_pull_request(finished_graph(), job, store)
+
+    assert store.statuses[job.dedupe_key].reason == "closed"
+    print("OK - a closed or merged PR is not reviewed")
+
+
+def test_a_push_during_the_review_drops_the_result(monkeypatch):
+    posted = fake_review_github(monkeypatch, [("open", "abc123"), ("open", "newer-sha")])
+    store = InMemoryReviewStatusStore()
+    job = ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123")
+
+    review_pull_request(finished_graph(), job, store)
+
+    assert posted == [], "the review of the older commit must not overwrite the newer one"
+    assert store.statuses[job.dedupe_key].status == "skipped"
+    print("OK - the head is checked again just before posting")
+
+
+def test_a_posted_review_records_latency_and_missing_categories(monkeypatch):
+    posted = fake_review_github(monkeypatch, [("open", "abc123"), ("open", "abc123")])
+    store = InMemoryReviewStatusStore()
+    job = ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123")
+
+    review_pull_request(finished_graph(failed_agents=["logic"]), job, store)
+
+    status = store.statuses[job.dedupe_key]
+    assert posted == ["# Review"] and status.status == "posted"
+    assert status.missing_categories == ("logic",) and status.latency_ms >= 0
+    print("OK - posted, with the partial categories and the latency")
+
+
+def test_a_dead_lettered_job_is_recorded_as_failed_with_a_redacted_reason(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_" + "k" * 30)
+    queue, clock, job = make_queue_with_job()
+    store = InMemoryReviewStatusStore()
+
+    def failing_review(_job):
+        raise RuntimeError("Groq said no for key gsk_" + "k" * 30)
+
+    for _ in range(3):
+        process_one(queue, failing_review, max_attempts=3, visibility_timeout_s=VISIBILITY_S, status_store=store)
+        clock.now += VISIBILITY_S + 1
+
+    status = store.statuses[job.dedupe_key]
+    assert status.status == "failed" and status.reason.startswith("RuntimeError: Groq said no")
+    assert "k" * 30 not in status.reason, "the key is redacted before it reaches Postgres"
+    print("OK - the third failure marks the review failed, without leaking the key")
+
+
+def test_a_failure_below_the_cap_is_not_marked_failed():
+    queue, _clock, job = make_queue_with_job()
+    store = InMemoryReviewStatusStore()
+
+    process_one(queue, lambda _job: 1 / 0, max_attempts=3, visibility_timeout_s=VISIBILITY_S, status_store=store)
+
+    assert job.dedupe_key not in store.statuses, "it will be retried, so it is not failed yet"
+    print("OK - only the last attempt records a failure")
 
 
 if __name__ == "__main__":
