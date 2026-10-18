@@ -27,7 +27,7 @@ These rules override any skill or subagent instruction that says otherwise.
 ```text
 app/        api/ (HTTP routers) · jobs/ (queue, dedupe) · main.py (API) · worker.py · bootstrap.py
 review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · agents/ (agent_runner.py, prompt_assembler.py, prompts/ shared, tools/ shared, one folder per agent: security/ logic/ quality/ with agent.py, prompts/*.md, rules.py, examples.json, tools/ (toolset.py + one file per own tool))
-rag/        ast_parser.py (tree-sitter) · knowledge_graph.py (NetworkX call graph for the agent tools) · ingestion.py (clone + parse + graph); becomes the Postgres indexer in Phase 4
+rag/        Postgres indexer: file_classifier · symbol_extractor · call_resolver · code_indexer (CLI) · index_writer; legacy ast_parser · knowledge_graph · ingestion (NetworkX graph the agent tools read until they use Postgres)
 tools/      external service clients (GitHub)       db/      postgres.py · migration_runner.py · migrations/*.sql
 eval/       LLM benchmark, datasets, results         infra/   Azure setup
 tests/      unit/ (offline, CI) · integration/ (real APIs, manual) · conftest.py

@@ -25,6 +25,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - psycopg 3 + numbered SQL migrations over SQLAlchemy + Alembic: graph joins read best as SQL; seven tables need no ORM
 - Drop the legacy semantic retrieval before an A/B eval: it was never measured and known-buggy; agents use diff + tools until the context builder (supersedes "delete only after the eval")
 - Schema fixed before its first use over a 002 ALTER migration: `findings` mirrors `Finding`, `symbols.name` for call resolution, dead columns dropped
+- Static call resolution that stores only provable edges over bare-name matching or a type checker: no false callers in the context, library calls and locals skipped
 
 **Superseded by the structural-context design (kept for history):**
 
@@ -391,3 +392,29 @@ Trade-off: the fingerprint has no line, so two findings of the same rule in one
 function share it and the second is hidden on later commits (worst for the
 `other` rule); accepted for stability. `repos.github_id` (survives a repo
 rename) is deferred to multi-repo support.
+
+## Why the indexer resolves calls statically and stores only what it can prove
+
+The `edges` table feeds the context builder: a false "caller" wastes the token
+budget and misleads the agents, a missing one is listed as "Not verifiable".
+`rag/call_resolver.py` therefore links a call only when one target is certain,
+in the documented order: `self`/`cls` methods (also on repo base classes), the
+imported name (relative imports, aliases, re-exports through `__init__.py`, a
+`src/` layout), the same file, then a name unique in the repo. Two candidates
+give an `ambiguous` row, none gives `not_found`. Calls into libraries, builtins
+and local names (parameters, assigned variables, nested defs) are neither edges
+nor rows: they can never be repo symbols, and storing them would flag a "gap" on
+nearly every change. A method missing on a class with a base we can't follow
+(`Model`, `Generic[T]`) is skipped for the same reason. `obj.method()` on a
+variable is not resolved, since its type needs inference. Calls inside a nested
+def count for the enclosing function. A file with a syntax
+error or not in UTF-8 keeps its `files` row with a `parse_error` and no symbols.
+Phase 4 writes a full index (delete the repo's files, cascade, insert) in one
+transaction with `indexed_sha` written last; the incremental upsert that keeps
+symbol ids is Phase 6. The old `rag/ast_parser.py` + NetworkX graph stays until
+the agent tools read Postgres, so both parsers exist for a while. Alternatives:
+the bare-name matching of `rag/knowledge_graph.py` (links every same-named
+function, V6), or a type checker such as pyright (precise, but a Node runtime
+and seconds per file). Trade-off: lower recall on dynamic code, which the
+context marks as not verifiable instead of guessing. On this repo: 97 Python
+files, 610 symbols, 1106 edges, 3 unresolved calls, 0.3 s.
