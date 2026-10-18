@@ -1,3 +1,4 @@
+from review.injection_detector import detect_injection
 from review.output_sanitizer import COMMENT_BUDGET_CHARS, code_block, escape_markdown_text, inline_code
 from review.state import ReviewState, Finding
 
@@ -162,23 +163,34 @@ def _findings_within_budget(findings: list[Finding], changed_files: frozenset[st
     return kept
 
 
+# Deterministic warning: lines of the diff that look written for the AI reviewer, so a human checks them.
+def _format_injection_note(diff: str) -> str | None:
+    signals = detect_injection(diff)
+    if not signals:
+        return None
+    lines = [
+        "⚠️ **Possible prompt injection.** These added lines look written for an AI reviewer. "
+        "They were treated as data, but check them and read this review with care:"
+    ]
+    lines += [
+        f"- {inline_code(f'{signal.file_path}:{signal.line_number}')} ({signal.kind.replace('_', ' ')}): {inline_code(signal.excerpt)}"
+        for signal in signals
+    ]
+    return "\n".join(lines)
+
+
 # LangGraph node: findings -> final review comment.
 def synthesizer_node(state: ReviewState) -> dict:
     findings = state["findings"]
-    size_note = _format_size_note(state["pr_diff"])
+    notes = [note for note in (_format_injection_note(state["pr_diff"]), _format_size_note(state["pr_diff"])) if note]
 
     if not findings:
-        sections = [REVIEW_HEADING, "No issues found by the security, logic and code quality reviews. Nice work! ✅"]
-        if size_note:
-            sections.append(size_note)
+        sections = [REVIEW_HEADING, "No issues found by the security, logic and code quality reviews. Nice work! ✅", *notes]
         return {"final_review_markdown": "\n\n".join(sections) + "\n"}
 
     changed_files = frozenset(state.get("changed_files") or ())
     groups = _group_by_category(findings)
-    sections = [REVIEW_HEADING, _format_verdict(findings)]
-    if size_note:
-        sections.append(size_note)
-    sections.append(_format_summary_table(groups))
+    sections = [REVIEW_HEADING, _format_verdict(findings), *notes, _format_summary_table(groups)]
 
     # The verdict and the table count every finding; only the detailed sections are budgeted.
     budget = COMMENT_BUDGET_CHARS - sum(len(section) for section in sections) - SECTION_OVERHEAD_CHARS * len(groups)

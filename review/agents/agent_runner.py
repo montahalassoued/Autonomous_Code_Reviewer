@@ -9,6 +9,7 @@ from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
 from review.agents.tools.tool_definition import Tool, ToolContext, execute_tool_call
 from review.output_sanitizer import sanitize_finding
 from review.secret_redactor import environment_secret_values, redact_secrets
+from review.untrusted_input import CONTEXT_LABEL, DIFF_LABEL, wrap_untrusted
 from review.state import ReviewState, Finding
 
 
@@ -125,9 +126,14 @@ def to_finding(raw: dict, spec: AgentSpec) -> Finding | None:
     )
 
 
-# Fills the agent's prompt template from the review state.
+# Fills the agent's prompt template; the diff and the context are wrapped as untrusted data, our own note is not.
 def build_prompt(spec: AgentSpec, state: ReviewState) -> str:
-    return fill_prompt(spec.prompt_template, state["pr_diff"], state.get("review_context") or EMPTY_CONTEXT_SUMMARY)
+    context = state.get("review_context")
+    return fill_prompt(
+        spec.prompt_template,
+        wrap_untrusted(state["pr_diff"], DIFF_LABEL),
+        wrap_untrusted(context, CONTEXT_LABEL) if context else EMPTY_CONTEXT_SUMMARY,
+    )
 
 
 def _ask_model(client: Groq, messages: list[dict], tool_schemas: list[dict], tool_choice: str):

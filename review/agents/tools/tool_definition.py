@@ -1,9 +1,10 @@
 import json
 import logging
-import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal, get_args
+
+from review.untrusted_input import TOOL_OUTPUT_LABEL, wrap_untrusted
 
 
 logger = logging.getLogger(__name__)
@@ -45,9 +46,8 @@ class Tool:
 
 
 # Repo content is untrusted: the nonce stops a repo file from faking the end of the block.
-def wrap_untrusted(text: str) -> str:
-    nonce = secrets.token_hex(8)
-    return f"<<<TOOL_OUTPUT {nonce}>>>\n{text}\n<<<END_TOOL_OUTPUT {nonce}>>>"
+def _wrap_tool_output(text: str) -> str:
+    return wrap_untrusted(text, TOOL_OUTPUT_LABEL)
 
 
 def _truncate(text: str) -> str:
@@ -60,7 +60,7 @@ def _truncate(text: str) -> str:
 def execute_tool_call(tools: dict[str, Tool], name: str, raw_arguments: str, context: ToolContext) -> str:
     tool = tools.get(name)
     if tool is None:
-        return wrap_untrusted(f"Error: unknown tool '{name}'. Available: {', '.join(sorted(tools))}.")
+        return _wrap_tool_output(f"Error: unknown tool '{name}'. Available: {', '.join(sorted(tools))}.")
     try:
         arguments = json.loads(raw_arguments or "{}")
         if not isinstance(arguments, dict):
@@ -69,4 +69,4 @@ def execute_tool_call(tools: dict[str, Tool], name: str, raw_arguments: str, con
     except Exception as error:  # a tool failure must not crash the review
         logger.warning("Tool %s failed: %s", name, error)
         output = f"Error: {error}"
-    return wrap_untrusted(_truncate(output))
+    return _wrap_tool_output(_truncate(output))
