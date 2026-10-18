@@ -61,8 +61,9 @@ def build_groq_client() -> Groq:
 def parse_findings(raw_output: str) -> list[dict]:
     cleaned = raw_output.strip().strip("`").removeprefix("json").strip()
 
+    # strict=False keeps raw newlines in strings (multi-line code in a suggestion); the sanitizer drops other controls.
     try:
-        parsed = json.loads(cleaned)
+        parsed = json.loads(cleaned, strict=False)
         if isinstance(parsed, list):
             return [item for item in parsed if isinstance(item, dict)]
     except json.JSONDecodeError:
@@ -74,7 +75,7 @@ def parse_findings(raw_output: str) -> list[dict]:
     end = cleaned.rfind("]")
     if start != -1 and end > start:
         try:
-            parsed = json.loads(cleaned[start:end + 1])
+            parsed = json.loads(cleaned[start:end + 1], strict=False)
             if isinstance(parsed, list):
                 return [item for item in parsed if isinstance(item, dict)]
         except json.JSONDecodeError:

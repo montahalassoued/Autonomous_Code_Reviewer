@@ -27,7 +27,7 @@ def is_json_array(text: str) -> bool:
         candidates.append(cleaned[start:end + 1])
     for candidate in candidates:
         try:
-            if isinstance(json.loads(candidate), list):
+            if isinstance(json.loads(candidate, strict=False), list):
                 return True
         except json.JSONDecodeError:
             continue

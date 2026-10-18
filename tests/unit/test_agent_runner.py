@@ -65,6 +65,15 @@ def test_parse_findings_handles_fences_and_prose():
     print("OK - fenced JSON and JSON wrapped in prose both parse")
 
 
+def test_parse_findings_keeps_raw_newlines_inside_strings():
+    suggestion = "Check the role:\n```python\nif not user.is_staff:\n    raise HTTPException(403)\n```"
+    escaped = json.dumps([{**VALID_RAW, "suggestion": suggestion}])
+    raw_newlines = escaped.replace("\\n", "\n")
+
+    assert parse_findings(raw_newlines)[0]["suggestion"] == suggestion, "a code block in a suggestion must not drop the answer"
+    print("OK - a multi-line suggestion written with raw newlines still parses")
+
+
 def test_parse_findings_degrades_to_empty_list():
     assert parse_findings("") == []
     assert parse_findings("not json at all") == []
