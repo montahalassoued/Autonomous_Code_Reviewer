@@ -6,7 +6,7 @@ Outputs: A running review service (FastAPI) that receives GitHub webhooks and po
 
 # autonomous-code-reviewer
 
-An AI code reviewer that runs entirely through GitHub. You push code or open a pull request, and a multi-agent pipeline (LangGraph + RAG over your codebase) posts a review back on GitHub, grouped by category, with a recommendation for every finding.
+An AI code reviewer that runs entirely through GitHub. You push code or open a pull request, and a multi-agent pipeline (LangGraph, with read-only tools over your codebase) posts a review back on GitHub, grouped by category, with a recommendation for every finding.
 
 ## Architecture
 
@@ -18,10 +18,11 @@ An AI code reviewer that runs entirely through GitHub. You push code or open a p
         │
         ▼
  LangGraph review pipeline
-   RAG context  ─►  review agents (parallel)  ─►  synthesizer
-   (code index:      security · logic ·            (findings +
-    parse, graph,    code quality                    recommendations)
-    search)
+   review agents (parallel)  ─►  synthesizer
+   security · logic ·            (findings +
+   code quality                   recommendations)
+   (read-only tools over the
+    checkout and call graph)
         │
         ▼
  GitHub (review comments on the PR or commit)
@@ -35,7 +36,7 @@ An AI code reviewer that runs entirely through GitHub. You push code or open a p
 | LLMs | Groq (Gemini only in the model benchmark) |
 | Code context | tree-sitter, NetworkX call graph read by bounded agent tools; Postgres code index planned |
 | API | FastAPI + GitHub webhooks (PyGithub) |
-| Tracing & LLM eval | Langfuse |
+| Tracing & LLM eval | Langfuse (planned, Phase 3) |
 | Deploy | Docker, Azure Container Apps |
 | CI/CD | GitHub Actions |
 

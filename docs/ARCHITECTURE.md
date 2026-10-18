@@ -1,7 +1,7 @@
 # Architecture
 
 **File purpose:** the target design of the reviewer: components, workflows, the code index schema, context assembly and failure handling.
-**Status:** target design (2026-10-14). The code today still runs the semantic RAG pipeline described in [RAG.md](RAG.md); [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) gives the order of work and [PROGRESS.md](PROGRESS.md) what is done.
+**Status:** target design (2026-10-14). The code today gives the agents the diff plus read-only tools (see [RAG.md](RAG.md)); the semantic retrieval was removed; [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) gives the order of work and [PROGRESS.md](PROGRESS.md) what is done.
 
 ## Core idea
 
@@ -14,7 +14,7 @@ The diff is the input under review. **Context** is what the agents need from the
 | Webhook API | Verify the HMAC signature, apply event rules, insert the `reviews` row (dedupe), enqueue a job, answer 202 | `app/api/webhook.py`, `app/main.py` |
 | Job queue | Durable hand-off between API and worker (Azure Storage Queue, visibility timeout, poison queue) | `app/jobs/` |
 | Worker | Runs one review at a time, then updates the index on pushes to `main` | `app/worker.py` |
-| Code index | Postgres: a derived, structural map of `main` (symbols, edges, reviews, findings). Git stays the source of truth | `db/` (planned) |
+| Code index | Postgres: a derived, structural map of `main` (symbols, edges, reviews, findings). Git stays the source of truth | `db/` (schema + migration runner; only `repos` and `reviews` are written today) |
 | Indexer | tree-sitter parse, symbol extraction, call resolution, test linking. No LLM | `rag/` → planned indexing modules |
 | Analysis | Triage, symbol diff, context builder | `analysis/` (planned) |
 | Review graph | LangGraph: build_context → optional context subagent → 3 agents → synthesizer | `review/` (`review/agents/` for the 3 agents) |

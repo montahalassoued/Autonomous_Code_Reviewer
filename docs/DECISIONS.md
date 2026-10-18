@@ -2,6 +2,8 @@
 
 Every significant design choice, and why it was made. Add new entries with the `log-decision` skill.
 
+Older entries mention five domain agents, a retriever and Chroma: the reasoning still holds, but the graph now has three agents and no retriever (see the later entries).
+
 ## At a glance
 
 **Current:**
@@ -100,10 +102,9 @@ real function boundary, never an arbitrary character offset.
 The no-op `supervisor` ran after `join_agents` and sent the graph back
 to the agents whenever `findings` was empty, so a clean PR looped
 until LangGraph's recursion limit (re-calling all 5 agents each time)
-and no review was posted. The graph is now `START -> retriever (retry
-while score < QUALITY_THRESHOLD and attempts < MAX_RETRIEVAL_ATTEMPTS)
--> 5 agents -> join_agents -> synthesizer -> END`, with both limits
-read from `review/retriever.py` instead of being hardcoded. A fixed
+and no review was posted. The graph is now `START -> security | logic |
+quality -> join_agents -> synthesizer -> END` (the retriever and its
+retry loop were removed later with the semantic retrieval). A fixed
 supervisor was the alternative, but it had no real decision to make.
 Validated in tests/unit/test_pipeline_offline.py.
 
@@ -117,10 +118,12 @@ name in one file ("#2", e.g. a property setter). Graph nodes, Chroma
 ids and `all_ids` all use this id; call resolution still uses the
 bare name, since a call site only knows `login(...)`. Ingestion
 deletes ids no longer produced, so old-format ids don't linger.
+Chroma was removed since; the id is now used by the call-graph nodes.
 Validated in tests/unit/test_ast_parser_identity.py.
 
 ## Why the reranker scores context + code over the chunk name
 
+Superseded: the reranker was removed with the semantic retrieval.
 Scoring only `"file::function_name"` gave the cross-encoder nothing to
 judge relevance on. It now scores the context sentence plus the code
 (capped at `MAX_RERANK_CODE_CHARS = 2000`, since the model truncates

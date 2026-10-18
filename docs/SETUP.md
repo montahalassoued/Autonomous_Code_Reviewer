@@ -22,6 +22,8 @@ Step-by-step for every account.
 
 ## 3) Langfuse (tracing + LLM evaluation, open source)
 
+Planned for Phase 3: no code sends traces yet, so you can skip this section for now.
+
 1. Pick where Langfuse runs:
    - **Langfuse Cloud:** sign up at https://cloud.langfuse.com. This is the easiest option.
    - **Self-hosted:** run Langfuse with its official Docker Compose setup (see the Langfuse docs, "Self-hosting").

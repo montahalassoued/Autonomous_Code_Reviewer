@@ -28,6 +28,8 @@ Full description: [ARCHITECTURE.md](ARCHITECTURE.md). In short:
 
 ## Verified problems the plan fixes
 
+Status (2026-10-18): V1, V2 and V8 were fixed in Phase 0. V3, V4 and V7 disappeared with the semantic retrieval, and the files they name no longer exist. V5 is fixed except `self.x()` calls, V6 is still open (Phase 4), V10 is fixed except the repo guard, and V12 is fixed (offline graph tests).
+
 | # | Problem | Where |
 |---|---|---|
 | V1 | A clean PR (no findings) loops back to the agents until the recursion limit, and no comment is posted | `review/graph.py:79-80`, `:161` |
@@ -45,7 +47,9 @@ Full description: [ARCHITECTURE.md](ARCHITECTURE.md). In short:
 
 Every phase leaves the system working. The fast offline tests plus that phase's new tests must pass before moving on.
 
-### Phase 0: Make the current pipeline correct (S)
+### Phase 0: Make the current pipeline correct (S), done
+
+Kept for history: the retriever, Chroma and reranker items below refer to code removed since.
 
 **Changes:**
 - **Graph routing** (`review/graph.py`)
@@ -105,14 +109,14 @@ Every phase leaves the system working. The fast offline tests plus that phase's 
 ### Phase 2: Webhook reliability for PR events (S-M, can run in parallel with Phase 1)
 
 **Done** (durable job pipeline, `feat/durable-job-pipeline`):
-- Head SHA and `X-GitHub-Delivery` in the job, dedupe claim on (repo, head_sha, target) in Azure Table Storage.
+- Head SHA and `X-GitHub-Delivery` in the job, dedupe claim on (repo, head_sha, target), first in Azure Table Storage, now in the Postgres `reviews` table.
 - Durable Storage Queue + separate worker with logging, retries and a poison queue (instead of the planned in-memory `app/review_registry.py`).
 - Idempotent summary upsert by marker.
 
 **Remaining:**
 - Repo guard.
 - `get_pr_head_sha()` for the stale check before posting.
-- The Table dedupe is replaced by the `reviews` table in Phase 4 (same key, plus status and metrics).
+- The `reviews` status lifecycle (queued → running → posted | failed); today a row stays `queued`.
 
 **Tests:** duplicate delivery runs once (done), a wrong repo is ignored, a stale SHA isn't posted, an exception gets logged (done).
 

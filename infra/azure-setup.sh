@@ -406,7 +406,7 @@ apply_yaml "$WORKER_APP_NAME" "$WORKER_CPU" "$WORKER_MEMORY"
 
 # Optional, for later: scale the worker with queue length using KEDA. Leave it
 # commented while min=max=1. With min 0 every cold start re-clones and
-# re-embeds the repo (minutes + API quota) before the first job runs, so only
+# re-parses the repo (minutes on a large repo) before the first job runs, so only
 # do this after the index is persisted or you accept that delay.
 #   az containerapp update --name "$WORKER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
 #     --min-replicas 1 --max-replicas 3 \

@@ -113,7 +113,7 @@ export LANGFUSE_SECRET_KEY='...'
 export LANGFUSE_HOST='https://cloud.langfuse.com'   # or your self-hosted Langfuse URL
 ```
 
-If `TARGET_REPO_URL` is a private repo, the clone needs credentials; check how `clone_repository` in `rag/ingestion.py` handles that before relying on it.
+If `TARGET_REPO_URL` is a private repo, the clone needs credentials, and `clone_repository` in `rag/ingestion.py` has no credential handling yet: use a public repo for now.
 
 Then run the script, pausing between steps so you can read the output:
 
