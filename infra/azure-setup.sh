@@ -24,8 +24,10 @@
 # Usage (Azure Cloud Shell or Git Bash, after `az login`):
 #   1. Choose ACR_NAME, STORAGE_ACCOUNT_NAME, GITHUB_REPO (env vars or edit CONFIG).
 #   2. Export the app secrets in your shell (never put them in this file):
-#        # API needs only:
+#        # API needs (the token checks that PR authors are collaborators):
 #        export GITHUB_WEBHOOK_SECRET='...'
+#        export GITHUB_TOKEN='...'
+#        export ALLOWED_REPOS='owner/repo'          # repos the webhook accepts, comma-separated
 #        # Worker needs:
 #        export TARGET_REPO_URL='https://github.com/owner/repo.git'
 #        export GROQ_API_KEY='...'
@@ -112,7 +114,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 # App secrets are read from YOUR shell environment, split per app. Required ones
 # must be set, because Container Apps refuses empty secret values.
-API_REQUIRED_SECRETS=(GITHUB_WEBHOOK_SECRET)
+API_REQUIRED_SECRETS=(GITHUB_WEBHOOK_SECRET GITHUB_TOKEN)
 WORKER_REQUIRED_SECRETS=(TARGET_REPO_URL GROQ_API_KEY GITHUB_TOKEN)
 WORKER_OPTIONAL_SECRETS=(LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY)
 missing=0
@@ -123,6 +125,7 @@ for v in "${WORKER_OPTIONAL_SECRETS[@]}"; do
   if [ -z "${!v:-}" ]; then echo "NOTE: optional variable $v is empty; it will be skipped."; fi
 done
 [ "$missing" = "0" ] || die "Export the missing variables listed above, then re-run."
+[ -n "${ALLOWED_REPOS:-}" ] || die "Export ALLOWED_REPOS='owner/repo' (the webhook ignores every other repo)."
 
 # Env var NAME -> Container Apps secret name (lowercase, dashes; secret names cannot contain '_').
 secret_name() { echo "$1" | tr 'A-Z_' 'a-z-'; }
@@ -367,8 +370,8 @@ ensure_app "$APP_NAME" "$API_CPU" "$API_MEMORY" \
   --min-replicas "$API_MIN_REPLICAS" --max-replicas "$API_MAX_REPLICAS"
 
 # Old single-container layout stored the LLM keys on this app. The API no longer
-# needs them; drop them so they are not kept in two places.
-for stale in TARGET_REPO_URL GROQ_API_KEY GOOGLE_API_KEY VOYAGE_API_KEY GITHUB_TOKEN LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY; do
+# needs them; drop them so they are not kept in two places (GITHUB_TOKEN stays: author check).
+for stale in TARGET_REPO_URL GROQ_API_KEY GOOGLE_API_KEY VOYAGE_API_KEY LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY; do
   sname="$(secret_name "$stale")"
   if az containerapp secret list --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
         --query "[?name=='$sname'].name" -o tsv | grep -q .; then
@@ -378,7 +381,7 @@ for stale in TARGET_REPO_URL GROQ_API_KEY GOOGLE_API_KEY VOYAGE_API_KEY GITHUB_T
 done
 
 YAML_KIND="api"
-YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure"
+YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure" "ALLOWED_REPOS=$ALLOWED_REPOS"
   "AZURE_STORAGE_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" "AZURE_CLIENT_ID=$IDENTITY_CLIENT_ID")
 # The YAML update first (it removes the old secretRef env vars), then the secrets
 # can be deleted without leaving a dangling reference.

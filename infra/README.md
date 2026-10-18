@@ -56,7 +56,7 @@ A job is deleted from the queue only after it succeeded. If the worker crashes o
 - **0.5 vCPU / 1 GiB.** The API only verifies the signature, inserts one `reviews` row in Postgres, enqueues and returns 202. It no longer clones or ingests anything, so it starts in seconds and needs little memory.
 - **Min replicas = 1 (recommended), max 2.** GitHub gives up on a webhook after about 10 seconds. Scale-to-zero is now technically possible because startup is fast, but a cold start still includes allocating a replica, pulling the image and starting Python plus the Azure SDKs. That can take several seconds, close enough to the limit to fail some deliveries, and a failed delivery means a PR that silently never gets reviewed. At 0.5 vCPU / 1Gi the always-on cost is small, so we keep 1. The API is stateless (dedupe is in Postgres, the queue in Storage), so a second replica is safe.
 - **Startup probe** is short (5s initial delay, 10s period, 6 failures = about 65s) because the app listens almost immediately. Liveness and readiness use `/health`.
-- Env vars: `JOBS_BACKEND=azure`, `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_CLIENT_ID` (see below), and secret `GITHUB_WEBHOOK_SECRET`. It no longer needs the LLM keys, `GITHUB_TOKEN` or `TARGET_REPO_URL`; re-running the script removes those stale secrets from the API app.
+- Env vars: `JOBS_BACKEND=azure`, `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_CLIENT_ID` (see below), `ALLOWED_REPOS` (export it before running the script), and secrets `GITHUB_WEBHOOK_SECRET` and `GITHUB_TOKEN` (the webhook asks GitHub whether the PR author is a collaborator). It no longer needs the LLM keys or `TARGET_REPO_URL`; re-running the script removes those stale secrets from the API app.
 
 **Worker (`WORKER_APP_NAME`, default `ca-code-reviewer-worker`)**
 
@@ -103,6 +103,7 @@ Put the secrets in your shell (they are only read from the environment, never wr
 ```bash
 # API
 export GITHUB_WEBHOOK_SECRET='choose-a-long-random-string'
+export ALLOWED_REPOS='owner/repo'   # the webhook ignores every other repo
 # Worker
 export TARGET_REPO_URL='https://github.com/owner/repo-to-review.git'
 export GROQ_API_KEY='...'
