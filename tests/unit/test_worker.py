@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 from app.jobs.models import ReviewJob
 from app.jobs.queue import InMemoryJobQueue
 from app.worker import process_one, review_pull_request, run_forever
-from tools.github_tools import SUMMARY_MARKER, upsert_summary_comment
+from tools.github_tools import SUMMARY_MARKER, changed_files_in_diff, upsert_summary_comment
 
 
 VISIBILITY_S = 60
@@ -156,6 +156,34 @@ def test_upsert_ignores_marked_comment_from_other_user(monkeypatch):
     impostor.edit.assert_not_called()
     pull_request.create_issue_comment.assert_called_once()
     print("OK - a marker copied by another user is ignored")
+
+
+def test_upsert_ignores_bot_comment_with_marker_not_at_the_start(monkeypatch):
+    quoted = make_comment(f"I pasted {SUMMARY_MARKER} here", "review-bot")
+    pull_request = fake_github(monkeypatch, [quoted])
+
+    upsert_summary_comment("owner/repo", 7, "new review")
+
+    quoted.edit.assert_not_called()
+    pull_request.create_issue_comment.assert_called_once()
+    print("OK - only a comment that starts with the marker is edited")
+
+
+def test_upsert_replaces_an_oversized_body_instead_of_failing(monkeypatch):
+    pull_request = fake_github(monkeypatch, [])
+
+    upsert_summary_comment("owner/repo", 7, "x" * 70_000)
+
+    body = pull_request.create_issue_comment.call_args.args[0]
+    assert body.startswith(SUMMARY_MARKER) and len(body) < 1_000
+    print("OK - no 422 retry loop on a huge review")
+
+
+def test_changed_files_are_read_from_the_diff_headers():
+    diff = "diff --git a/app/x.py b/app/x.py\n--- a/app/x.py\n+++ b/app/x.py\n@@ -1 +1 @@\n--- not a header\n"
+
+    assert changed_files_in_diff(diff) == ["app/x.py"]
+    print("OK - a removed line starting with '--' is not mistaken for a file")
 
 
 if __name__ == "__main__":

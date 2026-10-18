@@ -7,6 +7,8 @@ from groq import Groq
 
 from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
 from review.agents.tools.tool_definition import Tool, ToolContext, execute_tool_call
+from review.output_sanitizer import sanitize_finding
+from review.secret_redactor import environment_secret_values, redact_secrets
 from review.state import ReviewState, Finding
 
 
@@ -18,6 +20,9 @@ AGENT_TEMPERATURE = 0.1  # consistency over creativity for analysis
 DEFAULT_MAX_TOOL_CALLS = 3
 FINAL_ANSWER_REQUEST = "Tool call limit reached. Answer now with the JSON array only."
 VALID_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
+SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+# A flood of findings is noise or an injection; the most severe ones are kept.
+MAX_FINDINGS_PER_AGENT = 20
 REQUIRED_TEXT_FIELDS = ("file_path", "title", "description", "suggestion")
 VALID_CONFIDENCES = {"high", "medium", "low"}
 DEFAULT_CONFIDENCE = "medium"
@@ -178,12 +183,19 @@ def run_agent(spec: AgentSpec, state: ReviewState, client: Groq, tool_context: T
     raw_output = _converse(spec, build_prompt(spec, state), client, tool_context)
     raw_findings = parse_findings(raw_output)
 
+    known_secrets = environment_secret_values()
     findings = []
     for raw in raw_findings:
         finding = to_finding(raw, spec)
+        if finding is not None:
+            finding = sanitize_finding(finding, known_secrets)
         if finding is None:
-            logger.warning("Dropped invalid %s finding: %.200s", spec.name, json.dumps(raw, default=str))
+            # The raw output may quote a secret from the diff, so the log line is redacted too.
+            logger.warning("Dropped invalid %s finding: %.200s", spec.name, redact_secrets(json.dumps(raw, default=str), known_secrets))
             continue
         findings.append(finding)
 
+    if len(findings) > MAX_FINDINGS_PER_AGENT:
+        logger.warning("%s returned %d findings, keeping the %d most severe", spec.name, len(findings), MAX_FINDINGS_PER_AGENT)
+        findings = sorted(findings, key=lambda finding: SEVERITY_RANK[finding["severity"]])[:MAX_FINDINGS_PER_AGENT]
     return {"findings": findings}

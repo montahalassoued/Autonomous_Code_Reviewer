@@ -1,9 +1,12 @@
 import os
 from github import Github, Auth
 
+from review.output_sanitizer import fit_comment
+
 
 # Hidden HTML comment that tags the bot's summary so a retry can find and edit it.
 SUMMARY_MARKER = "<!-- acr:summary -->"
+DIFF_FILE_HEADER = "diff --git "
 
 
 # Reads GITHUB_TOKEN from the environment.
@@ -34,14 +37,22 @@ def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
     diff_parts = []
     for file in pull_request.get_files():
         if file.patch:  # binary files and some renames have no patch
-            diff_parts.append(f"--- {file.filename}\n{file.patch}")
+            name = file.filename
+            diff_parts.append(f"{DIFF_FILE_HEADER}a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n{file.patch}")
 
-    return "\n\n".join(diff_parts)
+    return "\n".join(diff_parts)
+
+
+# The files of a diff built by get_pr_diff; a patch line never starts with "diff --git".
+def changed_files_in_diff(diff: str) -> list[str]:
+    return [line.rsplit(" b/", 1)[-1] for line in diff.splitlines() if line.startswith(DIFF_FILE_HEADER)]
 
 
 # Creates the review summary comment, or edits it if one already exists.
 def upsert_summary_comment(repo_full_name: str, pr_number: int, markdown: str) -> None:
-    body = markdown if markdown.startswith(SUMMARY_MARKER) else f"{SUMMARY_MARKER}\n{markdown}"
+    body = fit_comment(markdown if markdown.startswith(SUMMARY_MARKER) else f"{SUMMARY_MARKER}\n{markdown}")
+    if not body.startswith(SUMMARY_MARKER):
+        body = f"{SUMMARY_MARKER}\n{body}"
 
     client = _build_github_client()
     repo = client.get_repo(repo_full_name)
@@ -49,7 +60,8 @@ def upsert_summary_comment(repo_full_name: str, pr_number: int, markdown: str) -
     bot_login = client.get_user().login
 
     for comment in pull_request.get_issue_comments():
-        if SUMMARY_MARKER in (comment.body or "") and comment.user.login == bot_login:
+        # Only a comment that starts with the marker is ours: LLM text quoting it elsewhere never matches.
+        if (comment.body or "").startswith(SUMMARY_MARKER + "\n") and comment.user.login == bot_login:
             comment.edit(body)
             return
 

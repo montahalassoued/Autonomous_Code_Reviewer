@@ -213,5 +213,25 @@ def test_agent_nodes_use_their_own_client_seam(monkeypatch):
     print("OK - each node calls its module's _build_groq_client and tags its own name")
 
 
+def test_findings_per_agent_are_capped_keeping_the_most_severe():
+    raws = [dict(VALID_RAW, severity="LOW", title=f"low {i}") for i in range(30)] + [dict(VALID_RAW, severity="CRITICAL")]
+
+    findings = run_agent(SECURITY, build_state(), FakeGroq(json.dumps(raws)))["findings"]
+
+    assert len(findings) == 20 and findings[0]["severity"] == "CRITICAL"
+    print("OK - a flood of findings is capped and the critical one survives")
+
+
+def test_findings_are_sanitized_and_malformed_paths_dropped(caplog):
+    token = "ghp_" + "R" * 36
+    raws = [dict(VALID_RAW, evidence=f"TOKEN = '{token}'"), dict(VALID_RAW, file_path="../../etc/passwd", title=token)]
+
+    findings = run_agent(SECURITY, build_state(), FakeGroq(json.dumps(raws)))["findings"]
+
+    assert len(findings) == 1 and token not in findings[0]["evidence"]
+    assert token not in caplog.text, "the dropped finding is logged with its secret redacted"
+    print("OK - secrets redacted in findings and logs, path traversal dropped")
+
+
 if __name__ == "__main__":
     print("Run under pytest: some tests rely on monkeypatch fixtures.")

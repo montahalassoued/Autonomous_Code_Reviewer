@@ -7,7 +7,7 @@ from typing import Callable
 from app.jobs.factory import build_queue
 from app.jobs.models import ReviewJob
 from app.jobs.queue import JobQueue
-from tools.github_tools import get_pr_diff, upsert_summary_comment
+from tools.github_tools import changed_files_in_diff, get_pr_diff, upsert_summary_comment
 
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def review_pull_request(compiled_graph, job: ReviewJob) -> None:
         "pr_number": job.pr_number,
         "repo_full_name": job.repo_full_name,
         "pr_diff": diff,
-        "changed_files": [],
+        "changed_files": changed_files_in_diff(diff),
         "review_context": "",
         "findings": [],
         "final_review_markdown": "",

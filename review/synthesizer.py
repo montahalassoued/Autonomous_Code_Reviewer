@@ -1,3 +1,4 @@
+from review.output_sanitizer import COMMENT_BUDGET_CHARS, code_block, escape_markdown_text, inline_code
 from review.state import ReviewState, Finding
 
 
@@ -39,6 +40,9 @@ SEVERITY_LABEL = {
 
 # Reviews get less thorough above ~400 changed lines (SmartBear / Google data).
 LARGE_PR_CHANGED_LINES = 400
+
+LABEL_ORDER = {"blocking": 0, "suggestion": 1, "nit": 2}
+SECTION_OVERHEAD_CHARS = 300  # category heading, separators and the nit fold
 
 
 # Sorts findings by severity, CRITICAL first and INFO last.
@@ -106,39 +110,56 @@ def _format_size_note(diff: str) -> str | None:
     )
 
 
-def _format_finding(finding: Finding) -> str:
+# Every LLM-written field is escaped for its place: heading, code span, prose or fenced block.
+def _format_finding(finding: Finding, changed_files: frozenset[str] = frozenset()) -> str:
     emoji = SEVERITY_EMOJI.get(finding["severity"], "⚪")
+    location = inline_code(f"{finding['file_path']}:{finding['line_number']}")
+    if changed_files and finding["file_path"] not in changed_files:
+        location += " (file not in this PR)"
     lines = [
-        f"#### {emoji} [{_label(finding)}] {finding['severity']} - {finding['title']}",
-        f"**Location:** `{finding['file_path']}:{finding['line_number']}` · **Confidence:** {finding.get('confidence', 'medium')}",
+        f"#### {emoji} [{_label(finding)}] {finding['severity']} - {escape_markdown_text(finding['title'], single_line=True)}",
+        f"**Location:** {location} · **Confidence:** {finding.get('confidence', 'medium')}",
         "",
-        finding["description"],
+        escape_markdown_text(finding["description"]),
     ]
     if finding["evidence"].strip():
-        lines += ["", "```", finding["evidence"], "```"]
-    lines += ["", f"**Suggestion:** {finding['suggestion']}"]
+        lines += ["", code_block(finding["evidence"])]
+    lines += ["", f"**Suggestion:** {escape_markdown_text(finding['suggestion'])}"]
     return "\n".join(lines)
 
 
-def _join_findings(findings: list[Finding]) -> str:
-    return "\n\n---\n\n".join(_format_finding(finding) for finding in findings)
+def _join_findings(findings: list[Finding], changed_files: frozenset[str]) -> str:
+    return "\n\n---\n\n".join(_format_finding(finding, changed_files) for finding in findings)
 
 
 # Category section: blocking issues and suggestions shown, nits folded so they don't bury them.
-def _format_category_section(category: str, findings: list[Finding]) -> str:
-    heading = f"### {_category_title(category)} ({len(findings)})"
+def _format_category_section(category: str, findings: list[Finding], changed_files: frozenset[str], total: int) -> str:
+    heading = f"### {_category_title(category)} ({total})"
     if not findings:
-        return f"{heading}\n\nNo issues found. ✅"
+        return f"{heading}\n\nNo issues found. ✅" if not total else f"{heading}\n\nNot shown: see the note below."
 
     main = [finding for finding in findings if _label(finding) != "nit"]
     nits = [finding for finding in findings if _label(finding) == "nit"]
     parts = [heading]
     if main:
-        parts.append(_join_findings(main))
+        parts.append(_join_findings(main, changed_files))
     if nits:
         # GitHub only renders Markdown inside <details> after a blank line.
-        parts.append(f"<details>\n<summary>{len(nits)} nit(s)</summary>\n\n{_join_findings(nits)}\n\n</details>")
+        parts.append(f"<details>\n<summary>{len(nits)} nit(s)</summary>\n\n{_join_findings(nits, changed_files)}\n\n</details>")
     return "\n\n".join(parts)
+
+
+# The findings that fit in the comment, blocking first: whatever is left out is counted, never cut mid-Markdown.
+def _findings_within_budget(findings: list[Finding], changed_files: frozenset[str], budget_chars: int) -> list[Finding]:
+    ranked = sorted(findings, key=lambda f: (LABEL_ORDER[_label(f)], SEVERITY_ORDER.get(f["severity"], len(SEVERITY_ORDER))))
+    kept, used = [], 0
+    for finding in ranked:
+        size = len(_format_finding(finding, changed_files)) + 10
+        if used + size > budget_chars:
+            break
+        kept.append(finding)
+        used += size
+    return kept
 
 
 # LangGraph node: findings -> final review comment.
@@ -152,11 +173,21 @@ def synthesizer_node(state: ReviewState) -> dict:
             sections.append(size_note)
         return {"final_review_markdown": "\n\n".join(sections) + "\n"}
 
+    changed_files = frozenset(state.get("changed_files") or ())
     groups = _group_by_category(findings)
     sections = [REVIEW_HEADING, _format_verdict(findings)]
     if size_note:
         sections.append(size_note)
     sections.append(_format_summary_table(groups))
-    sections += [_format_category_section(category, group) for category, group in groups.items()]
+
+    # The verdict and the table count every finding; only the detailed sections are budgeted.
+    budget = COMMENT_BUDGET_CHARS - sum(len(section) for section in sections) - SECTION_OVERHEAD_CHARS * len(groups)
+    shown = {id(finding) for finding in _findings_within_budget(findings, changed_files, budget)}
+    for category, group in groups.items():
+        visible = [finding for finding in group if id(finding) in shown]
+        sections.append(_format_category_section(category, visible, changed_files, len(group)))
+    hidden = len(findings) - len(shown)
+    if hidden:
+        sections.append(f"ℹ️ {hidden} more finding(s) not shown (GitHub comment size limit).")
 
     return {"final_review_markdown": "\n\n".join(sections) + "\n"}
