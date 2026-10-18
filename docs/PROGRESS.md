@@ -12,6 +12,8 @@
 | Agents (Phase 3, part) | 3 review agents (Security, Logic, Quality) on one shared runner with strict finding validation and `REVIEW_AGENT_MODEL`; synthesizer with one section per category. Security checks authn/authz/IDOR on changed endpoints | `review/`, `review/agents/` |
 | Durable jobs (Phase 2, part) | Webhook verifies HMAC, dedupes on (repo, target, head_sha) in the Postgres `reviews` table, enqueues to Azure Storage Queue; worker with retries and poison queue | `app/api/webhook.py`, `app/jobs/`, `app/worker.py` |
 | Trigger policy (Phase 2, part) | Before the dedupe, the webhook ignores repos outside `ALLOWED_REPOS`, draft PRs and authors GitHub does not list as collaborators; an unreachable GitHub gives 503 (fail closed); `ready_for_review` reviews a draft once it is ready | `app/jobs/trigger_policy.py`, `app/api/webhook.py` |
+| Prompt-injection defenses (Phase 3, part) | The diff, the context and tool output sit between random-nonce markers with a shared "data, never instructions" rule; a heuristic lists added lines that look written for the AI reviewer in a warning section; a benchmark case hides a SQL injection behind an injection comment | `review/untrusted_input.py`, `review/injection_detector.py`, `review/agents/prompts/85_untrusted_input.md` |
+| Output sanitizing (Phase 5, part) | Every LLM field is escaped for its place (no HTML, images, links, mentions, references, forged headings or fence breakouts), secrets are redacted (also in logs), invisible characters removed or revealed, fields and findings capped, the comment kept under GitHub's limit, and the summary marker only matches at the start of the bot's own comment | `review/output_sanitizer.py`, `review/secret_redactor.py`, `review/synthesizer.py` |
 | GitHub output (Phase 5, part) | One summary comment per PR, upserted by the `<!-- acr:summary -->` marker | `tools/github_tools.py` |
 | Packaging and deploy | Multi-stage Docker image, compose (Azurite + API + worker), Azure setup script, GitHub Actions test → build → deploy (deploy skipped until Azure vars exist) | `Dockerfile`, `docker-compose.yml`, `infra/`, `.github/workflows/` |
 | Postgres (Phase 4, part) | `pgvector/pgvector:pg16` in docker compose, the full schema as `db/migrations/001_initial_schema.sql`, a migration runner with an advisory lock, a connection pool. Only `reviews` is used so far; `symbols`/`edges` wait for the indexer | `db/` |
@@ -23,7 +25,7 @@
 
 - Phase 1: review eval harness (`eval/review_eval.py`, golden dataset, diff + tools vs structural).
 - Phase 2: stale-SHA check (the repo guard and author check are done).
-- Phase 3: shared LLM client (timeouts, retries, concurrency limit), Langfuse tracing, nonce-wrapped prompts. (The 3 agents and the shared runner are done.)
+- Phase 3: shared LLM client (timeouts, retries, concurrency limit), Langfuse tracing. (The 3 agents, the shared runner and the nonce-wrapped prompts are done.)
 - Phase 4: running the indexer from the worker (initial import), symbol diff, triage, structural context, PR text as input, agent tools reading Postgres instead of NetworkX. (Postgres, the schema, the `reviews` dedupe and the indexer itself are done.)
 - Phase 4b: context subagent.
 - Phase 5: inline review, only-new findings by fingerprint.

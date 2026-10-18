@@ -133,7 +133,7 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
   - call counters
   - a concurrency limit
   - **Langfuse tracing:** one trace per review, with a generation for each LLM call (prompt, output, tokens, latency). It's enabled only when `LANGFUSE_PUBLIC_KEY` is set, and it's a no-op in tests.
-- `review/prompting.py`: `wrap_untrusted()` with nonce delimiters, so untrusted content is treated as data.
+- **Done** as `review/untrusted_input.py`: `wrap_untrusted()` with nonce delimiters for the diff, the context and tool output, the shared rule `85_untrusted_input.md`, and `review/injection_detector.py`, a heuristic that lists suspicious added lines in the review.
 - **Done** (`refactor/three-review-agents`): `review/agents/agent_runner.py` with `AgentSpec(name, prompt_template)` and `run_agent()`, the agents `security`, `logic`, `quality`, strict validation (severity, integer line, non-empty text) with logged drops, `REVIEW_AGENT_MODEL`, and a synthesizer with one section per category. `Finding.agent` is the category, so no separate `category` field was added.
 - Delete the old performance, architecture, testing and documentation agents (done).
 
@@ -182,7 +182,8 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
 
 **Changes:**
 - The synthesizer returns a `ReviewResult(summary_markdown, inline[], findings, skipped_reason)`. A finding goes inline only if its line is part of the diff.
-- Markdown safety: fences, escaping `<!--`, neutralizing @mentions, length caps.
+- Markdown safety: **done** (`review/output_sanitizer.py`, `review/secret_redactor.py`): escaped HTML, links, images, mentions and references, unbreakable fences, invisible characters, redacted secrets, field caps and a comment budget. Rules kept for this phase: inline comments use the same render helpers, the review `event` is always `COMMENT`, and a `suggestion` block is never built from LLM text.
+- Bot identity: post as a GitHub App (or a machine user), not with the maintainer's token, so the bot's comments never carry owner authority (chat-ops commands, the summary lookup by author).
 - `post_pr_review()`, with `side: "RIGHT"` and a summary-only fallback on a 422 error.
 - `upsert_summary_comment()`: finds its own comment by the `<!-- acr:summary -->` marker and edits it (done).
 - On later commits, post only new findings: each finding gets a `fingerprint` stored in `findings`, and already-posted fingerprints are dropped by the synthesizer (D2). The fingerprint must survive line shifts (open point in [ARCHITECTURE.md](ARCHITECTURE.md)).
