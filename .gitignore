@@ -26,3 +26,6 @@ htmlcov/
 .claude/settings.local.json
 .claude/handoff.md
 
+
+# SQLTools query scratch files
+*.session.sql
