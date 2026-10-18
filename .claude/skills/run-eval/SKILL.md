@@ -7,17 +7,20 @@ description: Run or extend the evaluation of this project's LLMs and review qual
 
 ## What exists today: `eval/llm_benchmark.py`
 
-It compares free LLMs on the 4 LLM jobs (agents, decomposer, judge, chunker) using the **real production prompts** and deterministic scoring (no LLM grader).
-- **Dataset:** `eval/dataset/llm_benchmark_cases.json`. Each case has a known right answer.
-- **Results:** `eval/results/llm_benchmark_<timestamp>.json` and `.md`
-- **Unit tests:** `tests/unit/test_llm_benchmark.py` (offline)
+It compares LLMs (and prompt versions) on the 3 review agents using the **real production prompts**, and scores what production would post (`to_finding`, `sanitize_finding`, the 20-finding cap) with deterministic rules (scorer v2, no LLM grader).
+- **Dataset:** `eval/dataset/llm_benchmark_cases.json` (schema v2): each planted issue lists its `rule_ids`, `severity` band and `line_range`; clean cases list `forbidden_findings` (the mistake tested) and `allowed_findings` (defensible remarks, neutral). `tests/unit/test_benchmark_dataset.py` validates every label offline.
+- **Metrics:** quality (buggy: share of required issues found; clean: no blocking false alarm), recall and strict recall (right rule and line), precision (TP vs noise, duplicates, forbidden), F1, clean strict pass (no MEDIUM+ noise), rule and line accuracy, tokens per TP, retries. Per agent, plus a triage list of every failure and noise finding.
+- **Results:** `eval/results/llm_benchmark_<timestamp>.json` (every call, with the raw text and the scorer, dataset and prompt hashes) and `.md`.
+- **Code:** `eval/llm_benchmark.py` (CLI, model calls) and `eval/benchmark/` (`dataset_schema`, `scoring`, `metrics`, `report`, `call_cache`). Unit tests: `tests/unit/test_llm_benchmark.py`, `test_benchmark_*.py` (offline, including a golden replay of real answers).
 
 ```bash
-venv/Scripts/python.exe -m eval.llm_benchmark --list-models   # what your keys can call
-venv/Scripts/python.exe -m eval.llm_benchmark --tasks agents --models groq:<m>,gemini:<m> --runs 3
+venv/Scripts/python.exe -m eval.llm_benchmark --list-models                                   # what your keys can call
+venv/Scripts/python.exe -m eval.llm_benchmark --models groq:<m> --runs 3                       # real calls (user runs it)
+venv/Scripts/python.exe -m eval.llm_benchmark --models groq:<m> --only case_a,case_b --runs 3  # a subset
+venv/Scripts/python.exe -m eval.llm_benchmark --replay eval/results/<file>.json                # re-score, no API call
 ```
 
-Every run makes **real API calls**, so the user runs it. Before giving the command, tell the user roughly how many calls it makes (cases × models × runs).
+Real runs make **API calls**, so the user runs them. Before giving the command, say how many calls it makes (cases × models × runs) minus what the cache (`eval/cache/`, gitignored) already holds; `--fresh` ignores the cache. A replay costs nothing and is how a scoring or label change is checked.
 
 ## What's planned: the review eval harness (Phase 1 of `docs/IMPLEMENTATION_PLAN.md`)
 
@@ -33,5 +36,5 @@ The metrics are custom and deterministic, not RAGAS. Scores are pushed to **Lang
 
 1. Keep the dataset fixed between the runs.
 2. Run a baseline with `--runs 3`, make the change, then run again.
-3. Report a table of each metric: before, after, and the delta. Treat differences of about 0.02 or less as noise.
+3. Report a table of each metric: before, after, and the delta, plus the cases that changed. A difference is real only when at least 2 cases move the same way in all 3 runs; anything less is noise.
 4. Say so plainly when a metric gets worse. Never present a regression as an improvement.

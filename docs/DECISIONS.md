@@ -30,6 +30,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - Nonce delimiters + a prompt rule + a heuristic detector over a guard model: no extra call, testable, and the review shows suspicious lines
 - Escape and sanitize every LLM field before posting over trusting the model: no mentions, beacons, hidden content, forged marker or leaked secret
 - Review lifecycle in `reviews` + a head check before and after the review + partial reviews over silent `queued` rows and full retries: failures visible and retryable, no stale comments, one failing agent costs one category
+- Benchmark scored on what production posts, with labelled cases (rule, severity, lines, allowed/forbidden) over keyword matching or an LLM judge: sees false positives and wrong lines, deterministic, replayable for free
 
 **Superseded by the structural-context design (kept for history):**
 
@@ -510,3 +511,27 @@ fails (three times the quota for one rate-limited call), or compare the head
 only before posting (pays for reviews of commits already replaced). Trade-off:
 two extra GitHub calls per review, and the worker now needs Postgres whenever
 the dedupe uses it.
+
+## Why the benchmark scores what production posts, with labelled cases and no LLM judge
+
+The first scorer matched a finding when it named the right file and contained
+any one keyword ("log", "none", "loop" fit almost anything), ignored the
+rule_id, severity and line the model returns, never judged extra findings on
+buggy cases, scored raw JSON instead of what `to_finding` and
+`sanitize_finding` keep, and failed a clean case on any MEDIUM remark. Its 0.91
+on gpt-oss-120b hid that all 17 bugs were found while 2 of 6 clean cases drew
+false alarms. Scorer v2 (`eval/benchmark/scoring.py`) runs the production
+parsing path, matches one finding to one planted issue (strict: right file,
+rule and line; loose: right file and rule), and classifies every other finding
+as a duplicate, noise, a nit, or a labelled allowed or forbidden finding. The
+dataset (schema v2) lists the acceptable rule_ids, severity band and line
+range of each issue, and what each clean case tests. The headline clean rule
+follows production (a clean case fails on a blocking false alarm or a
+forbidden finding), and the strict rule (no MEDIUM+ noise) is reported next to
+it. Saved runs keep the raw answers, so `--replay` re-scores them for free, and
+a local call cache makes reruns pay only for missing answers. Alternatives: an
+LLM judge (twice the calls, non-deterministic, against D4; a label written once
+in the dataset settles the same question for good) or keeping v1 (cheap, but it
+cannot see false positives or wrong lines). Trade-off: every new case needs
+hand labels, checked by `tests/unit/test_benchmark_dataset.py`; v1 is still
+printed as `legacy` so old numbers stay readable.

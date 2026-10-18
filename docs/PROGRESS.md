@@ -19,7 +19,7 @@
 | Postgres (Phase 4, part) | `pgvector/pgvector:pg16` in docker compose, the full schema as `db/migrations/001_initial_schema.sql`, a migration runner with an advisory lock, a connection pool. Only `reviews` is used so far; `symbols`/`edges` wait for the indexer | `db/` |
 | Indexer (Phase 4, part) | Full index of a checkout into `files`, `symbols`, `edges` (calls, imports, inherits, tested_by) and `unresolved_calls`, in one transaction, no LLM. Call resolution `self`/`cls` (with repo bases) → import (relative, aliases, `__init__` re-exports, `src/` layout) → same file → unique name; library calls and locals are skipped. Run by hand: `python -m rag.code_indexer --repo owner/name --repo-path <checkout>` | `rag/`, `tests/unit/test_call_resolver.py` |
 | Tests | `tests/unit/` (offline, CI) and `tests/integration/` (real APIs, manual) | `tests/` |
-| LLM benchmark | Model comparison on the production prompts of the 3 agents | `eval/llm_benchmark.py` |
+| LLM benchmark (scorer v2) | 24 labelled cases (rule ids, severity bands, line ranges, allowed / forbidden findings) scored on what production would post: strict and loose recall, precision, F1, clean pass (no blocking false alarm) and clean strict pass, rule and line accuracy, tokens per true positive. `--replay` re-scores a saved run with no API call, a call cache makes reruns pay only for missing answers, and results record the scorer, dataset, prompt hashes and commit | `eval/llm_benchmark.py`, `eval/benchmark/` |
 
 ## Not built yet
 
@@ -35,4 +35,4 @@
 ## Known issues
 
 - The review agents' model `openai/gpt-oss-120b` is a provisional default until the benchmark runs on the 3 agents.
-- The latest benchmark run (2026-10-13) predates the 5 authn/authz cases and scores almost every model at 1.00, so it does not separate them.
+- The 2026-10-18 run (gpt-oss-120b, 1 run) re-scored with scorer v2: recall 1.00 but strict recall 0.82 (lines outside the function), precision 0.85, clean strict pass 0.83 (float money in `logic_clean`, prompt narrowed since). Needs the 3-run baseline before any model decision.
