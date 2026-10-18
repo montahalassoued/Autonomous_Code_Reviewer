@@ -19,6 +19,12 @@ def _build_github_client() -> Github:
     return Github(auth=Auth.Token(token))
 
 
+# True when GitHub lists login as a collaborator of the repo (owners and org members with access included).
+def is_collaborator(repo_full_name: str, login: str) -> bool:
+    repo = _build_github_client().get_repo(repo_full_name, lazy=True)  # lazy: one API call, not two
+    return repo.has_in_collaborators(login)
+
+
 # Fetches the unified diff for a pull request.
 def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
     client = _build_github_client()

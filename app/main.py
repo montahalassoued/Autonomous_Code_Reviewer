@@ -4,13 +4,15 @@ from fastapi import FastAPI
 
 from app.api.webhook import router as webhook_router
 from app.jobs.factory import build_dedupe, build_queue
+from tools.github_tools import is_collaborator
 
 
-# Creates the queue and dedupe store once and stores them on app.state.
+# Creates the queue, the dedupe store and the collaborator check once and stores them on app.state.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.job_queue = build_queue()
     app.state.dedupe = build_dedupe()
+    app.state.is_collaborator = is_collaborator
 
     yield
 

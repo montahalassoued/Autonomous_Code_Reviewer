@@ -29,6 +29,7 @@ def test_startup_creates_queue_and_dedupe_on_app_state():
     with TestClient(app):
         assert isinstance(app.state.job_queue, InMemoryJobQueue)
         assert isinstance(app.state.dedupe, InMemoryDedupeStore)
+        assert callable(app.state.is_collaborator), "the webhook checks PR authors through app.state"
     print("OK - startup stores the job queue and dedupe store on app.state")
 
 

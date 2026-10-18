@@ -8,11 +8,15 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.jobs.models import DedupeKey, ReviewJob
+from app.jobs.trigger_policy import evaluate_pull_request
 
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# ready_for_review: a draft is skipped, so it is reviewed when it is marked ready.
+HANDLED_ACTIONS = {"opened", "synchronize", "ready_for_review"}
 
 
 # Reject the request unless its HMAC signature proves it came from GitHub.
@@ -53,7 +57,7 @@ def _extract_pr_fields(payload: dict) -> tuple[int, str, str]:
     return pr_number, repo_full_name, head_sha
 
 
-# Verify, dedupe and queue a review for PR opened/synchronize events.
+# Verify, apply the trigger policy, dedupe and queue a review for pull_request events.
 @router.post("/webhook/github")
 async def github_webhook(
     request: Request,
@@ -68,10 +72,20 @@ async def github_webhook(
         return {"status": "ignored", "reason": f"unhandled event type: {x_github_event}"}
 
     payload = await request.json()
-    if payload.get("action") not in {"opened", "synchronize"}:
+    if payload.get("action") not in HANDLED_ACTIONS:
         return {"status": "ignored", "reason": f"unhandled action: {payload.get('action')}"}
 
     pr_number, repo_full_name, head_sha = _extract_pr_fields(payload)
+
+    # Before the dedupe, so a refused event leaves no reviews row and costs no LLM call.
+    try:
+        decision = await run_in_threadpool(evaluate_pull_request, payload, request.app.state.is_collaborator)
+    except Exception as exc:  # GitHub unreachable: refuse for now, the delivery can be redelivered
+        logger.exception("Collaborator check failed delivery=%s repo=%s", x_github_delivery, repo_full_name)
+        raise HTTPException(status_code=503, detail="Could not verify the pull request author") from exc
+    if not decision.allowed:
+        logger.info("Ignored delivery=%s repo=%s pr=%s: %s", x_github_delivery, repo_full_name, pr_number, decision.reason)
+        return {"status": "ignored", "reason": decision.reason}
     dedupe = request.app.state.dedupe
     queue = request.app.state.job_queue
     dedupe_key = DedupeKey(repo_full_name, head_sha, target=f"pr:{pr_number}")

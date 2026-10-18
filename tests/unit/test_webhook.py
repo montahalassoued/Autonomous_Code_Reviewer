@@ -7,21 +7,32 @@ import os
 # real .env value for this key, which would silently desync the sign()
 # helper below from what _verify_signature() actually checks against.
 os.environ["GITHUB_WEBHOOK_SECRET"] = "test-secret"
+os.environ["ALLOWED_REPOS"] = "test-owner/test-repo"
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.webhook import router
 from app.jobs.dedupe import InMemoryDedupeStore
+from app.jobs.models import DedupeKey
 from app.jobs.queue import InMemoryJobQueue
 
 
-# Builds a minimal FastAPI app with the webhook router and in-memory job backends.
-def make_app(job_queue=None, dedupe=None):
+COLLABORATORS = {"alice"}
+
+
+# Stands in for the GitHub API: alice is a collaborator, nobody else is.
+def fake_is_collaborator(repo_full_name: str, login: str) -> bool:
+    return login in COLLABORATORS
+
+
+# Builds a minimal FastAPI app with the webhook router, in-memory job backends and a fake collaborator check.
+def make_app(job_queue=None, dedupe=None, is_collaborator=fake_is_collaborator):
     app = FastAPI()
     app.include_router(router)
     app.state.job_queue = job_queue or InMemoryJobQueue()
     app.state.dedupe = dedupe or InMemoryDedupeStore()
+    app.state.is_collaborator = is_collaborator
     return app
 
 
@@ -32,11 +43,12 @@ def sign(body: bytes, secret: str = "test-secret") -> str:
 
 
 # Builds a minimal pull_request payload for the given head sha.
-def make_payload(sha: str = "sha-one", action: str = "opened") -> dict:
+def make_payload(sha: str = "sha-one", action: str = "opened", author: str = "alice", draft: bool = False,
+                 repo: str = "test-owner/test-repo") -> dict:
     return {
         "action": action,
-        "pull_request": {"number": 42, "head": {"sha": sha}},
-        "repository": {"full_name": "test-owner/test-repo"},
+        "pull_request": {"number": 42, "head": {"sha": sha}, "user": {"login": author}, "draft": draft},
+        "repository": {"full_name": repo},
     }
 
 
@@ -217,6 +229,64 @@ def test_webhook_rejects_payload_without_head_sha():
     print("OK - payload without head.sha returns 400")
 
 
+def test_webhook_ignores_pr_from_a_non_collaborator():
+    app = make_app()
+    client = TestClient(app)
+
+    response = post_event(client, make_payload(author="mallory"))
+
+    assert response.status_code == 200 and response.json()["status"] == "ignored"
+    assert "not a collaborator" in response.json()["reason"]
+    assert drain(app.state.job_queue) == []
+    assert app.state.dedupe.claim(DedupeKey("test-owner/test-repo", "sha-one", "pr:42")), "no dedupe claim was taken"
+    print("OK - an outsider's PR is ignored before the dedupe and the queue")
+
+
+def test_webhook_ignores_repo_not_in_allowed_repos():
+    app = make_app()
+
+    response = post_event(TestClient(app), make_payload(repo="someone/else"))
+
+    assert response.json() == {"status": "ignored", "reason": "repo someone/else is not in ALLOWED_REPOS"}
+    assert drain(app.state.job_queue) == []
+    print("OK - only ALLOWED_REPOS are reviewed")
+
+
+def test_webhook_ignores_drafts_and_reviews_them_when_ready():
+    app = make_app()
+    client = TestClient(app)
+
+    draft = post_event(client, make_payload(draft=True), delivery="d1")
+    ready = post_event(client, make_payload(action="ready_for_review"), delivery="d2")
+
+    assert draft.json()["reason"] == "draft pull request"
+    assert ready.status_code == 202, "the draft left no dedupe row, so ready_for_review is queued"
+    assert len(drain(app.state.job_queue)) == 1
+    print("OK - drafts are skipped, ready_for_review queues the review")
+
+
+def test_webhook_returns_503_when_the_collaborator_check_fails():
+    def github_down(repo_full_name, login):
+        raise ConnectionError("GitHub unreachable")
+
+    app = make_app(is_collaborator=github_down)
+
+    response = post_event(TestClient(app), PR_OPENED_PAYLOAD)
+
+    assert response.status_code == 503, "fail closed: no review without a verified author"
+    assert drain(app.state.job_queue) == []
+    print("OK - an unverifiable author is refused with 503 so GitHub can redeliver")
+
+
+def test_webhook_reviews_nothing_when_allowed_repos_is_unset(monkeypatch):
+    monkeypatch.delenv("ALLOWED_REPOS")
+
+    response = post_event(TestClient(make_app()), PR_OPENED_PAYLOAD)
+
+    assert response.json()["status"] == "ignored" and "ALLOWED_REPOS is not set" in response.json()["reason"]
+    print("OK - a missing allow-list fails closed")
+
+
 if __name__ == "__main__":
     test_webhook_rejects_missing_signature()
     test_webhook_rejects_invalid_signature()
@@ -228,4 +298,8 @@ if __name__ == "__main__":
     test_webhook_enqueue_failure_returns_503_and_releases_claim()
     test_webhook_rejects_malformed_payload()
     test_webhook_rejects_payload_without_head_sha()
+    test_webhook_ignores_pr_from_a_non_collaborator()
+    test_webhook_ignores_repo_not_in_allowed_repos()
+    test_webhook_ignores_drafts_and_reviews_them_when_ready()
+    test_webhook_returns_503_when_the_collaborator_check_fails()
     print("\nAll webhook tests passed.")
