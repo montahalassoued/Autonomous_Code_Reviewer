@@ -82,20 +82,22 @@ GitHub push / pull_request
 The index is derived from `main` and can always be rebuilt from git. Raw files are not stored, except the plain text of non-Python files, kept for grep.
 
 ```text
-repos(id, full_name, default_branch, indexed_sha, schema_version, embedding_model)
-files(id, repo_id, path, language, content_hash, content NULL for Python)
-symbols(id, file_id, qualified_name, kind[function|method|class_header|module], parent_id,
-        signature, start_line, end_line, code, content_hash, norm_hash)
-        UNIQUE (file_id, qualified_name)
-edges(src_id, dst_id, kind[calls|imports|inherits|tested_by])          ON DELETE CASCADE
-unresolved_calls(src_id, name, reason)
-symbol_embeddings(symbol_id, embedding vector)                          optional, pgvector
-reviews(id, repo_id, target, base_sha, head_sha,
-        status[queued|running|posted|skipped|failed], skipped_reason,
-        llm_calls, tokens_in, tokens_out, latency_ms, context_symbol_ids)
-        UNIQUE (repo_id, target, head_sha)            -- replaces the Azure Table dedupe
-findings(id, review_id, category, severity, file_path, line, symbol_name,
-         message, recommendation, fingerprint, github_comment_id)
+repos(id, full_name, default_branch, indexed_sha, schema_version)   both NULL until the first index
+files(id, repo_id, path, language, content_hash, content NULL for Python, parse_error)
+symbols(id, file_id, name, qualified_name, kind[function|method|class_header|module], parent_id,
+        signature, start_line, end_line, code, content_hash)
+        UNIQUE (file_id, qualified_name), INDEX (name), INDEX (parent_id)
+edges(src_id, kind[calls|imports|inherits|tested_by], dst_id)          ON DELETE CASCADE
+        PK (src_id, kind, dst_id), INDEX (dst_id, kind); tested_by: src = code, dst = test
+unresolved_calls(src_id, name, reason[not_found|ambiguous|dynamic])    no external library calls
+symbol_embeddings(symbol_id, embedding vector)                          optional, pgvector, later migration
+reviews(id, repo_id, target[pr:<n>|push:<branch>], base_sha, head_sha,
+        status[queued|running|posted|skipped|failed], status_reason, missing_categories,
+        llm_calls, tokens_in, tokens_out, latency_ms, created_at, updated_at (trigger))
+        UNIQUE (repo_id, target, head_sha)            -- the webhook dedupe key
+findings(id, review_id, category[security|logic|quality], severity, rule_id, confidence,
+         file_path, line_number, qualified_name, title, description, evidence, suggestion,
+         fingerprint, github_comment_id)              INDEX (review_id, fingerprint)
 ```
 
 The call graph is the `edges` table. NetworkX is used only ad hoc when a graph algorithm is needed.
@@ -103,9 +105,9 @@ The call graph is the `edges` table. NetworkX is used only ad hoc when a graph a
 **Indexing (no LLM):**
 
 - tree-sitter extracts functions, methods as `Class.method` (with decorators), class headers without method bodies, and one `<module>` pseudo-symbol for top-level code. It does not recurse into function bodies.
-- `content_hash` is the hash of the code; `norm_hash` is the hash of the code without comments, docstrings and whitespace.
-- Calls resolve in this order: `self`/`cls` method (including base classes) → imported name → same file → name unique in the repo → otherwise a row in `unresolved_calls`. Never guess.
-- Tests are linked with `tested_by` edges.
+- `content_hash` is the hash of the code, stored in `symbols`; `norm_hash` is the hash of the code without comments, docstrings and whitespace, computed in memory by the symbol diff (not stored).
+- Calls are matched on the bare `symbols.name` (a call site only knows `login(...)`) and resolve in this order: `self`/`cls` method (including base classes) → imported name → same file → name unique in the repo → otherwise a row in `unresolved_calls`. Never guess.
+- Tests are linked with `tested_by` edges (`src` = the code under test, `dst` = the test). Import edges start from the importing file's `<module>` symbol.
 - A full index runs only on first install or a `schema_version` change; otherwise it is incremental by `content_hash`.
 
 ## Context assembly (deterministic)

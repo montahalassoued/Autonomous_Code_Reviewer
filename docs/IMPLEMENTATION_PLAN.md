@@ -145,7 +145,7 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
 
 **Index (Postgres, schema in [ARCHITECTURE.md](ARCHITECTURE.md)):**
 - `db/` Postgres adapter and migrations for `repos`, `files`, `symbols`, `edges`, `unresolved_calls`, `reviews`, `findings` (`symbol_embeddings` only if D1's "similar code" is enabled).
-- Indexer (no LLM): tree-sitter symbols (functions, `Class.method` with decorators, class headers without bodies, a `<module>` pseudo-symbol), `content_hash` and `norm_hash`, call resolution `self`/`cls` (incl. bases) → import → same file → unique name → `unresolved_calls`, and `tested_by` edges.
+- Indexer (no LLM): tree-sitter symbols (functions, `Class.method` with decorators, class headers without bodies, a `<module>` pseudo-symbol), `content_hash` (`norm_hash` is computed in memory by the symbol diff), call resolution `self`/`cls` (incl. bases) → import → same file → unique name → `unresolved_calls`, and `tested_by` edges.
 - Full index build on first install or `schema_version` change (incremental sync is Phase 6).
 - **Initial import:** a first push or an empty repo (`before` = `000…`) indexes everything and records the review as `skipped` (`initial_import`), with zero LLM calls.
 - The `reviews` table replaces the Azure Table dedupe (unique `(repo_id, target, head_sha)`). **Done** (`feat/postgres-reviews-store`), together with the compose service, `db/migrations/001_initial_schema.sql` and `db/migration_runner.py`.
@@ -195,7 +195,7 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
 - Apply a push's symbol diff to Postgres in one transaction, **after** the review is posted, then set `repos.indexed_sha = after`. A failure rolls back.
 - Before each push review, check `indexed_sha == before`; if not, sync the index to `before` first (repairs missed or failed updates).
 - Only new or changed symbols (by `content_hash`) are re-parsed and re-linked; deleted symbols cascade their edges; a rename keeps the embedding if any.
-- `repos.schema_version` and `embedding_model` mismatches trigger a full rebuild.
+- A `repos.schema_version` mismatch triggers a full rebuild (also how `norm_hash` or embeddings get added later).
 - The worker no longer re-ingests the repo in memory at startup: it reads Postgres, so it is ready in seconds.
 
 **Agents:** ai-engineer and webhook-engineer (docker-expert and devops-engineer for storage).

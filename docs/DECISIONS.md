@@ -24,6 +24,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - `reviews` table over Azure Table dedupe: dedupe, status and metrics in one row (supersedes the Table claim)
 - psycopg 3 + numbered SQL migrations over SQLAlchemy + Alembic: graph joins read best as SQL; seven tables need no ORM
 - Drop the legacy semantic retrieval before an A/B eval: it was never measured and known-buggy; agents use diff + tools until the context builder (supersedes "delete only after the eval")
+- Schema fixed before its first use over a 002 ALTER migration: `findings` mirrors `Finding`, `symbols.name` for call resolution, dead columns dropped
 
 **Superseded by the structural-context design (kept for history):**
 
@@ -367,3 +368,26 @@ that contradicted D1. Trade-off: the structural context is compared against
 "diff + tools" instead of semantic retrieval, so there is no "beats RAG" number.
 Supersedes "deleted only after the eval shows structural >= legacy" in "Why
 structural context over semantic retrieval".
+
+## Why fix the schema in 001 before its first use over a 002 migration
+
+A data-engineer review of `db/migrations/001_initial_schema.sql` found that it
+did not fit the code that will fill it. `findings` had `message` and
+`recommendation` instead of the `Finding` fields (no `rule_id`, which the
+fingerprint `sha1(category + file_path + qualified_name + rule_id)` needs, no
+`confidence`, which the synthesizer reads, no `evidence`), call resolution had
+no bare-name column (`qualified_name` is `Class.login` or `login#2`, a call site
+only knows `login`), and `repos.embedding_model`, `symbols.norm_hash` and
+`reviews.context_symbol_ids` had no reader. 001 was rewritten instead of adding
+a 002 of ALTERs, because it existed only in a local, empty database. Choices:
+`findings` mirrors `review/state.py` (only `category` stands for `Finding.agent`)
+with a CHECK on the three categories, so a fourth agent needs a migration; a
+finding has no foreign key to `symbols`, because PR code is never indexed;
+`tested_by` edges go from the code to its test; `unresolved_calls` keeps only
+`not_found`, `ambiguous` and `dynamic` calls, never external library calls;
+`reviews` gets `status_reason` (required when skipped or failed),
+`missing_categories` for partial reviews and an `updated_at` trigger.
+Trade-off: the fingerprint has no line, so two findings of the same rule in one
+function share it and the second is hidden on later commits (worst for the
+`other` rule); accepted for stability. `repos.github_id` (survives a repo
+rename) is deferred to multi-repo support.
