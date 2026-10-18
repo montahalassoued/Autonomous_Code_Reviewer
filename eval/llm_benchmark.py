@@ -15,6 +15,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 from review.agents.agent_runner import EMPTY_CONTEXT_SUMMARY
 from review.agents.prompt_assembler import fill_prompt
 from review.agents.security.agent import SECURITY_AGENT
+from review.untrusted_input import DIFF_LABEL, wrap_untrusted
 from review.agents.logic.agent import LOGIC_AGENT
 from review.agents.quality.agent import QUALITY_AGENT
 
@@ -244,9 +245,10 @@ def _join_lines(value) -> str:
     return "\n".join(value) if isinstance(value, list) else value
 
 
-# Production agent prompt for an 'agents' case, with no retrieved context.
+# Production agent prompt for an 'agents' case: the diff wrapped as untrusted data, no prepared context.
 def build_agent_prompt(case: dict) -> str:
-    return fill_prompt(AGENT_PROMPTS[case["agent"]], _join_lines(case["diff"]), EMPTY_CONTEXT_SUMMARY)
+    diff = wrap_untrusted(_join_lines(case["diff"]), DIFF_LABEL)
+    return fill_prompt(AGENT_PROMPTS[case["agent"]], diff, EMPTY_CONTEXT_SUMMARY)
 
 
 # ---------------------------------------------------------------------
