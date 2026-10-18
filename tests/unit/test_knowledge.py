@@ -1,12 +1,5 @@
-import os
 from rag.ast_parser import parse_file
-from rag.knowledge_graph import (
-    build_knowledge_graph,
-    get_callers,
-    get_callees,
-    save_graph,
-    load_graph,
-)
+from rag.knowledge_graph import build_knowledge_graph
 
 
 SAMPLE_CODE = '''def hash_password(password):
@@ -72,7 +65,7 @@ def test_get_callers_finds_who_calls_a_function():
     functions = parse_file("auth/utils.py", SAMPLE_CODE)
     graph = build_knowledge_graph(functions)
 
-    callers = get_callers(graph, "auth/utils.py", "verify_password")
+    callers = list(graph.predecessors("auth/utils.py::verify_password"))
     assert callers == ["auth/utils.py::login"], f"Got: {callers}"
     print(f"OK - callers of verify_password(): {callers}")
 
@@ -81,7 +74,7 @@ def test_get_callees_finds_what_a_function_calls():
     functions = parse_file("auth/utils.py", SAMPLE_CODE)
     graph = build_knowledge_graph(functions)
 
-    callees = get_callees(graph, "auth/utils.py", "login")
+    callees = list(graph.successors("auth/utils.py::login"))
     assert set(callees) == {"auth/utils.py::verify_password", "auth/utils.py::create_session"}
     print(f"OK - login() calls: {callees}")
 
@@ -115,23 +108,9 @@ def test_methods_get_class_qualified_node_ids():
 
     # calls still resolve by bare name, and the edge uses qualified ids
     assert graph.has_edge("services.py::UserService.register", "services.py::normalize_email")
-    assert get_callers(graph, "services.py", "normalize_email") == ["services.py::UserService.register"]
-    assert get_callees(graph, "services.py", "UserService.register") == ["services.py::normalize_email"]
+    assert list(graph.predecessors("services.py::normalize_email")) == ["services.py::UserService.register"]
+    assert list(graph.successors("services.py::UserService.register")) == ["services.py::normalize_email"]
     print(f"OK - qualified node ids: {list(graph.nodes)}")
-
-
-def test_save_and_load_roundtrip():
-    functions = parse_file("auth/utils.py", SAMPLE_CODE)
-    graph = build_knowledge_graph(functions)
-
-    test_path = "test_graph.pkl"
-    save_graph(graph, test_path)
-    loaded = load_graph(test_path)
-
-    assert loaded.number_of_nodes() == graph.number_of_nodes()
-    assert loaded.number_of_edges() == graph.number_of_edges()
-    os.remove(test_path)
-    print("OK - graph survives save/load round-trip via pickle")
 
 
 if __name__ == "__main__":
@@ -141,5 +120,4 @@ if __name__ == "__main__":
     test_get_callers_finds_who_calls_a_function()
     test_get_callees_finds_what_a_function_calls()
     test_methods_get_class_qualified_node_ids()
-    test_save_and_load_roundtrip()
     print("\nAll knowledge_graph tests passed.")

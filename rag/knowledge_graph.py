@@ -1,4 +1,3 @@
-import pickle
 import networkx as nx
 from rag.ast_parser import ParsedFunction
 
@@ -47,31 +46,3 @@ def build_knowledge_graph(functions: list[ParsedFunction]) -> nx.DiGraph:
                 graph.add_edge(caller_id, callee_id)
 
     return graph
-
-
-# Returns the node IDs of every function that calls the given function.
-def get_callers(graph: nx.DiGraph, file_path: str, qualified_name: str) -> list[str]:
-    node_id = _node_id(file_path, qualified_name)
-    if node_id not in graph:
-        return []
-    return list(graph.predecessors(node_id))
-
-
-# Returns the node IDs of every function that the given function calls.
-def get_callees(graph: nx.DiGraph, file_path: str, qualified_name: str) -> list[str]:
-    node_id = _node_id(file_path, qualified_name)
-    if node_id not in graph:
-        return []
-    return list(graph.successors(node_id))
-
-
-# Pickle the graph so the review can load it without re-parsing the repo.
-def save_graph(graph: nx.DiGraph, path: str) -> None:
-    with open(path, "wb") as f:
-        pickle.dump(graph, f)
-
-
-# Loads a previously saved graph back from disk.
-def load_graph(path: str) -> nx.DiGraph:
-    with open(path, "rb") as f:
-        return pickle.load(f)

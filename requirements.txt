@@ -1,63 +1,37 @@
-# File purpose: Python dependencies for the autonomous review service.
-# Inputs: pip or other Python packaging tools.
-# Outputs: A reproducible dependency set for local development and deployment.
-# =============================================================================
-# autonomous-code-reviewer — full project requirements
-# Organized by architecture layer, matching docs/PROGRESS.md build order.
-# =============================================================================
-
-# --- Orchestration (Step 2) ---
+# --- Orchestration ---
 langgraph>=1.2.0
-langchain>=0.3.0
-langchain-core>=0.3.0
-google-genai>=1.0.0                # Gemini SDK, used by eval/llm_benchmark.py to compare models
 
-langchain-groq>=0.2.0              # Groq - REVIEW_AGENT_MODEL, free tier
+# --- LLMs ---
+groq>=0.37.0                       # Groq SDK - REVIEW_AGENT_MODEL, free tier
+google-genai>=1.0.0                # Gemini SDK, used by eval/llm_benchmark.py to compare models
 
 # --- Code parsing (tree-sitter) ---
 tree-sitter>=0.23.0
 tree-sitter-python>=0.23.0
-tree-sitter-javascript>=0.23.0
 
 # --- Call graph read by the agents' graph tools (replaced by the Postgres edges table in Phase 4) ---
 networkx>=3.3
 
-# --- Backend API (Step 13) ---
+# --- Backend API ---
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
-websockets>=12.0
-python-multipart>=0.0.9
 
 # --- Database ---
 psycopg[binary,pool]>=3.2.0        # Postgres driver + connection pool (db/postgres.py); plain SQL, no ORM
-
-# --- Cache ---
-redis>=5.0.0
 
 # --- Durable review jobs (Azure Storage) ---
 azure-storage-queue>=12.9.0        # review job queue + poison queue
 azure-identity>=1.17.0             # managed identity auth (DefaultAzureCredential)
 
-# --- GitHub integration (Step 13) ---
+# --- GitHub integration ---
 PyGithub>=2.3.0
 gitpython>=3.1.40                  # clone the target repo the agents' tools read
 
-# --- Evaluation (Step 15) ---
-ragas>=0.1.0
-datasets>=2.20.0                   # required by ragas
-
-
 # --- Core utilities ---
 pydantic>=2.8.0
-pydantic-settings>=2.4.0
-python-dotenv>=1.0.0
-httpx>=0.27.0
+python-dotenv>=1.0.0               # loads .env in eval/ and tests/
+httpx>=0.27.0                      # FastAPI TestClient
 tenacity>=8.5.0                    # retry logic for LLM/API calls
-
-# --- Observability ---
-langfuse>=3.0.0                   # open-source LLM tracing + evaluation (replaces LangSmith)
-prometheus-client>=0.20.0
 
 # --- Testing ---
 pytest>=8.3.0
-pytest-asyncio>=0.24.0

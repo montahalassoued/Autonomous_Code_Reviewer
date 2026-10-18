@@ -48,8 +48,3 @@ def upsert_summary_comment(repo_full_name: str, pr_number: int, markdown: str) -
             return
 
     pull_request.create_issue_comment(body)
-
-
-# Thin alias for upsert_summary_comment(), kept for older callers.
-def post_review_comment(repo_full_name: str, pr_number: int, markdown: str) -> None:
-    upsert_summary_comment(repo_full_name, pr_number, markdown)
