@@ -16,6 +16,25 @@ def finding(line: int, evidence: str, path: str = "app/users.py") -> dict:
             "line_number": line, "title": "SQL injection", "description": "d", "evidence": evidence, "suggestion": "s"}
 
 
+def test_a_path_written_differently_is_matched_to_the_diff_file():
+    evidence = "query = f\"SELECT * FROM users WHERE name = '{username}'\""
+    for written in ("b/app/users.py", "./app/users.py", "/app/users.py", "app\\users.py"):
+        [located] = locate_findings([finding(13, evidence, path=written)], DIFF)
+        assert (located["file_path"], located["line_number"]) == ("app/users.py", 15), written
+    print("OK - b/, ./, / and backslash paths still get the diff path and the quoted line")
+
+
+def test_an_unknown_or_ambiguous_path_is_kept_as_written():
+    paths = {"app/users.py", "billing/users.py"}
+    from review.finding_locator import diff_path
+
+    assert diff_path("users.py", paths) == "users.py", "a bare file name is not enough"
+    assert diff_path("lib/users.py", {"src/lib/users.py", "test/lib/users.py"}) == "lib/users.py"
+    assert diff_path("lib/users.py", {"src/lib/users.py"}) == "src/lib/users.py"
+    assert diff_path("app/caller.py", paths) == "app/caller.py", "a file from main keeps its path"
+    print("OK - only one clear match rewrites the path")
+
+
 def test_added_lines_keep_their_code():
     assert map_diff_lines(DIFF)["app/users.py"].added_text[15] == "    query = f\"SELECT * FROM users WHERE name = '{username}'\""
     print("OK - the diff map knows what each added line says")
