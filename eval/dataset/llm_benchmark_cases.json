@@ -567,6 +567,135 @@
       "expected_issues": [
         {"id": "bug", "file": "tests/test_pricing.py", "rule_ids": ["weak_test"], "severity": ["LOW", "MEDIUM"], "line_range": [4, 5], "keywords": ["assert", "weak", "meaningful", "not none", "expected value", "doesn't check", "does not check"]}
       ]
+    },
+    {
+      "id": "logic_off_by_one_tail",
+      "agent": "logic",
+      "_about": "The slice starts one line too early, so it returns count + 1 lines.",
+      "diff": [
+        "diff --git a/app/logs/tail.py b/app/logs/tail.py",
+        "--- a/app/logs/tail.py",
+        "+++ b/app/logs/tail.py",
+        "@@ -1,1 +1,6 @@",
+        " from pathlib import Path",
+        "+",
+        "+def last_lines(path: Path, count: int) -> list[str]:",
+        "+    # The last `count` lines of the file, oldest first.",
+        "+    lines = path.read_text().splitlines()",
+        "+    return lines[len(lines) - count - 1:]"
+      ],
+      "expected_issues": [
+        {"id": "bug", "file": "app/logs/tail.py", "rule_ids": ["off_by_one", "wrong_return"], "severity": ["MEDIUM", "HIGH"], "line_range": [6, 6], "keywords": ["off-by-one", "off by one", "one extra", "count + 1", "too many", "- 1"]}
+      ],
+      "allowed_findings": [
+        {"file": "app/logs/tail.py", "rule_ids": ["unhandled_edge_case"], "max_severity": "MEDIUM", "why": "a count larger than the file is a fair second remark"}
+      ]
+    },
+    {
+      "id": "logic_swallowed_config_error",
+      "agent": "logic",
+      "_about": "A broken config file silently becomes an empty config, although the comment says startup must fail.",
+      "diff": [
+        "diff --git a/app/config_loader.py b/app/config_loader.py",
+        "--- a/app/config_loader.py",
+        "+++ b/app/config_loader.py",
+        "@@ -1,1 +1,9 @@",
+        " import json",
+        "+",
+        "+def load_config(path: str) -> dict:",
+        "+    # The service must not start with a broken config file.",
+        "+    try:",
+        "+        with open(path) as config_file:",
+        "+            return json.load(config_file)",
+        "+    except Exception:",
+        "+        return {}"
+      ],
+      "expected_issues": [
+        {"id": "bug", "file": "app/config_loader.py", "rule_ids": ["swallowed_error"], "severity": ["MEDIUM", "HIGH"], "line_range": [8, 9], "keywords": ["swallow", "silent", "hides", "broad except", "except exception", "empty config"]}
+      ]
+    },
+    {
+      "id": "logic_mutation_during_iteration",
+      "agent": "logic",
+      "_about": "Removing from the list being iterated skips the element after each removal.",
+      "diff": [
+        "diff --git a/app/auth/sessions.py b/app/auth/sessions.py",
+        "--- a/app/auth/sessions.py",
+        "+++ b/app/auth/sessions.py",
+        "@@ -1,1 +1,7 @@",
+        " import time",
+        "+",
+        "+def drop_expired(sessions: list[dict]) -> None:",
+        "+    now = time.time()",
+        "+    for session in sessions:",
+        "+        if session[\"expires_at\"] < now:",
+        "+            sessions.remove(session)"
+      ],
+      "expected_issues": [
+        {"id": "bug", "file": "app/auth/sessions.py", "rule_ids": ["mutation_during_iteration"], "severity": ["MEDIUM", "HIGH"], "line_range": [5, 7], "keywords": ["while iterating", "during iteration", "skip", "modif", "remove"]}
+      ]
+    },
+    {
+      "id": "logic_clean_in_place_filter",
+      "agent": "logic",
+      "_about": "Trap: the same cleanup done right, rebuilding the list in place. Nothing to report.",
+      "tags": ["near_miss"],
+      "diff": [
+        "diff --git a/app/auth/sessions.py b/app/auth/sessions.py",
+        "--- a/app/auth/sessions.py",
+        "+++ b/app/auth/sessions.py",
+        "@@ -1,1 +1,5 @@",
+        " import time",
+        "+",
+        "+def drop_expired(sessions: list[dict]) -> None:",
+        "+    now = time.time()",
+        "+    sessions[:] = [session for session in sessions if session[\"expires_at\"] >= now]"
+      ],
+      "expected_issues": [],
+      "forbidden_findings": [
+        {"file": "app/auth/sessions.py", "rule_ids": ["mutation_during_iteration"], "why": "the comprehension reads the old list before the slice assignment replaces it"}
+      ]
+    },
+    {
+      "id": "quality_missing_timeout",
+      "agent": "quality",
+      "_about": "urlopen without a timeout can block the worker forever on a stalled server.",
+      "diff": [
+        "diff --git a/app/clients/rates.py b/app/clients/rates.py",
+        "--- a/app/clients/rates.py",
+        "+++ b/app/clients/rates.py",
+        "@@ -1,1 +1,5 @@",
+        " import urllib.request",
+        "+",
+        "+def fetch_exchange_rates() -> bytes:",
+        "+    with urllib.request.urlopen(\"https://rates.example.com/latest.json\") as response:",
+        "+        return response.read()"
+      ],
+      "expected_issues": [
+        {"id": "bug", "file": "app/clients/rates.py", "rule_ids": ["missing_timeout"], "severity": ["MEDIUM", "HIGH"], "line_range": [4, 4], "keywords": ["timeout", "hang", "block forever", "stalled"]}
+      ]
+    },
+    {
+      "id": "quality_clean_bulk_insert",
+      "agent": "quality",
+      "_about": "Trap: one executemany in one transaction, no query per row. Nothing to report.",
+      "tags": ["near_miss"],
+      "diff": [
+        "diff --git a/app/scores.py b/app/scores.py",
+        "--- a/app/scores.py",
+        "+++ b/app/scores.py",
+        "@@ -1,1 +1,6 @@",
+        " from app.db import connection",
+        "+",
+        "+def save_scores(scores: dict[str, int]) -> None:",
+        "+    rows = list(scores.items())",
+        "+    with connection:",
+        "+        connection.executemany(\"INSERT INTO scores (name, score) VALUES (?, ?)\", rows)"
+      ],
+      "expected_issues": [],
+      "forbidden_findings": [
+        {"file": "app/scores.py", "rule_ids": ["io_in_loop", "n_plus_one"], "why": "executemany sends the rows as one batch"}
+      ]
     }
   ]
 }
