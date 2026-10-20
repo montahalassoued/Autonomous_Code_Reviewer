@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_REVIEW_AGENT_MODEL = "openai/gpt-oss-120b"
 AGENT_TEMPERATURE = 0.1  # consistency over creativity for analysis
+# Reasoning models spend output tokens thinking; without a cap Groq's default (2048) cut answers off.
+AGENT_MAX_OUTPUT_TOKENS = 4096
 # Each extra call resends the whole prompt, so tool use is capped per agent and per review.
 DEFAULT_MAX_TOOL_CALLS = 3
 FINAL_ANSWER_REQUEST = "Tool call limit reached. Answer now with the JSON array only."
@@ -138,11 +140,15 @@ def build_prompt(spec: AgentSpec, state: ReviewState) -> str:
 
 
 def _ask_model(client: Groq, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
-    request = {"model": review_agent_model(), "messages": messages, "temperature": AGENT_TEMPERATURE}
+    request = {"model": review_agent_model(), "messages": messages, "temperature": AGENT_TEMPERATURE,
+               "max_completion_tokens": AGENT_MAX_OUTPUT_TOKENS}
     if tool_schemas:
         request["tools"] = tool_schemas
         request["tool_choice"] = tool_choice
-    return client.chat.completions.create(**request).choices[0].message
+    choice = client.chat.completions.create(**request).choices[0]
+    if getattr(choice, "finish_reason", None) == "length":
+        logger.warning("Agent answer cut off at %d output tokens: its findings may be lost", AGENT_MAX_OUTPUT_TOKENS)
+    return choice.message
 
 
 def _assistant_turn(message, tool_calls) -> dict:

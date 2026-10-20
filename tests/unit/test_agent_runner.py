@@ -3,6 +3,7 @@ import re
 from types import SimpleNamespace
 
 from review.agents.agent_runner import (
+    AGENT_MAX_OUTPUT_TOKENS,
     DEFAULT_REVIEW_AGENT_MODEL,
     EMPTY_CONTEXT_SUMMARY,
     parse_findings,
@@ -168,6 +169,7 @@ def test_run_agent_sends_diff_context_model_and_temperature(monkeypatch):
     prompt = request["messages"][0]["content"]
     assert request["model"] == "groq-test-model"
     assert request["temperature"] == 0.1
+    assert request["max_completion_tokens"] == AGENT_MAX_OUTPUT_TOKENS, "an explicit cap, not Groq's 2048 default"
     assert "+ x = compute()" in prompt
     assert "- load_user (app/users.py):\ndef load_user(): ..." in prompt
     print("OK - the prompt carries the diff and the context, with the configured model")
