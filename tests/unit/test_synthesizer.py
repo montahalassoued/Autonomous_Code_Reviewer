@@ -195,6 +195,17 @@ def test_synthesizer_marks_findings_outside_the_diff():
     print("OK - a finding on a caller from main is labelled, not dropped")
 
 
+def test_synthesizer_marks_a_line_the_diff_does_not_show():
+    diff = "\n".join(["diff --git a/some/file.py b/some/file.py", "--- a/some/file.py", "+++ b/some/file.py",
+                      "@@ -9,2 +9,3 @@", " def f():", "+    value = load()", "     return value"])
+    inside, outside = make_finding("logic", "HIGH"), make_finding("logic", "HIGH")
+    outside["line_number"] = 200
+
+    assert "(line not in the diff)" not in render([inside], diff)
+    assert "`some/file.py:200` (line not in the diff)" in render([outside], diff)
+    print("OK - a line outside the diff's hunks is labelled, so nobody looks for it in the PR")
+
+
 def test_synthesizer_budget_drops_nits_first_and_counts_the_rest():
     big = "word " * 1_500
     findings = [make_finding("quality", "LOW", title=f"nit {i}", evidence=big) for i in range(40)]
