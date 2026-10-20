@@ -31,6 +31,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - Escape and sanitize every LLM field before posting over trusting the model: no mentions, beacons, hidden content, forged marker or leaked secret
 - Review lifecycle in `reviews` + a head check before and after the review + partial reviews over silent `queued` rows and full retries: failures visible and retryable, no stale comments, one failing agent costs one category
 - Benchmark scored on what production posts, with labelled cases (rule, severity, lines, allowed/forbidden) over keyword matching or an LLM judge: sees false positives and wrong lines, deterministic, replayable for free
+- Finding lines taken from the code the evidence quotes over the model's line number: models miscount diff lines but quote the right code; strict recall 0.84 to 1.00 on replay
 - Duplicate findings merged in code (same agent, file, related rule, within 5 lines) over a prompt rule alone: deterministic, testable, measurable on saved answers for free, and it works for every model
 - One model per review agent, picked per agent by the benchmark and spread over the agents when tied, plus a fallback model on a 429, over one model for all three: Groq limits each model separately, so three models give ~3x the daily reviews, and each agent gets the model best at its category
 - Benchmark prompt says "no tools in this run" and every agent call has an explicit 4096-token output cap, over the production "use your tools" line with no tools and Groq's 2048 default: models are compared on the same task, reasoning models are not cut off
@@ -595,3 +596,22 @@ costs a re-run to measure and invalidates the call cache, and stays planned on
 top; or merging across agents, which would hide a category section. Trade-off:
 two different bugs within 5 lines under related rules would be shown as one
 comment; `other` findings are merged only on the same line for that reason.
+
+## Why a finding's line comes from the code its evidence quotes
+
+On the 3-run gpt-oss-120b baseline every SQL injection was found, but 6 of 6
+were reported 2-3 lines off (the `def` line, or a line outside the function),
+while their `evidence` quoted the right code. An inline comment there would
+point at the wrong line. `review/finding_locator.py` moves a finding to the
+added line its evidence quotes (whitespace-normalized, at least 10 characters,
+nearest the reported line when several match) and leaves it alone otherwise.
+It runs inside `postprocess_findings` (`review/agents/agent_runner.py`), which
+production and the benchmark now share, so the two cannot drift. The merger
+was tightened at the same time: one rule twice is one problem only at the same
+line or on the same quoted code nearby, so two adjacent SQL injections stay two
+comments. Replayed for free: strict recall 0.84 to 1.00, line accuracy 1.00,
+precision unchanged at 0.91. Alternatives: a prompt rule ("point at the
+dangerous line"), which depends on the model and costs a re-run, or trusting
+the model's numbers. Trade-off: evidence that paraphrases instead of quoting
+keeps the model's line, and evidence quoting an unchanged context line is not
+used.

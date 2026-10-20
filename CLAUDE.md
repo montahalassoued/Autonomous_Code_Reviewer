@@ -26,7 +26,7 @@ These rules override any skill or subagent instruction that says otherwise.
 
 ```text
 app/        api/ (HTTP routers) · jobs/ (queue, dedupe) · main.py (API) · worker.py · bootstrap.py
-review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · untrusted_input.py + injection_detector.py (prompt-injection defenses) · output_sanitizer.py + secret_redactor.py (what may be posted) · finding_merger.py (one finding per problem) · agents/ (agent_runner.py, prompt_assembler.py, prompts/ shared, tools/ shared, one folder per agent: security/ logic/ quality/ with agent.py, prompts/*.md, rules.py, examples.json, tools/ (toolset.py + one file per own tool))
+review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · untrusted_input.py + injection_detector.py (prompt-injection defenses) · output_sanitizer.py + secret_redactor.py (what may be posted) · finding_locator.py (line from the quoted evidence) · finding_merger.py (one finding per problem) · agents/ (agent_runner.py, prompt_assembler.py, prompts/ shared, tools/ shared, one folder per agent: security/ logic/ quality/ with agent.py, prompts/*.md, rules.py, examples.json, tools/ (toolset.py + one file per own tool))
 rag/        Postgres indexer: file_classifier · symbol_extractor · call_resolver · code_indexer (CLI) · index_writer; worker path today: ast_parser · knowledge_graph · ingestion (NetworkX graph built at worker start, read by the agent tools until they use Postgres)
 tools/      external service clients (GitHub)       db/      postgres.py · migration_runner.py · migrations/*.sql
 eval/       llm_benchmark.py (CLI) · benchmark/ (dataset schema, scoring, metrics, report, call cache) · dataset/ · results/   infra/   Azure setup
