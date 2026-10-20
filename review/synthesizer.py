@@ -170,7 +170,8 @@ def _format_partial_note(failed_agents: list[str]) -> str | None:
     names = ", ".join(_category_title(agent) for agent in sorted(set(failed_agents), key=_category_order))
     return (
         f"⚠️ **Partial review:** {names} could not run (model or API error), so its findings are missing. "
-        "Push a new commit or redeliver the webhook to retry."
+        # A redelivery would not help: a partial review is stored as posted, so the dedupe drops it.
+        "Push a new commit to retry."
     )
 
 

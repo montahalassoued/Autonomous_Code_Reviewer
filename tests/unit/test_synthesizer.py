@@ -225,6 +225,7 @@ def test_synthesizer_names_the_missing_categories_of_a_partial_review():
     markdown = synthesizer_node(state)["final_review_markdown"]
 
     assert "Partial review" in markdown and "🧠 Logic" in markdown
+    assert "Push a new commit to retry" in markdown and "redeliver" not in markdown, "a redelivery is deduped"
     assert "Nice work" not in markdown and "security, code quality review(s)" in markdown
     print("OK - a partial review never reads as a clean one")
 
