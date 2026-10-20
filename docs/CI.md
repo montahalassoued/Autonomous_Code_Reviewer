@@ -7,8 +7,8 @@ The pipeline is defined in [`.github/workflows/ci-cd.yml`](../.github/workflows/
 | You do | Pipeline | Jobs |
 | --- | --- | --- |
 | Push to a feature branch (no PR) | Doesn't run | none |
-| Open a PR into `main`, or push to that PR | Runs | **Offline tests**, then **Docker build** |
-| Push or merge into `main` | Runs | **Offline tests**, then **Docker build**, then **Deploy** (once Azure is configured) |
+| Open a PR into `main`, or push to that PR | Runs | **Offline tests** and **Postgres tests**, then **Docker build** |
+| Push or merge into `main` | Runs | **Offline tests** and **Postgres tests**, then **Docker build**, then **Deploy** (once Azure is configured, and only if both test jobs passed) |
 | "Run workflow" in the Actions tab | Runs | Same as a push to `main` |
 
 If a job fails, the jobs after it don't run, so code that fails its tests never gets built or deployed.
@@ -29,6 +29,10 @@ This job installs Python 3.11 (the same version as the Docker image) and `requir
 | `test_main.py` | App startup and `GET /health`, with indexing mocked |
 
 The other tests in `tests/` call real APIs (Groq, GitHub) and use quota. They run only on demand, through the separate **integration-tests** workflow (Actions tab, then "Run workflow").
+
+## Job 1b: Postgres tests
+
+Runs next to the offline tests, against a throwaway `pgvector/pgvector:pg16` service container (the image docker compose uses) with `DATABASE_URL` set. It applies the migrations and runs `tests/integration/test_postgres_dedupe.py` (dedupe claim and release, the review lifecycle, the stored LLM cost) and `tests/integration/test_index_writer.py` (the code index). No API key, no quota. The deploy waits for it, so a migration that fails on Postgres is never deployed.
 
 ## Job 2: Docker build
 
