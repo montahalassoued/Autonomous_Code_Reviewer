@@ -7,6 +7,7 @@ from groq import Groq
 
 from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
 from review.agents.tools.tool_definition import Tool, ToolContext, execute_tool_call
+from review.finding_merger import merge_duplicate_findings
 from review.output_sanitizer import sanitize_finding
 from review.secret_redactor import environment_secret_values, redact_secrets
 from review.untrusted_input import CONTEXT_LABEL, DIFF_LABEL, wrap_untrusted
@@ -235,6 +236,7 @@ def run_agent(spec: AgentSpec, state: ReviewState, client: Groq, tool_context: T
             continue
         findings.append(finding)
 
+    findings = merge_duplicate_findings(findings)
     if len(findings) > MAX_FINDINGS_PER_AGENT:
         logger.warning("%s returned %d findings, keeping the %d most severe", spec.name, len(findings), MAX_FINDINGS_PER_AGENT)
         findings = sorted(findings, key=lambda finding: SEVERITY_RANK[finding["severity"]])[:MAX_FINDINGS_PER_AGENT]

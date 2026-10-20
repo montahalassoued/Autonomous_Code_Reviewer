@@ -5,6 +5,7 @@ from review.agents.logic.agent import LOGIC_AGENT
 from review.agents.quality.agent import QUALITY_AGENT
 from review.agents.security.agent import SECURITY_AGENT
 from review.diff_line_map import map_diff_lines
+from review.finding_merger import merge_duplicate_findings
 from review.output_sanitizer import sanitize_finding
 from review.synthesizer import review_label
 from review.state import Finding
@@ -45,6 +46,7 @@ def posted_findings(agent: str, text: str) -> tuple[list[Finding], int]:
             finding = sanitize_finding(finding)
         if finding is not None:
             findings.append(finding)
+    findings = merge_duplicate_findings(findings)
     findings.sort(key=lambda finding: SEVERITY_RANK[finding["severity"]])
     return findings[:MAX_FINDINGS_PER_AGENT], len(raws)
 

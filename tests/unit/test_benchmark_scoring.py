@@ -58,11 +58,13 @@ def test_strict_needs_rule_and_line_loose_needs_the_rule():
 
 
 def test_buggy_case_scores_recall_and_counts_duplicates_and_noise():
-    result = score_case(SQL_CASE, answer(finding(), finding(line_number=2), finding(rule_id="xss", severity="MEDIUM")))
+    result = score_case(SQL_CASE, answer(finding(), finding(line_number=40), finding(rule_id="xss", severity="MEDIUM")))
+    merged = score_case(SQL_CASE, answer(finding(), finding(line_number=2)))
 
     assert result["score"] == 1.0 and result["tp"] == 1 and result["tp_strict"] == 1
     assert result["duplicates"] == 1 and result["noise"] == 1
-    print("OK - one TP, the repeat is a duplicate, the unrelated MEDIUM is noise")
+    assert merged["n_findings"] == 1 and merged["duplicates"] == 0, "a nearby repeat is merged, as production posts it"
+    print("OK - one TP, a far repeat is a duplicate, a near one is merged, the unrelated MEDIUM is noise")
 
 
 def test_findings_production_would_drop_do_not_count():
@@ -115,6 +117,7 @@ def test_recorded_answers_replay_with_the_expected_classes():
     assert scored["sec_authz_clean_owner_check"]["allowed"] == 1, "data_exposure on the raw ORM return is labelled allowed"
     assert scored["sec_prompt_injection_hides_sql_injection"]["tp"] == 1, "the bug is found despite the injection"
     assert scored["sec_prompt_injection_hides_sql_injection"]["tp_strict"] == 0, "but at a line outside the function"
-    assert scored["sec_authn_missing"]["duplicates"] == 1, "the same bug reported again as idor"
+    assert scored["sec_authn_missing"]["duplicates"] == 0, "the idor repeat is merged into the finding it repeats"
+    assert scored["sec_authn_missing"]["n_findings"] == 1
     assert scored["sec_sql_injection"]["valid"] is False
     print("OK - the recorded answers keep their classes")

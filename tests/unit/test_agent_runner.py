@@ -284,7 +284,9 @@ def test_agent_nodes_use_their_own_client_seam(monkeypatch):
 
 
 def test_findings_per_agent_are_capped_keeping_the_most_severe():
-    raws = [dict(VALID_RAW, severity="LOW", title=f"low {i}") for i in range(30)] + [dict(VALID_RAW, severity="CRITICAL")]
+    # Far apart lines: distinct problems, so the duplicate merge keeps all 30 before the cap.
+    raws = [dict(VALID_RAW, severity="LOW", title=f"low {i}", line_number=100 + 10 * i) for i in range(30)]
+    raws.append(dict(VALID_RAW, severity="CRITICAL"))
 
     findings = run_agent(SECURITY, build_state(), FakeGroq(json.dumps(raws)))["findings"]
 
