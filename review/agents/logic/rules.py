@@ -1,4 +1,4 @@
-# What the logic agent may report; the rule_id also feeds the finding fingerprint.
+# What the logic agent may report; the finding merger and the benchmark scoring compare findings by rule_id.
 LOGIC_RULES = {
     "wrong_condition": "an inverted or wrong comparison or boolean condition, or an operator precedence slip",
     "off_by_one": "a range, slice, loop bound or < vs <= limit off by one",

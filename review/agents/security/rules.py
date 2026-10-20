@@ -1,4 +1,4 @@
-# What the security agent may report; the rule_id also feeds the finding fingerprint.
+# What the security agent may report; the finding merger and the benchmark scoring compare findings by rule_id.
 SECURITY_RULES = {
     "sql_injection": "SQL built from untrusted input (CWE-89)",
     "nosql_injection": "untrusted input used as a NoSQL query or operator, e.g. a raw dict in find() (CWE-943)",

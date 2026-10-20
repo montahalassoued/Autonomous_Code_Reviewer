@@ -1,4 +1,4 @@
-# What the quality agent may report; the rule_id also feeds the finding fingerprint.
+# What the quality agent may report; the finding merger and the benchmark scoring compare findings by rule_id.
 QUALITY_RULES = {
     "n_plus_one": "a database query or ORM lookup per item of a loop",
     "io_in_loop": "an HTTP, file, cache or queue call per item that could be batched",
