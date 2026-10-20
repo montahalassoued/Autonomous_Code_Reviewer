@@ -67,10 +67,12 @@ class RecordedGroq:
                 return record_to_response(record)
         if self._live_client is None:
             raise CallNotRecorded(f"{request['model']}: this call is not recorded yet (run without --offline)")
+        started = time.monotonic()
         response = self._call_live(request)
         with self._lock:
             self.live_calls += 1
             self.cache.put(key, response_to_record(response))
+        print(f"  call {self.live_calls} done: {request['model']}, {time.monotonic() - started:.0f}s", flush=True)
         return response
 
     def _call_live(self, request: dict):
@@ -86,4 +88,6 @@ class RecordedGroq:
                 status = getattr(exc, "status_code", None)
                 if status not in (429, 500, 502, 503, 504) or attempt == MAX_ATTEMPTS:
                     raise
-                time.sleep(min((provider_retry_delay_s(str(exc)) or 2.0 * attempt) + 1.0, MAX_PROVIDER_WAIT_S))
+                wait_s = min((provider_retry_delay_s(str(exc)) or 2.0 * attempt) + 1.0, MAX_PROVIDER_WAIT_S)
+                print(f"  {request['model']} answered {status}: waiting {wait_s:.0f}s (attempt {attempt}/{MAX_ATTEMPTS})", flush=True)
+                time.sleep(wait_s)
