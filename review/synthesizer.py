@@ -1,4 +1,5 @@
 from review.diff_line_map import map_diff_lines
+from review.finding_merger import merge_cross_agent_findings
 from review.injection_detector import detect_injection
 from review.output_sanitizer import COMMENT_BUDGET_CHARS, code_block, escape_markdown_text, inline_code
 from review.state import ReviewState, Finding
@@ -228,7 +229,7 @@ def _format_injection_note(diff: str) -> str | None:
 
 # LangGraph node: findings -> final review comment.
 def synthesizer_node(state: ReviewState) -> dict:
-    findings = state["findings"]
+    findings = merge_cross_agent_findings(state["findings"])
     failed_agents = state.get("failed_agents") or []
     unreviewed = state.get("unreviewed_files") or []
     notes = [note for note in (
@@ -240,7 +241,7 @@ def synthesizer_node(state: ReviewState) -> dict:
         reviewed = [CATEGORY_TITLES[agent].split(" ", 1)[1].lower() for agent in CATEGORY_TITLES if agent not in failed_agents]
         clean = f"No issues found by the {', '.join(reviewed)} review(s)." + ("" if failed_agents or unreviewed else " Nice work! ✅")
         sections = [REVIEW_HEADING, clean, *notes]
-        return {"final_review_markdown": "\n\n".join(sections) + "\n"}
+        return {"final_review_markdown": "\n\n".join(sections) + "\n", "posted_findings": []}
 
     diff_lines = commentable_lines(state["pr_diff"], state.get("changed_files") or ())
     groups = _group_by_category(findings)
@@ -256,4 +257,4 @@ def synthesizer_node(state: ReviewState) -> dict:
     if hidden:
         sections.append(f"ℹ️ {hidden} more finding(s) not shown (GitHub comment size limit).")
 
-    return {"final_review_markdown": "\n\n".join(sections) + "\n"}
+    return {"final_review_markdown": "\n\n".join(sections) + "\n", "posted_findings": findings}

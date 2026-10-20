@@ -59,6 +59,7 @@ def test_full_state_initialization():
         "llm_calls": 0,
         "tokens_in": 0,
         "tokens_out": 0,
+        "posted_findings": [],
         "final_review_markdown": "",
     }
     assert set(state) == set(ReviewState.__annotations__), "the test state covers every ReviewState field"

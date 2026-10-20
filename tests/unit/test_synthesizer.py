@@ -6,6 +6,8 @@ def make_finding(agent: str, severity: str, title: str = "Issue", evidence: str 
     return {
         "agent": agent,
         "severity": severity,
+        "rule_id": f"{agent}_rule",
+        "confidence": "high",
         "file_path": "some/file.py",
         "line_number": 10,
         "title": title,

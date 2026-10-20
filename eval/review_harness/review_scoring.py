@@ -18,7 +18,8 @@ def category_case(case: dict, agent: str) -> dict:
     }
 
 
-# Records for one review: one per category (comparable with the benchmark) and one for the review as posted.
+# Records for one review: one per category (comparable with the benchmark) and one for the review as posted
+# (after the synthesizer's cross-agent merge).
 # A failed agent's category is an error, not "no findings": a spent quota must not look like a clean pass.
 def score_review(case: dict, final_state: dict, run: int, label: str, latency_s: float) -> list[dict]:
     findings = final_state.get("findings") or []
@@ -39,7 +40,8 @@ def score_review(case: dict, final_state: dict, run: int, label: str, latency_s:
     if failed:
         records.append({**review, "error": "partial review", "clean": False, "score": 0.0})
     else:
-        records.append({**review, "error": None, **score_findings(case, findings, len(findings))})
+        posted = final_state.get("posted_findings", findings)
+        records.append({**review, "error": None, **score_findings(case, posted, len(findings))})
     return records
 
 

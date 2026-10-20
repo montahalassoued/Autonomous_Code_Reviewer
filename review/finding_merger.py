@@ -6,6 +6,11 @@ from review.state import Finding
 RELATED_RULE_GROUPS = (
     frozenset({"missing_authentication", "missing_authorization", "idor"}),
     frozenset({"n_plus_one", "io_in_loop", "repeated_work_in_loop"}),
+    frozenset({"unbounded_query", "whole_data_in_memory"}),
+)
+# Rules of two agents that describe one bug from each side: an inverted check is also a missing authorization.
+CROSS_AGENT_RULE_GROUPS = (
+    frozenset({"wrong_condition", "missing_authorization", "missing_authentication"}),
 )
 # Findings this close are about the same statement or function (decorator, def and body lines).
 MAX_LINE_GAP = 5
@@ -36,15 +41,36 @@ def same_problem(a: Finding, b: Finding) -> bool:
     return gap <= MAX_LINE_GAP and _related_rules(a["rule_id"], b["rule_id"])
 
 
-# One finding per problem: the most severe and confident is kept and names the others, so one bug gets one comment.
-def merge_duplicate_findings(findings: list[Finding]) -> list[Finding]:
-    ranked = sorted(findings, key=lambda finding: (SEVERITY_RANK[finding["severity"]], CONFIDENCE_RANK[finding["confidence"]]))
+# Two agents on one line: the same bug only when one says "other" (it names no problem) or their rules are two sides of one bug.
+# Same line and same code is not enough: a SQL injection and an unbounded query can quote the same statement.
+def same_problem_across_agents(a: Finding, b: Finding) -> bool:
+    if a["agent"] == b["agent"] or a["file_path"] != b["file_path"] or a["line_number"] != b["line_number"]:
+        return False
+    rules = {a["rule_id"], b["rule_id"]}
+    return CATCH_ALL_RULE in rules or any(rules <= group for group in CROSS_AGENT_RULE_GROUPS)
+
+
+def _merge(findings: list[Finding], is_duplicate, note) -> list[Finding]:
+    # A named rule beats "other", then the most severe and confident finding is kept.
+    ranked = sorted(findings, key=lambda finding: (finding["rule_id"] == CATCH_ALL_RULE, SEVERITY_RANK[finding["severity"]],
+                                                   CONFIDENCE_RANK[finding["confidence"]]))
     kept: list[Finding] = []
     for finding in ranked:
-        primary = next((other for other in kept if same_problem(other, finding)), None)
+        primary = next((other for other in kept if is_duplicate(other, finding)), None)
         if primary is None:
             kept.append(dict(finding))
             continue
-        note = f" Also reported as {finding['rule_id']} at line {finding['line_number']}: {finding['title']}"
-        primary["description"] = truncate_text(primary["description"] + note, FIELD_LIMITS_CHARS["description"])
+        primary["description"] = truncate_text(primary["description"] + note(finding), FIELD_LIMITS_CHARS["description"])
     return kept
+
+
+# One finding per problem within one agent: the kept finding names the others, so one bug gets one comment.
+def merge_duplicate_findings(findings: list[Finding]) -> list[Finding]:
+    return _merge(findings, same_problem,
+                  lambda finding: f" Also reported as {finding['rule_id']} at line {finding['line_number']}: {finding['title']}")
+
+
+# One finding per problem across agents, run by the synthesizer on the whole review.
+def merge_cross_agent_findings(findings: list[Finding]) -> list[Finding]:
+    return _merge(findings, same_problem_across_agents,
+                  lambda finding: f" Also reported by the {finding['agent']} review as {finding['rule_id']}: {finding['title']}")

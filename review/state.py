@@ -42,7 +42,8 @@ class ReviewState(TypedDict):
     tokens_in: Annotated[int, operator.add]
     tokens_out: Annotated[int, operator.add]
 
-    # Final output - populated by review/synthesizer.py
+    # Final output - populated by review/synthesizer.py: the findings it posts (after the cross-agent merge) and the comment
+    posted_findings: list[Finding]
     final_review_markdown: str
 
 
@@ -52,5 +53,5 @@ def initial_state(pr_number: int, repo_full_name: str, diff: str, changed_files:
     return ReviewState(
         pr_number=pr_number, repo_full_name=repo_full_name, pr_diff=diff, changed_files=changed_files,
         unreviewed_files=unreviewed_files, review_context="", findings=[], failed_agents=[],
-        llm_calls=0, tokens_in=0, tokens_out=0, final_review_markdown="",
+        llm_calls=0, tokens_in=0, tokens_out=0, posted_findings=[], final_review_markdown="",
     )
