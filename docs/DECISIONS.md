@@ -31,6 +31,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - Escape and sanitize every LLM field before posting over trusting the model: no mentions, beacons, hidden content, forged marker or leaked secret
 - Review lifecycle in `reviews` + a head check before and after the review + partial reviews over silent `queued` rows and full retries: failures visible and retryable, no stale comments, one failing agent costs one category
 - Benchmark scored on what production posts, with labelled cases (rule, severity, lines, allowed/forbidden) over keyword matching or an LLM judge: sees false positives and wrong lines, deterministic, replayable for free
+- Benchmark prompt says "no tools in this run" and every agent call has an explicit 4096-token output cap, over the production "use your tools" line with no tools and Groq's 2048 default: models are compared on the same task, reasoning models are not cut off
 
 **Superseded by the structural-context design (kept for history):**
 
@@ -535,3 +536,23 @@ in the dataset settles the same question for good) or keeping v1 (cheap, but it
 cannot see false positives or wrong lines). Trade-off: every new case needs
 hand labels, checked by `tests/unit/test_benchmark_dataset.py`; v1 is still
 printed as `legacy` so old numbers stay readable.
+
+## Why the benchmark tells models it sends no tools, and agent calls cap output at 4096 tokens
+
+The first multi-model run (2026-10-20) scored qwen at 0.49 and gpt-oss-20b at
+0.88, but the raw answers showed the setup was at fault. The production prompt
+says "no context prepared: use your tools", and the benchmark sends no tools:
+gpt-oss answers anyway, qwen writes fake `<tool_call>` text (`Read`, `bash`)
+and never answers. And with no `max_completion_tokens`, Groq's 2048 default cut
+5 gpt-oss-20b answers mid-JSON; gpt-oss-120b's longest answer was 1748 tokens,
+so production was one larger PR away from posting nothing. The benchmark now
+fills the context slot with "no context prepared and no tools in this run:
+review the diff only", and `AGENT_MAX_OUTPUT_TOKENS = 4096` is sent by both
+production (`review/agents/agent_runner.py`, which also logs a
+`finish_reason == "length"`) and the benchmark; the cap is part of the cache
+key. Alternatives: give the benchmark the real tools on fixture repos (most
+faithful, planned as tools mode, days of work and new labelled repos) or keep
+the mismatch (unfair to every model that follows the prompt). Trade-off: the
+benchmark measures diff-only reviewing, and the gpt-oss-120b baseline is re-run
+once (72 calls). Retries follow the provider's own delay ("try again in 7.5s",
+Gemini's `retryDelay`) and stop the model on a daily limit or a wait over 60 s.
