@@ -9,7 +9,9 @@ from app.jobs.factory import build_queue, build_review_status
 from app.jobs.models import ReviewJob
 from app.jobs.queue import JobQueue
 from app.jobs.review_status import SKIP_CLOSED, SKIP_SUPERSEDED, ReviewCost, ReviewStatusStore
+from review.diff_budget import fit_diff, max_diff_chars
 from review.secret_redactor import environment_secret_values, redact_secrets
+from review.synthesizer import unreviewable_markdown
 from tools.github_tools import changed_files_in_diff, get_pr_diff, get_pull_request_head, upsert_summary_comment
 
 
@@ -49,13 +51,22 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
         logger.info("Skipped job_id=%s pr=%s sha=%s: %s", job.job_id, job.pr_number, job.head_sha, reason)
         return
 
-    diff = get_pr_diff(job.repo_full_name, job.pr_number)
+    pull_request_diff = get_pr_diff(job.repo_full_name, job.pr_number)
+    # A diff over the budget would fail every agent call on the per-minute token limit: whole files are left out instead.
+    diff, over_budget = fit_diff(pull_request_diff.text, max_diff_chars())
+    unreviewed = [*pull_request_diff.files_without_patch, *over_budget]
+    if not diff.strip():
+        upsert_summary_comment(job.repo_full_name, job.pr_number, unreviewable_markdown(unreviewed))
+        status_store.mark_posted(key, int((time.monotonic() - started) * 1000), [], ReviewCost())
+        logger.info("Nothing reviewable job_id=%s pr=%s: %d file(s) left out", job.job_id, job.pr_number, len(unreviewed))
+        return
 
     initial_state = {
         "pr_number": job.pr_number,
         "repo_full_name": job.repo_full_name,
         "pr_diff": diff,
         "changed_files": changed_files_in_diff(diff),
+        "unreviewed_files": unreviewed,
         "review_context": "",
         "findings": [],
         "failed_agents": [],

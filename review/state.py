@@ -24,6 +24,8 @@ class ReviewState(TypedDict):
     repo_full_name: str
     pr_diff: str
     changed_files: list[str]
+    # Files left out of the diff (over the size budget, or no patch from GitHub): named in the review, never reviewed
+    unreviewed_files: list[str]
 
     # Repository context for the agents; empty until the structural context builder (Phase 4) fills it
     review_context: str

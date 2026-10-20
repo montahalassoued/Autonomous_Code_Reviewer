@@ -52,6 +52,7 @@ def test_full_state_initialization():
         "repo_full_name": "Montaha/test-repo",
         "pr_diff": "+ def login(username, password): ...",
         "changed_files": ["auth/login.py"],
+        "unreviewed_files": [],
         "review_context": "",
         "findings": [],
         "failed_agents": [],

@@ -3,7 +3,7 @@ import pytest
 from dotenv import load_dotenv
 load_dotenv()
 
-from tools.github_tools import get_pr_diff
+from tools.github_tools import get_pr_diff  # noqa: E402 - .env must be loaded before the client reads GITHUB_TOKEN
 
 
 # A small, merged, historical PR on a stable public repo - unlikely to
@@ -20,9 +20,11 @@ requires_github_token = pytest.mark.skipif(
 
 @requires_github_token
 def test_get_pr_diff_returns_real_content():
-    diff = get_pr_diff(STABLE_PUBLIC_REPO, STABLE_PUBLIC_PR)
+    pull_request_diff = get_pr_diff(STABLE_PUBLIC_REPO, STABLE_PUBLIC_PR)
+    diff = pull_request_diff.text
 
-    print(f"\nFetched diff ({len(diff)} chars) for {STABLE_PUBLIC_REPO}#{STABLE_PUBLIC_PR}")
+    print(f"\nFetched diff ({len(diff)} chars, {len(pull_request_diff.files_without_patch)} file(s) without patch) "
+          f"for {STABLE_PUBLIC_REPO}#{STABLE_PUBLIC_PR}")
     assert isinstance(diff, str)
     assert len(diff) > 0, "Should return non-empty diff content for a real PR"
     print("OK - get_pr_diff returned real diff content from the GitHub API")

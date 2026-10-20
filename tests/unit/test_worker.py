@@ -5,9 +5,9 @@ from app.jobs.models import ReviewJob
 from app.jobs.queue import InMemoryJobQueue
 from app.jobs.review_status import InMemoryReviewStatusStore, ReviewCost, ReviewStatus
 from app.worker import process_one, review_pull_request, run_forever
-from tools.github_tools import SUMMARY_MARKER, changed_files_in_diff, upsert_summary_comment
+from tools.github_tools import SUMMARY_MARKER, PullRequestDiff, changed_files_in_diff, upsert_summary_comment
 
-
+SMALL_DIFF = "diff --git a/app/x.py b/app/x.py\n--- a/app/x.py\n+++ b/app/x.py\n@@ -0,0 +1 @@\n+x = 1"
 VISIBILITY_S = 60
 
 
@@ -96,7 +96,7 @@ def test_run_forever_stops_when_event_is_set():
 
 def test_review_pull_request_runs_graph_and_upserts(monkeypatch):
     posted = []
-    monkeypatch.setattr("app.worker.get_pr_diff", lambda repo, pr: "the diff")
+    monkeypatch.setattr("app.worker.get_pr_diff", lambda repo, pr: PullRequestDiff(SMALL_DIFF))
     monkeypatch.setattr("app.worker.get_pull_request_head", lambda repo, pr: ("open", "abc123"))
     monkeypatch.setattr("app.worker.upsert_summary_comment", lambda repo, pr, md: posted.append((repo, pr, md)))
     graph = MagicMock()
@@ -106,7 +106,7 @@ def test_review_pull_request_runs_graph_and_upserts(monkeypatch):
     review_pull_request(graph, job, InMemoryReviewStatusStore())
 
     state = graph.invoke.call_args.args[0]
-    assert state["pr_diff"] == "the diff" and state["pr_number"] == 7
+    assert state["pr_diff"] == SMALL_DIFF and state["pr_number"] == 7 and state["unreviewed_files"] == []
     assert posted == [("owner/repo", 7, "# Review")]
     print("OK - review_pull_request invokes the graph and upserts the comment")
 
@@ -193,7 +193,7 @@ def fake_review_github(monkeypatch, heads: list[tuple[str, str]]) -> list:
     posted: list = []
     answers = iter(heads)
     monkeypatch.setattr("app.worker.get_pull_request_head", lambda repo, pr: next(answers))
-    monkeypatch.setattr("app.worker.get_pr_diff", lambda repo, pr: "diff --git a/app/x.py b/app/x.py\n+x")
+    monkeypatch.setattr("app.worker.get_pr_diff", lambda repo, pr: PullRequestDiff(SMALL_DIFF))
     monkeypatch.setattr("app.worker.upsert_summary_comment", lambda repo, pr, md: posted.append(md))
     return posted
 
@@ -203,6 +203,37 @@ def finished_graph(failed_agents: list[str] | None = None) -> MagicMock:
     graph.invoke.return_value = {"final_review_markdown": "# Review", "failed_agents": failed_agents or [],
                                  "llm_calls": 3, "tokens_in": 15_000, "tokens_out": 2_000}
     return graph
+
+
+def test_files_over_the_budget_or_without_patch_are_named_not_reviewed(monkeypatch):
+    big = "diff --git a/data/big.py b/data/big.py\n--- a/data/big.py\n+++ b/data/big.py\n@@ -0,0 +1 @@\n+" + "y" * 500
+    monkeypatch.setenv("REVIEW_MAX_DIFF_CHARS", "200")
+    fake_review_github(monkeypatch, [("open", "abc123"), ("open", "abc123")])
+    monkeypatch.setattr("app.worker.get_pr_diff",
+                        lambda repo, pr: PullRequestDiff(f"{big}\n{SMALL_DIFF}", files_without_patch=("logo.png",)))
+    graph = finished_graph()
+
+    review_pull_request(graph, ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123"),
+                        InMemoryReviewStatusStore())
+
+    state = graph.invoke.call_args.args[0]
+    assert state["pr_diff"] == SMALL_DIFF, "the small file that fits is still reviewed"
+    assert state["unreviewed_files"] == ["logo.png", "data/big.py"]
+    print("OK - the agents get what fits, the review names the rest")
+
+
+def test_a_pull_request_with_nothing_reviewable_costs_no_llm_call(monkeypatch):
+    posted = fake_review_github(monkeypatch, [("open", "abc123")])
+    monkeypatch.setattr("app.worker.get_pr_diff", lambda repo, pr: PullRequestDiff("", files_without_patch=("logo.png",)))
+    store, graph = InMemoryReviewStatusStore(), finished_graph()
+    job = ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123")
+
+    review_pull_request(graph, job, store)
+
+    graph.invoke.assert_not_called()
+    assert "Nothing in this pull request could be reviewed" in posted[0] and "logo.png" in posted[0]
+    assert store.statuses[job.dedupe_key].cost == ReviewCost()
+    print("OK - a binary-only PR gets an explanation, not three empty agent calls")
 
 
 def test_a_superseded_commit_is_skipped_before_any_llm_call(monkeypatch):

@@ -29,6 +29,7 @@ CATEGORY_TITLES = {
 OTHER_CATEGORY_TITLE = "📎 Other"
 
 REVIEW_HEADING = "## 🤖 Autonomous Code Review"
+MAX_UNREVIEWED_LISTED = 10
 
 # Must the author act before merging? Derived from severity, so it is deterministic.
 SEVERITY_LABEL = {
@@ -179,6 +180,24 @@ def _category_order(agent: str) -> int:
     return list(CATEGORY_TITLES).index(agent) if agent in CATEGORY_TITLES else len(CATEGORY_TITLES)
 
 
+# Files the agents never saw, so "no issues" is never read as covering them.
+def _format_unreviewed_note(unreviewed_files: list[str]) -> str | None:
+    if not unreviewed_files:
+        return None
+    names = ", ".join(inline_code(path) for path in unreviewed_files[:MAX_UNREVIEWED_LISTED])
+    more = len(unreviewed_files) - MAX_UNREVIEWED_LISTED
+    return (
+        f"⚠️ **Not reviewed:** {len(unreviewed_files)} file(s) were too large for one review or had no patch from GitHub: "
+        f"{names}{f' and {more} more' if more > 0 else ''}. Split the pull request to have them reviewed."
+    )
+
+
+# The comment when no file fits in a review: no agent runs, and the reader is told why.
+def unreviewable_markdown(unreviewed_files: list[str]) -> str:
+    return "\n\n".join([REVIEW_HEADING, "Nothing in this pull request could be reviewed.",
+                        _format_unreviewed_note(unreviewed_files) or ""]).rstrip() + "\n"
+
+
 # Deterministic warning: lines of the diff that look written for the AI reviewer, so a human checks them.
 def _format_injection_note(diff: str) -> str | None:
     signals = detect_injection(diff)
@@ -199,13 +218,15 @@ def _format_injection_note(diff: str) -> str | None:
 def synthesizer_node(state: ReviewState) -> dict:
     findings = state["findings"]
     failed_agents = state.get("failed_agents") or []
+    unreviewed = state.get("unreviewed_files") or []
     notes = [note for note in (
-        _format_partial_note(failed_agents), _format_injection_note(state["pr_diff"]), _format_size_note(state["pr_diff"]),
+        _format_partial_note(failed_agents), _format_unreviewed_note(unreviewed), _format_injection_note(state["pr_diff"]),
+        _format_size_note(state["pr_diff"]),
     ) if note]
 
     if not findings:
         reviewed = [CATEGORY_TITLES[agent].split(" ", 1)[1].lower() for agent in CATEGORY_TITLES if agent not in failed_agents]
-        clean = f"No issues found by the {', '.join(reviewed)} review(s)." + ("" if failed_agents else " Nice work! ✅")
+        clean = f"No issues found by the {', '.join(reviewed)} review(s)." + ("" if failed_agents or unreviewed else " Nice work! ✅")
         sections = [REVIEW_HEADING, clean, *notes]
         return {"final_review_markdown": "\n\n".join(sections) + "\n"}
 

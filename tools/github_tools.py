@@ -1,4 +1,6 @@
 import os
+from dataclasses import dataclass
+
 from github import Github, Auth
 
 from review.output_sanitizer import fit_comment
@@ -34,19 +36,28 @@ def get_pull_request_head(repo_full_name: str, pr_number: int) -> tuple[str, str
     return pull_request.state, pull_request.head.sha
 
 
+# A pull request's unified diff, and the files GitHub sent without a patch (binary, or too large to diff).
+@dataclass(frozen=True)
+class PullRequestDiff:
+    text: str
+    files_without_patch: tuple[str, ...] = ()
+
+
 # Fetches the unified diff for a pull request.
-def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
+def get_pr_diff(repo_full_name: str, pr_number: int) -> PullRequestDiff:
     client = _build_github_client()
     repo = client.get_repo(repo_full_name)
     pull_request = repo.get_pull(pr_number)
 
-    diff_parts = []
+    diff_parts, without_patch = [], []
     for file in pull_request.get_files():
-        if file.patch:  # binary files and some renames have no patch
-            name = file.filename
-            diff_parts.append(f"{DIFF_FILE_HEADER}a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n{file.patch}")
+        name = file.filename
+        if not file.patch:
+            without_patch.append(name)
+            continue
+        diff_parts.append(f"{DIFF_FILE_HEADER}a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n{file.patch}")
 
-    return "\n".join(diff_parts)
+    return PullRequestDiff("\n".join(diff_parts), tuple(without_patch))
 
 
 # The files of a diff built by get_pr_diff; a patch line never starts with "diff --git".
