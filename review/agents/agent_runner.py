@@ -47,6 +47,20 @@ def review_agent_model() -> str:
     return os.environ.get("REVIEW_AGENT_MODEL", "").strip() or DEFAULT_REVIEW_AGENT_MODEL
 
 
+# One agent's model: SECURITY_AGENT_MODEL and so on, else REVIEW_AGENT_MODEL. Groq limits each model separately.
+def agent_model(agent_name: str) -> str:
+    return os.environ.get(f"{agent_name.upper()}_AGENT_MODEL", "").strip() or review_agent_model()
+
+
+# The model an agent switches to when its own is rate limited; None when unset.
+def fallback_agent_model() -> str | None:
+    return os.environ.get("FALLBACK_AGENT_MODEL", "").strip() or None
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    return getattr(exc, "status_code", None) == 429
+
+
 # Builds a Groq client from GROQ_API_KEY.
 def build_groq_client() -> Groq:
     api_key = os.environ.get("GROQ_API_KEY")
@@ -139,8 +153,8 @@ def build_prompt(spec: AgentSpec, state: ReviewState) -> str:
     )
 
 
-def _ask_model(client: Groq, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
-    request = {"model": review_agent_model(), "messages": messages, "temperature": AGENT_TEMPERATURE,
+def _ask_model(client: Groq, model: str, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
+    request = {"model": model, "messages": messages, "temperature": AGENT_TEMPERATURE,
                "max_completion_tokens": AGENT_MAX_OUTPUT_TOKENS}
     if tool_schemas:
         request["tools"] = tool_schemas
@@ -149,6 +163,18 @@ def _ask_model(client: Groq, messages: list[dict], tool_schemas: list[dict], too
     if getattr(choice, "finish_reason", None) == "length":
         logger.warning("Agent answer cut off at %d output tokens: its findings may be lost", AGENT_MAX_OUTPUT_TOKENS)
     return choice.message
+
+
+# Asks models[0]; a 429 moves the rest of the conversation to the next model, if one is left.
+def _ask_with_fallback(client: Groq, models: list[str], agent_name: str, *request_args):
+    while True:
+        try:
+            return _ask_model(client, models[0], *request_args)
+        except Exception as exc:
+            if not _is_rate_limited(exc) or len(models) == 1:
+                raise
+            logger.warning("%s: %s is rate limited, switching to %s", agent_name, models[0], models[1])
+            models.pop(0)
 
 
 def _assistant_turn(message, tool_calls) -> dict:
@@ -168,9 +194,10 @@ def _converse(spec: AgentSpec, prompt: str, client: Groq, tool_context: ToolCont
     tool_schemas = [tool.to_groq_schema() for tool in tools.values()]
     messages = [{"role": "user", "content": prompt}]
     calls_left = spec.max_tool_calls if tools else 0
+    models = list(dict.fromkeys(model for model in (agent_model(spec.name), fallback_agent_model()) if model))
 
     while True:
-        message = _ask_model(client, messages, tool_schemas, "auto" if calls_left > 0 else "none")
+        message = _ask_with_fallback(client, models, spec.name, messages, tool_schemas, "auto" if calls_left > 0 else "none")
         tool_calls = getattr(message, "tool_calls", None) or []
         if not tool_calls or calls_left == 0:
             if tools and not message.content:

@@ -160,6 +160,7 @@ def test_run_agent_treats_none_content_as_no_findings():
 
 def test_run_agent_sends_diff_context_model_and_temperature(monkeypatch):
     monkeypatch.setenv("REVIEW_AGENT_MODEL", "groq-test-model")
+    monkeypatch.delenv("QUALITY_AGENT_MODEL", raising=False)
     context = "- load_user (app/users.py):\ndef load_user(): ..."
     client = FakeGroq("[]")
 
@@ -190,6 +191,63 @@ def test_review_agent_model_falls_back_to_default(monkeypatch):
     monkeypatch.delenv("REVIEW_AGENT_MODEL")
     assert review_agent_model() == DEFAULT_REVIEW_AGENT_MODEL
     print("OK - unset or blank REVIEW_AGENT_MODEL uses the default model")
+
+
+def test_each_agent_can_have_its_own_model(monkeypatch):
+    monkeypatch.setenv("REVIEW_AGENT_MODEL", "shared-model")
+    monkeypatch.setenv("SECURITY_AGENT_MODEL", "security-model")
+    monkeypatch.delenv("LOGIC_AGENT_MODEL", raising=False)
+    monkeypatch.delenv("FALLBACK_AGENT_MODEL", raising=False)
+    security, logic = FakeGroq("[]"), FakeGroq("[]")
+
+    run_agent(SECURITY, build_state(), security)
+    run_agent(logic_agent.LOGIC_AGENT, build_state(), logic)
+
+    assert security.requests[0]["model"] == "security-model"
+    assert logic.requests[0]["model"] == "shared-model", "an unset agent model uses REVIEW_AGENT_MODEL"
+    print("OK - SECURITY_AGENT_MODEL overrides the shared model for that agent only")
+
+
+class RateLimitError(Exception):
+    status_code = 429
+
+
+# Fails with a 429 for the models in `limited`, answers for the others.
+class RateLimitedGroq(FakeGroq):
+
+    def __init__(self, limited: set[str]) -> None:
+        super().__init__("[]")
+        self.limited = limited
+
+    def _create(self, **request) -> SimpleNamespace:
+        self.requests.append(request)
+        if request["model"] in self.limited:
+            raise RateLimitError("Rate limit reached on tokens per day (TPD)")
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="[]"))])
+
+
+def test_a_rate_limited_agent_model_switches_to_the_fallback(monkeypatch):
+    monkeypatch.setenv("SECURITY_AGENT_MODEL", "spent-model")
+    monkeypatch.setenv("FALLBACK_AGENT_MODEL", "spare-model")
+    client = RateLimitedGroq({"spent-model"})
+
+    result = run_agent(SECURITY, build_state(), client)
+
+    assert result == {"findings": []}
+    assert [request["model"] for request in client.requests] == ["spent-model", "spare-model"]
+    print("OK - a spent daily quota costs one failed call, not the agent's review")
+
+
+def test_without_a_fallback_a_rate_limit_still_fails_the_agent(monkeypatch):
+    monkeypatch.setenv("SECURITY_AGENT_MODEL", "spent-model")
+    monkeypatch.delenv("FALLBACK_AGENT_MODEL", raising=False)
+
+    try:
+        run_agent(SECURITY, build_state(), RateLimitedGroq({"spent-model"}))
+    except RateLimitError:
+        print("OK - the error reaches the graph, which reports a partial review")
+    else:
+        raise AssertionError("a 429 with no fallback must not be swallowed")
 
 
 def test_every_agent_prompt_keeps_placeholders_and_output_contract():
