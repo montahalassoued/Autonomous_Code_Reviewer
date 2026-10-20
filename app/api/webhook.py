@@ -19,8 +19,8 @@ router = APIRouter()
 HANDLED_ACTIONS = {"opened", "synchronize", "ready_for_review"}
 
 
-# Reject the request unless its HMAC signature proves it came from GitHub.
-def _verify_signature(payload_body: bytes, signature_header: str | None) -> None:
+# GITHUB_WEBHOOK_SECRET, or a clear error; the API calls it at startup so a missing secret never reaches a request.
+def webhook_secret() -> str:
     secret = os.environ.get("GITHUB_WEBHOOK_SECRET")
     if not secret:
         raise RuntimeError(
@@ -28,6 +28,12 @@ def _verify_signature(payload_body: bytes, signature_header: str | None) -> None
             "Set it in your .env file to match the secret configured "
             "on the GitHub webhook."
         )
+    return secret
+
+
+# Reject the request unless its HMAC signature proves it came from GitHub.
+def _verify_signature(payload_body: bytes, signature_header: str | None) -> None:
+    secret = webhook_secret()
 
     if not signature_header:
         raise HTTPException(status_code=401, detail="Missing X-Hub-Signature-256 header")

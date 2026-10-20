@@ -33,6 +33,20 @@ def test_startup_creates_queue_and_dedupe_on_app_state():
     print("OK - startup stores the job queue and dedupe store on app.state")
 
 
+def test_the_api_refuses_to_start_without_the_webhook_secret(monkeypatch):
+    from app.main import app
+
+    monkeypatch.delenv("GITHUB_WEBHOOK_SECRET")
+    try:
+        with TestClient(app):
+            pass
+    except RuntimeError as error:
+        assert "GITHUB_WEBHOOK_SECRET" in str(error)
+        print("OK - a missing webhook secret stops startup with the variable's name")
+    else:
+        raise AssertionError("the API started and would answer every webhook with a 500")
+
+
 def test_webhook_router_is_mounted():
     from app.main import app
 
