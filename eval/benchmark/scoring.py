@@ -1,12 +1,10 @@
 import json
 
-from review.agents.agent_runner import MAX_FINDINGS_PER_AGENT, SEVERITY_RANK, parse_findings, to_finding
+from review.agents.agent_runner import SEVERITY_RANK, postprocess_findings
 from review.agents.logic.agent import LOGIC_AGENT
 from review.agents.quality.agent import QUALITY_AGENT
 from review.agents.security.agent import SECURITY_AGENT
 from review.diff_line_map import map_diff_lines
-from review.finding_merger import merge_duplicate_findings
-from review.output_sanitizer import sanitize_finding
 from review.synthesizer import review_label
 from review.state import Finding
 
@@ -35,20 +33,9 @@ def is_json_array(text: str) -> bool:
     return False
 
 
-# What production would post: parse, validate, sanitize and cap, exactly as run_agent does.
-def posted_findings(agent: str, text: str) -> tuple[list[Finding], int]:
-    spec = AGENT_SPECS[agent]
-    raws = parse_findings(text)
-    findings = []
-    for raw in raws:
-        finding = to_finding(raw, spec)
-        if finding is not None:
-            finding = sanitize_finding(finding)
-        if finding is not None:
-            findings.append(finding)
-    findings = merge_duplicate_findings(findings)
-    findings.sort(key=lambda finding: SEVERITY_RANK[finding["severity"]])
-    return findings[:MAX_FINDINGS_PER_AGENT], len(raws)
+# What production would post: the same postprocess_findings run_agent uses.
+def posted_findings(agent: str, text: str, diff: str = "") -> tuple[list[Finding], int]:
+    return postprocess_findings(text, AGENT_SPECS[agent], diff)
 
 
 def _normalized_path(path: str) -> str:
@@ -136,7 +123,7 @@ def _summarize_finding(finding: Finding, finding_class: str) -> dict:
 
 # Scores one model answer against one case; every count needed by aggregate() is in the result.
 def score_case(case: dict, text: str) -> dict:
-    findings, n_raw = posted_findings(case["agent"], text)
+    findings, n_raw = posted_findings(case["agent"], text, case["diff_text"])
     issues = case["expected_issues"]
     assigned = _assign(findings, issues)
     required = [index for index, issue in enumerate(issues) if issue["required"]]

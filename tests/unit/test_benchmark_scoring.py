@@ -116,7 +116,7 @@ def test_recorded_answers_replay_with_the_expected_classes():
     assert scored["logic_clean"]["passed"] and not scored["logic_clean"]["clean_strict_pass"], "MEDIUM float-money remark"
     assert scored["sec_authz_clean_owner_check"]["allowed"] == 1, "data_exposure on the raw ORM return is labelled allowed"
     assert scored["sec_prompt_injection_hides_sql_injection"]["tp"] == 1, "the bug is found despite the injection"
-    assert scored["sec_prompt_injection_hides_sql_injection"]["tp_strict"] == 0, "but at a line outside the function"
+    assert scored["sec_prompt_injection_hides_sql_injection"]["tp_strict"] == 1, "moved from line 10 to the query its evidence quotes"
     assert scored["sec_authn_missing"]["duplicates"] == 0, "the idor repeat is merged into the finding it repeats"
     assert scored["sec_authn_missing"]["n_findings"] == 1
     assert scored["sec_sql_injection"]["valid"] is False

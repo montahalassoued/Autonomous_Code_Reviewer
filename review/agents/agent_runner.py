@@ -7,6 +7,7 @@ from groq import Groq
 
 from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
 from review.agents.tools.tool_definition import Tool, ToolContext, execute_tool_call
+from review.finding_locator import locate_findings
 from review.finding_merger import merge_duplicate_findings
 from review.output_sanitizer import sanitize_finding
 from review.secret_redactor import environment_secret_values, redact_secrets
@@ -222,9 +223,15 @@ def _converse(spec: AgentSpec, prompt: str, client: Groq, tool_context: ToolCont
 # Run one agent: prompt -> Groq (with bounded tool calls) -> validated findings.
 def run_agent(spec: AgentSpec, state: ReviewState, client: Groq, tool_context: ToolContext | None = None) -> dict:
     raw_output = _converse(spec, build_prompt(spec, state), client, tool_context)
-    raw_findings = parse_findings(raw_output)
+    findings, _ = postprocess_findings(raw_output, spec, state["pr_diff"], environment_secret_values())
+    return {"findings": findings}
 
-    known_secrets = environment_secret_values()
+
+# What gets posted from a model answer: parse, validate, sanitize, move to the quoted line, merge, cap.
+# The benchmark scores through this same function, so it measures exactly what production posts.
+def postprocess_findings(raw_output: str, spec: AgentSpec, diff: str,
+                         known_secrets: tuple[str, ...] = ()) -> tuple[list[Finding], int]:
+    raw_findings = parse_findings(raw_output)
     findings = []
     for raw in raw_findings:
         finding = to_finding(raw, spec)
@@ -236,8 +243,8 @@ def run_agent(spec: AgentSpec, state: ReviewState, client: Groq, tool_context: T
             continue
         findings.append(finding)
 
-    findings = merge_duplicate_findings(findings)
+    findings = merge_duplicate_findings(locate_findings(findings, diff))
     if len(findings) > MAX_FINDINGS_PER_AGENT:
         logger.warning("%s returned %d findings, keeping the %d most severe", spec.name, len(findings), MAX_FINDINGS_PER_AGENT)
-        findings = sorted(findings, key=lambda finding: SEVERITY_RANK[finding["severity"]])[:MAX_FINDINGS_PER_AGENT]
-    return {"findings": findings}
+    findings = sorted(findings, key=lambda finding: SEVERITY_RANK[finding["severity"]])[:MAX_FINDINGS_PER_AGENT]
+    return findings, len(raw_findings)

@@ -18,13 +18,21 @@ def _related_rules(a: str, b: str) -> bool:
     return a == b or any(a in group and b in group for group in RELATED_RULE_GROUPS)
 
 
+def _same_evidence(a: Finding, b: Finding) -> bool:
+    return bool(a["evidence"].strip()) and " ".join(a["evidence"].split()) == " ".join(b["evidence"].split())
+
+
 def same_problem(a: Finding, b: Finding) -> bool:
     if a["agent"] != b["agent"] or a["file_path"] != b["file_path"]:
         return False
     gap = abs(a["line_number"] - b["line_number"])
-    # "other" says nothing about the problem, so only the same line makes two of them one.
+    # "other" names no problem, so only the same line makes two of them one.
     if CATCH_ALL_RULE in (a["rule_id"], b["rule_id"]):
         return a["rule_id"] == b["rule_id"] and gap == 0
+    # One rule twice is one problem only at one place: two SQL injections a few lines apart are two bugs.
+    if a["rule_id"] == b["rule_id"]:
+        return gap == 0 or (gap <= MAX_LINE_GAP and _same_evidence(a, b))
+    # Related rules near each other are one problem seen from two angles.
     return gap <= MAX_LINE_GAP and _related_rules(a["rule_id"], b["rule_id"])
 
 

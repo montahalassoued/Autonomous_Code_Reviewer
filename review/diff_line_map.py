@@ -10,6 +10,7 @@ HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 class FileLines:
     added: set[int] = field(default_factory=set)
     commentable: set[int] = field(default_factory=set)  # added or unchanged context, both on the new side
+    added_text: dict[int, str] = field(default_factory=dict)  # each added line's code, without the "+"
 
 
 # Each file of a unified diff with its new-file line numbers, read from the hunk headers.
@@ -32,6 +33,7 @@ def map_diff_lines(diff: str) -> dict[str, FileLines]:
             continue
         if line.startswith("+"):
             current.added.add(line_number)
+            current.added_text[line_number] = line[1:]
             current.commentable.add(line_number)
             line_number += 1
         elif line.startswith(" ") or line == "":

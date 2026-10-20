@@ -43,6 +43,16 @@ def test_distinct_problems_are_never_merged():
     print("OK - only the same problem in the same place is merged")
 
 
+def test_one_rule_twice_on_different_code_is_two_bugs():
+    first = finding(rule_id="sql_injection", line_number=3, evidence="cursor.execute(f\"... {name}\")")
+    second = finding(rule_id="sql_injection", line_number=5, evidence="cursor.execute(f\"... {email}\")")
+    repeat = finding(rule_id="sql_injection", line_number=4, evidence="cursor.execute(f\"... {name}\")")
+
+    assert len(merge_duplicate_findings([first, second])) == 2, "two nearby SQL injections are two comments"
+    assert len(merge_duplicate_findings([first, repeat])) == 1, "the same quoted code is the same bug"
+    print("OK - the same rule merges only at the same line or on the same quoted code")
+
+
 def test_two_other_findings_merge_only_on_the_same_line():
     nearby = [finding(rule_id="other", line_number=8), finding(rule_id="other", line_number=10, title="b")]
     same_line = [finding(rule_id="other"), finding(rule_id="other", title="b")]
