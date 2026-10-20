@@ -1,7 +1,7 @@
 # Progress
 
 **File purpose:** what is actually built today, versus the target design in [ARCHITECTURE.md](ARCHITECTURE.md) and the phases in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
-**Last updated:** 2026-10-18.
+**Last updated:** 2026-10-20.
 
 ## Done (in code)
 

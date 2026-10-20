@@ -39,7 +39,8 @@ docs/       IMPLEMENTATION_PLAN, CI, SETUP, DECISIONS, ...
 ```text
 GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storage Queue → app/worker.py → review/graph.py (LangGraph)
   START → security | logic | quality  (parallel, one shared runner: review/agents/agent_runner.py, bounded read-only tools)
-        → join_agents (barrier) → synthesizer → END → tools/github_tools.py   (forward-only: always terminates)
+        → join_agents (barrier) → synthesizer → END   (forward-only: always terminates)
+  then app/worker.py re-checks the PR head and upserts the summary comment (tools/github_tools.py)
 ```
 
 - **Shared state:** `review/state.py` holds `ReviewState`. `findings` and `failed_agents` use an `operator.add` reducer so parallel agents don't overwrite each other. An agent that raises is caught in `review/graph.py` (partial review naming its category); if all three fail, `join_agents` raises so the job is retried. `review_context` is empty until the Phase 4 context builder fills it; the prompt then tells the agents to use their tools.
