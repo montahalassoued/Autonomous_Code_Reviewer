@@ -177,6 +177,20 @@ def test_one_failing_agent_gives_a_partial_review(monkeypatch):
     print("OK - a failing agent costs its category, not the review")
 
 
+def test_a_failed_agent_still_counts_the_calls_it_spent():
+    from review.agents.agent_runner import AgentFailed, LlmUsage
+    from review.graph import isolate_agent_failure
+
+    def fails_after_two_calls(state):
+        raise AgentFailed("logic", LlmUsage(calls=2, tokens_in=9000, tokens_out=300)) from RuntimeError("Groq 503")
+
+    update = isolate_agent_failure("logic", fails_after_two_calls)({})
+
+    assert update["failed_agents"] == ["logic"]
+    assert (update["llm_calls"], update["tokens_in"], update["tokens_out"]) == (2, 9000, 300)
+    print("OK - a partial review's cost includes the quota the failed agent used")
+
+
 def test_every_agent_failing_raises_so_the_job_is_retried(monkeypatch):
     def groq_down():
         raise RuntimeError("Groq 503")

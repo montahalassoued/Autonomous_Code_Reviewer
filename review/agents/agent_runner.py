@@ -237,10 +237,20 @@ def _converse(spec: AgentSpec, prompt: str, client: Groq, tool_context: ToolCont
             messages.append({"role": "user", "content": FINAL_ANSWER_REQUEST})
 
 
+# An agent that fails mid-conversation still spent quota: the graph adds this usage to the partial review's cost.
+class AgentFailed(Exception):
+    def __init__(self, agent_name: str, usage: LlmUsage) -> None:
+        super().__init__(f"{agent_name} agent failed after {usage.calls} LLM call(s)")
+        self.usage = usage
+
+
 # Run one agent: prompt -> Groq (with bounded tool calls) -> validated findings.
 def run_agent(spec: AgentSpec, state: ReviewState, client: Groq, tool_context: ToolContext | None = None) -> dict:
     usage = LlmUsage()
-    raw_output = _converse(spec, build_prompt(spec, state), client, tool_context, usage)
+    try:
+        raw_output = _converse(spec, build_prompt(spec, state), client, tool_context, usage)
+    except Exception as exc:
+        raise AgentFailed(spec.name, usage) from exc
     findings, _ = postprocess_findings(raw_output, spec, state["pr_diff"], environment_secret_values())
     return {"findings": findings, "llm_calls": usage.calls, "tokens_in": usage.tokens_in, "tokens_out": usage.tokens_out}
 

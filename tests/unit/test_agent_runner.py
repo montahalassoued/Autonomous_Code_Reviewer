@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from review.agents.agent_runner import (
     AGENT_MAX_OUTPUT_TOKENS,
+    AgentFailed,
     DEFAULT_REVIEW_AGENT_MODEL,
     EMPTY_CONTEXT_SUMMARY,
     parse_findings,
@@ -244,8 +245,10 @@ def test_without_a_fallback_a_rate_limit_still_fails_the_agent(monkeypatch):
 
     try:
         run_agent(SECURITY, build_state(), RateLimitedGroq({"spent-model"}))
-    except RateLimitError:
-        print("OK - the error reaches the graph, which reports a partial review")
+    except AgentFailed as error:
+        assert isinstance(error.__cause__, RateLimitError), "the provider's error stays attached for the log"
+        assert error.usage.calls == 0, "the refused call is not counted"
+        print("OK - the error reaches the graph with the usage spent so far, and the graph reports a partial review")
     else:
         raise AssertionError("a 429 with no fallback must not be swallowed")
 
