@@ -39,3 +39,5 @@ The metrics are custom and deterministic, not RAGAS. Scores are pushed to **Lang
 2. Run a baseline with `--runs 3`, make the change, then run again.
 3. Report a table of each metric: before, after, and the delta, plus the cases that changed. A difference is real only when at least 2 cases move the same way in all 3 runs; anything less is noise.
 4. Say so plainly when a metric gets worse. Never present a regression as an improvement.
+
+When `tests/unit/test_prompt_pins.py` fails, a prompt changed: give the user the benchmark command for that agent (`--runs 3`), compare its report with the last one, and only then update `PINNED_PROMPT_HASHES` to the new `prompt_sha256` from the results file, in the same commit as the prompt change.
