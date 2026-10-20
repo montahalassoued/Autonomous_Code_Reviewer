@@ -1,3 +1,6 @@
+from eval.benchmark.model_selection import MIN_CASE_GAP, PRODUCTION_PROVIDER, recommend_models
+
+
 def _cell(value, kind: str = "ratio") -> str:
     if value is None:
         return "-"
@@ -54,6 +57,37 @@ def _failures(records: list[dict]) -> list[str]:
     return lines
 
 
+# Which model to give each agent; shown only when the run compares several models.
+def _model_choice(records: list[dict]) -> list[str]:
+    if len({record["model"] for record in records}) < 2:
+        return []
+    recommendations = recommend_models(records)
+    lines = [
+        "## Best model per agent", "",
+        f"A model beats another when it wins at least {MIN_CASE_GAP} more cases, each one in every run both models have; "
+        "models nobody beats are tied. The pick is a Groq model (production calls Groq only), a different one per agent "
+        "when a tie allows it so each model's daily quota serves one agent, then the fewest tokens per true positive.", "",
+        "| agent | cases | tied best | pick |", "|---|---|---|---|",
+    ]
+    env_lines, partial = [], []
+    for agent, recommendation in sorted(recommendations.items()):
+        choice = recommendation["choice"] or "-"
+        lines.append(f"| {agent} | {recommendation['cases']} | {', '.join(recommendation['top'])} | {choice} |")
+        if recommendation["choice"]:
+            env_lines.append(f"{agent.upper()}_AGENT_MODEL={recommendation['choice'].removeprefix(PRODUCTION_PROVIDER)}")
+        calls = {}
+        for record in records:
+            if record["agent"] == agent:
+                calls[record["model"]] = calls.get(record["model"], 0) + 1
+        most = max(calls.values())
+        partial += [f"- {model} has {count} of {most} {agent} calls: compare again once its run is complete."
+                    for model, count in sorted(calls.items()) if count < most]
+    lines += ["", "```", *env_lines, "```", ""]
+    if partial:
+        lines += ["Incomplete comparisons:", "", *partial, ""]
+    return lines
+
+
 def format_markdown(summary: list[dict], records: list[dict], settings: dict) -> str:
     overall = [row for row in summary if row["agent"] == "all"]
     per_agent = [row for row in summary if row["agent"] != "all"]
@@ -68,6 +102,7 @@ def format_markdown(summary: list[dict], records: list[dict], settings: dict) ->
         "## Cost", "", *_table(overall, COST_COLUMNS, ("model", "model")), "",
         "## Per agent", "", *_table([{**row, "label": f"{row['model']} / {row['agent']}"} for row in per_agent],
                                     MAIN_COLUMNS, ("model / agent", "label")), "",
+        *_model_choice(records),
     ]
     failures = _failures(records)
     lines += ["## Failures and noise (triage)", "", *(failures or ["None."]), ""]

@@ -361,7 +361,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--only", default="", help="comma-separated case ids to run (default: all)")
     parser.add_argument("--out", type=Path, default=DEFAULT_RESULTS_DIR, help="results directory")
     parser.add_argument("--fresh", action="store_true", help="ignore the call cache and call every model again")
-    parser.add_argument("--replay", type=Path, help="re-score a saved results JSON with the current scorer, no API call")
+    parser.add_argument("--replay", type=Path, nargs="+",
+                        help="re-score saved results JSON files with the current scorer, no API call; "
+                             "several files (one per model) are compared in one report")
     parser.add_argument("--list-models", action="store_true", help="print the models your keys can call, then exit")
     return parser.parse_args()
 
@@ -386,9 +388,14 @@ def main() -> None:
     settings = {"cases": str(args.cases), **provenance(args.cases)}
 
     if args.replay:
-        print(f"Re-scoring {args.replay} with scorer v{SCORER_VERSION} (no API call).")
-        records = replay(args.replay, cases)
-        settings |= {"replay_of": str(args.replay), "runs": max((r["run"] for r in records), default=0),
+        print(f"Re-scoring {len(args.replay)} file(s) with scorer v{SCORER_VERSION} (no API call).")
+        # Files given later win for the same (model, case, run): a completed run replaces its partial one.
+        latest = {}
+        for path in args.replay:
+            for record in replay(path, cases):
+                latest[(record["model"], record["case_id"], record["run"])] = record
+        records = list(latest.values())
+        settings |= {"replay_of": [str(path) for path in args.replay], "runs": max((r["run"] for r in records), default=0),
                      "models": sorted({r["model"] for r in records})}
     else:
         models = [m.strip() for m in args.models.split(",") if m.strip()]
