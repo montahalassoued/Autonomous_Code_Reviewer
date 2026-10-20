@@ -36,4 +36,5 @@
 
 - The review agents' model `openai/gpt-oss-120b` is a provisional default until the benchmark runs on the 3 agents.
 - The 2026-10-20 3-run baseline of gpt-oss-120b: quality, recall and clean pass 1.00, strict recall 0.84, precision 0.81 (the same auth bug reported as both `missing_authorization` and `idor`; a HIGH `unbounded_query` on `perf_n_plus_one`), clean strict 0.90. It was run with tools offered but not sent and no output cap, so it is re-run with the no-tools prompt and the 4096-token cap before comparing models; the gpt-oss-20b, qwen and Gemini runs of that day are not comparable (truncated at Groq's 2048 default, fake tool calls, quota retries).
+- Per-agent models are built (`SECURITY_AGENT_MODEL` / `LOGIC_AGENT_MODEL` / `QUALITY_AGENT_MODEL`, `FALLBACK_AGENT_MODEL`) but not chosen yet: the benchmark (30 cases, 8+ per agent) must finish for each candidate model first.
 - qwen/qwen3.8-27b cannot answer on the Groq free tier: its 1000 output tokens per minute are less than one review answer.

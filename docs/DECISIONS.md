@@ -31,6 +31,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - Escape and sanitize every LLM field before posting over trusting the model: no mentions, beacons, hidden content, forged marker or leaked secret
 - Review lifecycle in `reviews` + a head check before and after the review + partial reviews over silent `queued` rows and full retries: failures visible and retryable, no stale comments, one failing agent costs one category
 - Benchmark scored on what production posts, with labelled cases (rule, severity, lines, allowed/forbidden) over keyword matching or an LLM judge: sees false positives and wrong lines, deterministic, replayable for free
+- One model per review agent, picked per agent by the benchmark and spread over the agents when tied, plus a fallback model on a 429, over one model for all three: Groq limits each model separately, so three models give ~3x the daily reviews, and each agent gets the model best at its category
 - Benchmark prompt says "no tools in this run" and every agent call has an explicit 4096-token output cap, over the production "use your tools" line with no tools and Groq's 2048 default: models are compared on the same task, reasoning models are not cut off
 
 **Superseded by the structural-context design (kept for history):**
@@ -556,3 +557,22 @@ the mismatch (unfair to every model that follows the prompt). Trade-off: the
 benchmark measures diff-only reviewing, and the gpt-oss-120b baseline is re-run
 once (72 calls). Retries follow the provider's own delay ("try again in 7.5s",
 Gemini's `retryDelay`) and stop the model on a daily limit or a wait over 60 s.
+
+## Why each review agent has its own model
+
+The Groq free tier gives each model its own daily limit (200k tokens for
+gpt-oss-120b), and one agent call costs about 5,300 tokens, so one model
+serving all three agents allows about 12 reviews a day before every agent
+fails at once. Each agent now reads `SECURITY_AGENT_MODEL`,
+`LOGIC_AGENT_MODEL` or `QUALITY_AGENT_MODEL` (else `REVIEW_AGENT_MODEL`), and
+`FALLBACK_AGENT_MODEL`, when set, takes over the rest of an agent's
+conversation after a 429 (`review/agents/agent_runner.py`). The benchmark runs
+every model on all 30 cases and `eval/benchmark/model_selection.py` picks one
+model per agent: a model beats another only with at least 2 more cases won in
+every common run; among the tied best, it picks a Groq model not already given
+to another agent, then the fewest tokens per true positive. `--replay` takes
+several result files so one run per model can be compared without new calls.
+Alternatives: one model for everything (simplest, one quota for all agents),
+or a paid tier (no quota issue, costs money for a portfolio project). Trade-off:
+three settings to keep in sync with the benchmark, and Gemini models can win a
+category but not be picked until production has a Gemini client (Phase 3).

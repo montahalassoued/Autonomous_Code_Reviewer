@@ -49,7 +49,7 @@ The implementations shared by several agents (and later by the context subagent)
 
 `review/agents/prompt_assembler.py` builds the prompt once at import: the agent's `prompts/*.md` → its rules → its examples → the shared `review/agents/prompts/*.md` (the diff and context, then the JSON output contract). Everything else is shared:
 
-- **Model:** `REVIEW_AGENT_MODEL` (default `openai/gpt-oss-120b`, provisional until the benchmark picks one), temperature 0.1.
+- **Model:** one per agent (`SECURITY_AGENT_MODEL`, `LOGIC_AGENT_MODEL`, `QUALITY_AGENT_MODEL`), each falling back to `REVIEW_AGENT_MODEL` (default `openai/gpt-oss-120b`, provisional until the benchmark picks); `FALLBACK_AGENT_MODEL` takes over after a 429. Temperature 0.1, at most 4096 output tokens.
 - **Prompt:** `{diff}` and `{context_summary}` are filled from `ReviewState` in one pass (`fill_prompt`), so braces in examples or in the diff never break it; every prompt ends with the same output contract (`prompts/99_output_contract.md`).
 - **Parsing:** strips code fences, falls back to the outermost `[...]`, and returns `[]` on anything unparseable. A malformed response never crashes the review.
 - **Validation:** a finding is kept only with a known severity, a positive integer line and a non-empty file, title, description and suggestion. Dropped findings are logged.
