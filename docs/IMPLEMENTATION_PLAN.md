@@ -28,7 +28,7 @@ Full description: [ARCHITECTURE.md](ARCHITECTURE.md). In short:
 
 ## Verified problems the plan fixes
 
-Status (2026-10-18): V1, V2 and V8 were fixed in Phase 0. V3, V4 and V7 disappeared with the semantic retrieval, and the files they name no longer exist. V5 is fixed except `self.x()` calls, V6 is still open (Phase 4), V10 is fixed, and V12 is fixed (offline graph tests).
+Status (2026-10-18): V1, V2 and V8 were fixed in Phase 0. V3, V4 and V7 disappeared with the semantic retrieval, and the files they name no longer exist. V5 is fixed except `self.x()` calls, V6 is fixed for the worker (its call graph takes only the edges `rag/call_resolver.py` proves; the bare-name builder remains for small tool tests), V10 is fixed, and V12 is fixed (offline graph tests).
 
 | # | Problem | Where |
 |---|---|---|
