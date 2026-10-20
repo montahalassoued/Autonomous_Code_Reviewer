@@ -45,5 +45,15 @@ def test_ingest_repository_builds_the_call_graph_offline(tmp_path):
     print(f"OK - {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges, no API call")
 
 
+def test_a_file_in_another_encoding_does_not_stop_the_worker(tmp_path):
+    repo = build_test_repo(tmp_path)
+    (tmp_path / "legacy.py").write_bytes("# caf\xe9 in Latin-1\ndef old_helper():\n    pass\n".encode("latin-1"))
+
+    graph = ingest_repository(repo)
+
+    assert "legacy.py::old_helper" in graph.nodes and "auth/utils.py::login" in graph.nodes
+    print("OK - a Latin-1 file is parsed with replaced bytes instead of crashing startup")
+
+
 if __name__ == "__main__":
     print("Run under pytest: this test uses the tmp_path fixture.")

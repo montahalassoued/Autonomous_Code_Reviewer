@@ -40,7 +40,8 @@ def _parse_repo(repo_path: str) -> list[ParsedFunction]:
 
     for absolute_path in _find_python_files(repo_path):
         relative_path = os.path.relpath(absolute_path, repo_path).replace(os.sep, "/")
-        with open(absolute_path, "r", encoding="utf-8") as f:
+        # One file in another encoding must not stop the worker: bad bytes become U+FFFD.
+        with open(absolute_path, "r", encoding="utf-8", errors="replace") as f:
             source_code = f.read()
 
         parsed = parse_file(relative_path, source_code)
