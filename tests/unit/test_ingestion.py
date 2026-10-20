@@ -45,6 +45,21 @@ def test_ingest_repository_builds_the_call_graph_offline(tmp_path):
     print(f"OK - {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges, no API call")
 
 
+def test_a_call_links_only_to_the_function_it_imports(tmp_path):
+    (tmp_path / "billing").mkdir()
+    (tmp_path / "billing" / "format.py").write_text("def render(total):\n    return f'{total:.2f}'\n", encoding="utf-8")
+    (tmp_path / "emails").mkdir()
+    (tmp_path / "emails" / "format.py").write_text("def render(body):\n    return body.strip()\n", encoding="utf-8")
+    (tmp_path / "invoice.py").write_text(
+        "from billing.format import render\n\ndef invoice_line(total):\n    return render(total)\n", encoding="utf-8")
+
+    graph = ingest_repository(str(tmp_path))
+
+    assert set(graph.successors("invoice.py::invoice_line")) == {"billing/format.py::render"}, \
+        "the bare name 'render' must not link to emails/format.py too"
+    print("OK - call edges follow the import, not every function with the same name")
+
+
 def test_a_file_in_another_encoding_does_not_stop_the_worker(tmp_path):
     repo = build_test_repo(tmp_path)
     (tmp_path / "legacy.py").write_bytes("# caf\xe9 in Latin-1\ndef old_helper():\n    pass\n".encode("latin-1"))

@@ -5,7 +5,8 @@ import networkx as nx
 
 from rag.ast_parser import parse_file, ParsedFunction
 from rag.file_classifier import SKIPPED_DIRS
-from rag.knowledge_graph import build_knowledge_graph
+from rag.code_indexer import build_index
+from rag.knowledge_graph import build_resolved_graph
 
 
 # Clone a remote repo into target_dir.
@@ -55,7 +56,7 @@ def _parse_repo(repo_path: str) -> list[ParsedFunction]:
 def ingest_repository(repo_path: str) -> nx.DiGraph:
     print(f"Parsing repository at {repo_path}...")
     functions = _parse_repo(repo_path)
-    graph = build_knowledge_graph(functions)
+    graph = build_resolved_graph(functions, build_index(repo_path).resolution.edges)
     print(f"Ingestion complete: {len(functions)} function(s), "
           f"{graph.number_of_nodes()} graph nodes, {graph.number_of_edges()} graph edges.")
     return graph

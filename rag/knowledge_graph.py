@@ -1,5 +1,6 @@
 import networkx as nx
 from rag.ast_parser import ParsedFunction
+from rag.call_resolver import Edge
 
 
 # Builds a unique node identifier for a function.
@@ -45,4 +46,17 @@ def build_knowledge_graph(functions: list[ParsedFunction]) -> nx.DiGraph:
                     continue  # skip self-recursive calls for now
                 graph.add_edge(caller_id, callee_id)
 
+    return graph
+
+
+# The worker's graph: function nodes, with only the call edges rag/call_resolver.py proved, not every same-named function.
+def build_resolved_graph(functions: list[ParsedFunction], edges: list[Edge]) -> nx.DiGraph:
+    graph = nx.DiGraph()
+    for fn in functions:
+        graph.add_node(_node_id(fn.file_path, fn.qualified_name), function=fn)
+    for edge in edges:
+        caller, callee = _node_id(*edge.src), _node_id(*edge.dst)
+        # Module-level code and class headers are not nodes here; a call from or to them has no tool to serve.
+        if edge.kind == "calls" and caller != callee and caller in graph and callee in graph:
+            graph.add_edge(caller, callee)
     return graph
