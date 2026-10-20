@@ -31,6 +31,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - Escape and sanitize every LLM field before posting over trusting the model: no mentions, beacons, hidden content, forged marker or leaked secret
 - Review lifecycle in `reviews` + a head check before and after the review + partial reviews over silent `queued` rows and full retries: failures visible and retryable, no stale comments, one failing agent costs one category
 - Benchmark scored on what production posts, with labelled cases (rule, severity, lines, allowed/forbidden) over keyword matching or an LLM judge: sees false positives and wrong lines, deterministic, replayable for free
+- Duplicate findings merged in code (same agent, file, related rule, within 5 lines) over a prompt rule alone: deterministic, testable, measurable on saved answers for free, and it works for every model
 - One model per review agent, picked per agent by the benchmark and spread over the agents when tied, plus a fallback model on a 429, over one model for all three: Groq limits each model separately, so three models give ~3x the daily reviews, and each agent gets the model best at its category
 - Benchmark prompt says "no tools in this run" and every agent call has an explicit 4096-token output cap, over the production "use your tools" line with no tools and Groq's 2048 default: models are compared on the same task, reasoning models are not cut off
 
@@ -576,3 +577,21 @@ Alternatives: one model for everything (simplest, one quota for all agents),
 or a paid tier (no quota issue, costs money for a portfolio project). Trade-off:
 three settings to keep in sync with the benchmark, and Gemini models can win a
 category but not be picked until production has a Gemini client (Phase 3).
+
+## Why duplicate findings are merged in code, not only asked of the prompt
+
+The 3-run gpt-oss-120b baseline found every planted bug but reported the auth
+bugs twice, as `missing_authorization` and `idor` (6 extra findings), so a PR
+would get two comments for one problem and precision was 0.81.
+`review/finding_merger.py` merges findings of one agent on the same file within
+5 lines when the rule is the same or in a related group (one unprotected
+endpoint; one loop doing work per item); the most severe and confident one is
+kept and names the others in its description. `run_agent` and the benchmark's
+`posted_findings` both apply it, so the benchmark still scores what production
+posts. Replayed for free on the saved answers: precision 0.81 to 0.91
+(security 0.77 to 0.96), recall and strict recall unchanged. Alternatives: a
+prompt rule ("one bug, one finding"), which also helps but depends on the model,
+costs a re-run to measure and invalidates the call cache, and stays planned on
+top; or merging across agents, which would hide a category section. Trade-off:
+two different bugs within 5 lines under related rules would be shown as one
+comment; `other` findings are merged only on the same line for that reason.
