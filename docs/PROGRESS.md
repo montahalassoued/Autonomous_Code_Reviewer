@@ -22,10 +22,11 @@
 | Indexer (Phase 4, part) | Full index of a checkout into `files`, `symbols`, `edges` (calls, imports, inherits, tested_by) and `unresolved_calls`, in one transaction, no LLM. Call resolution `self`/`cls` (with repo bases) → import (relative, aliases, `__init__` re-exports, `src/` layout) → same file → unique name; library calls and locals are skipped. Run by hand: `python -m rag.code_indexer --repo owner/name --repo-path <checkout>` | `rag/`, `tests/unit/test_call_resolver.py` |
 | Tests | `tests/unit/` (offline, CI) and `tests/integration/` (real APIs, manual) | `tests/` |
 | LLM benchmark (scorer v2) | 30 labelled cases (rule ids, severity bands, line ranges, allowed / forbidden findings) scored on what production would post: strict and loose recall, precision, F1, clean pass (no blocking false alarm) and clean strict pass, rule and line accuracy, tokens per true positive. `--replay` re-scores a saved run with no API call, a call cache makes reruns pay only for missing answers, and results record the scorer, dataset, prompt hashes and commit | `eval/llm_benchmark.py`, `eval/benchmark/` |
+| Review eval harness (Phase 1, part) | 12 golden PRs written as edits to a small fixture repo (`eval/fixtures/review_repo/`, the PRs' `main`): injection, missing authorization, a prompt-injection PR, an off-by-one, a None dereference, an inverted check, a broken caller, an N+1, a missing test, and two clean PRs. Each runs through the production graph (agents with their tools, then the synthesizer) and is scored per category and as the posted review, with calls, tokens and latency per review. A recording client replays saved calls for free (`--offline`) and resumes after a spent quota | `eval/review_eval.py`, `eval/review_harness/` |
 
 ## Not built yet
 
-- Phase 1: review eval harness (`eval/review_eval.py`, golden dataset, diff + tools vs structural).
+- Phase 1 (rest): the first 3-run baseline, `--mode structural` (after the Phase 4 context builder), context recall and precision, Langfuse dataset runs.
 - Phase 3: shared LLM client (timeouts, retries, concurrency limit), Langfuse tracing. (The 3 agents, the shared runner and the nonce-wrapped prompts are done.)
 - Phase 4: running the indexer from the worker (initial import), symbol diff, triage, structural context, PR text as input, agent tools reading Postgres instead of NetworkX. (Postgres, the schema, the `reviews` dedupe and the indexer itself are done.)
 - Phase 4b: context subagent.

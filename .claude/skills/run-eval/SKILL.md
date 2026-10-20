@@ -1,6 +1,6 @@
 ---
 name: run-eval
-description: Run or extend the evaluation of this project's LLMs and review quality (eval/llm_benchmark.py today, the Phase 1 review eval harness later) and compare results before/after a change to prompts, models, retrieval or agents. Use when the user asks to evaluate, benchmark, or compare models or quality.
+description: Run or extend the evaluation of this project's LLMs and review quality (eval/llm_benchmark.py for single agent calls, eval/review_eval.py for whole reviews) and compare results before/after a change to prompts, models, retrieval or agents. Use when the user asks to evaluate, benchmark, or compare models or quality.
 ---
 
 # Evaluation
@@ -23,15 +23,20 @@ venv/Scripts/python.exe -m eval.llm_benchmark --replay <model_a>.json <model_b>.
 
 Real runs make **API calls**, so the user runs them. Before giving the command, say how many calls it makes (cases × models × runs) minus what the cache (`eval/cache/`, gitignored) already holds; `--fresh` ignores the cache. A replay costs nothing and is how a scoring or label change is checked.
 
-## What's planned: the review eval harness (Phase 1 of `docs/IMPLEMENTATION_PLAN.md`)
+## Whole reviews: `eval/review_eval.py` (Phase 1)
 
-Golden PRs with planted bugs, measuring:
-- context recall and precision
-- findings per category
-- false positives on clean PRs
-- calls per review
+It runs the **production graph** (the 3 agents with their tools, then the synthesizer) on golden PRs, so it measures what a real review posts, tool calls and fallback included. The benchmark above sends one prompt without tools; this is the configuration production runs.
+- **Dataset:** `eval/dataset/review_eval_cases.json`. Each case is a list of edits (`find`/`replace` that must match exactly once, or `create`) on `eval/fixtures/review_repo/`, the PRs' `main`; the harness builds the diff in the shape `get_pr_diff` returns. Expected issues name their `agent` and locate their line with `at` (and `at_end`), a fragment of the new code. `tests/unit/test_review_eval.py` checks every case builds and every issue sits on an added line.
+- **Scoring:** `eval/review_harness/review_scoring.py`, with the benchmark's `score_findings`: one row per category (its own issues, comparable with the benchmark) and a `review` row for the posted review (cross-agent duplicates count). A failed agent is an error, never a clean pass. Also calls, tokens and latency per review.
+- **Calls:** `eval/review_harness/recorded_client.py` records every model answer in `eval/cache/review_eval_calls.jsonl` (gitignored), keyed without the prompt's random nonce. A rerun replays them for free, a run stopped by a spent daily quota resumes where it stopped, and `--offline` refuses any unrecorded call. Per-minute 429s are waited out, so the eval measures quality, not the rate limit.
 
-The metrics are custom and deterministic, not RAGAS. Scores are pushed to **Langfuse** as dataset runs.
+```bash
+venv/Scripts/python.exe -m eval.review_eval --runs 1                       # real calls (user runs it): about 3-10 calls per case
+venv/Scripts/python.exe -m eval.review_eval --only sec_sql_injection_search  # one case
+venv/Scripts/python.exe -m eval.review_eval --runs 3 --offline             # re-score recorded runs, no API call
+```
+
+The models are the production ones (`SECURITY_/LOGIC_/QUALITY_AGENT_MODEL`, `FALLBACK_AGENT_MODEL` from `.env`). Before giving a real run, say roughly what it costs: an agent prompt is 3.5-5k tokens and every tool round resends it, so an estimated ~15k tokens per agent per case (2-3 calls), about 180k per agent per run of 12 cases. Against Groq's ~200k tokens per model per day, one run fits in a day only when the three agents use three different models; with one shared model it takes about three days, resumed from the recorded calls. Planned: `--mode structural` after the Phase 4 context builder, context recall and precision, Langfuse dataset runs.
 
 ## Comparing before and after a change
 

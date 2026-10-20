@@ -36,6 +36,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - Duplicate findings merged in code (same agent, file, related rule, within 5 lines) over a prompt rule alone: deterministic, testable, measurable on saved answers for free, and it works for every model
 - One model per review agent, picked per agent by the benchmark and spread over the agents when tied, plus a fallback model on a 429, over one model for all three: Groq limits each model separately, so three models give ~3x the daily reviews, and each agent gets the model best at its category
 - Benchmark prompt says "no tools in this run" and every agent call has an explicit 4096-token output cap, over the production "use your tools" line with no tools and Groq's 2048 default: models are compared on the same task, reasoning models are not cut off
+- Review eval on golden PRs written as edits to a fixture repo, run through the production graph with every model call recorded, over hand-written diffs or the tool-free benchmark alone: measures what a review posts, line labels follow the code, reruns are free and resume after a spent quota
 
 **Superseded by the structural-context design (kept for history):**
 
@@ -634,3 +635,9 @@ splitting the diff into several agent calls (more quota per review, and
 findings that need two files lose their context). Trade-off: on the free tier
 a large PR is reviewed only in part, and says so; a paid tier raises the
 variable.
+
+## Why the review eval writes its golden PRs as edits to a fixture repo and records every model call
+
+The benchmark scores one prompt without tools, but production runs a tool loop, a fallback model and the synthesizer, so nothing measured what a review actually posts. `eval/review_eval.py` runs the compiled production graph on 12 golden PRs against `eval/fixtures/review_repo/`, which plays `main`, so the agents' tools read real callers, guards and tests. Each case is a list of exact-once `find`/`replace` edits on that repo, and the harness builds the diff in the shape `get_pr_diff` returns. Expected issues locate their line with a fragment of the new code (`at`), so no line number can drift when a case is edited. Hand-written diffs were the alternative, but their hunk headers and line labels break on every edit.
+
+Every model answer is recorded by `RecordedGroq`, keyed on the request without its random nonce. A rerun therefore replays for free, a run stopped by the daily quota resumes where it stopped, and `--offline` re-scores after a scoring or synthesizer change with no API call. The trade-off: a replayed run measures the recorded answers, so a prompt change needs live calls again (its request, and so its key, changes), and the fixture repo is small enough that tools find what they look for faster than in a real codebase.
