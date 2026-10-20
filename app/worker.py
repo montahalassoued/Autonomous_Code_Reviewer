@@ -11,6 +11,7 @@ from app.jobs.queue import JobQueue
 from app.jobs.review_status import SKIP_CLOSED, SKIP_SUPERSEDED, ReviewCost, ReviewStatusStore
 from review.diff_budget import fit_diff, max_diff_chars
 from review.secret_redactor import environment_secret_values, redact_secrets
+from review.state import initial_state
 from review.synthesizer import unreviewable_markdown
 from tools.github_tools import changed_files_in_diff, get_pr_diff, get_pull_request_head, upsert_summary_comment
 
@@ -61,22 +62,9 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
         logger.info("Nothing reviewable job_id=%s pr=%s: %d file(s) left out", job.job_id, job.pr_number, len(unreviewed))
         return
 
-    initial_state = {
-        "pr_number": job.pr_number,
-        "repo_full_name": job.repo_full_name,
-        "pr_diff": diff,
-        "changed_files": changed_files_in_diff(diff),
-        "unreviewed_files": unreviewed,
-        "review_context": "",
-        "findings": [],
-        "failed_agents": [],
-        "llm_calls": 0,
-        "tokens_in": 0,
-        "tokens_out": 0,
-        "final_review_markdown": "",
-    }
+    review_state = initial_state(job.pr_number, job.repo_full_name, diff, changed_files_in_diff(diff), unreviewed)
 
-    final_state = compiled_graph.invoke(initial_state)
+    final_state = compiled_graph.invoke(review_state)
     cost = ReviewCost(final_state.get("llm_calls", 0), final_state.get("tokens_in", 0), final_state.get("tokens_out", 0))
     logger.info("Review cost job_id=%s: %d LLM calls, %d tokens in, %d tokens out",
                 job.job_id, cost.llm_calls, cost.tokens_in, cost.tokens_out)

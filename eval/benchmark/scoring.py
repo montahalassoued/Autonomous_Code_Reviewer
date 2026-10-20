@@ -124,6 +124,11 @@ def _summarize_finding(finding: Finding, finding_class: str) -> dict:
 # Scores one model answer against one case; every count needed by aggregate() is in the result.
 def score_case(case: dict, text: str) -> dict:
     findings, n_raw = posted_findings(case["agent"], text, case["diff_text"])
+    return {**score_findings(case, findings, n_raw), "legacy_score": legacy_score(case, text), "valid": is_json_array(text)}
+
+
+# Scores posted findings against a case's labels; the review eval scores a whole review's findings with it too.
+def score_findings(case: dict, findings: list[Finding], n_raw: int) -> dict:
     issues = case["expected_issues"]
     assigned = _assign(findings, issues)
     required = [index for index, issue in enumerate(issues) if issue["required"]]
@@ -161,8 +166,6 @@ def score_case(case: dict, text: str) -> dict:
     matched_findings = [(issues[index], findings[assigned[index][0]], assigned[index][1]) for index in matched_required]
     return {
         "score": score,
-        "legacy_score": legacy_score(case, text),
-        "valid": is_json_array(text),
         "clean": clean,
         "passed": score == 1.0,
         "clean_strict_pass": clean and forbidden == 0 and counted("noise") == 0,

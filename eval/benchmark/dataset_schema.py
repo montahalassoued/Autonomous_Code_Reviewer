@@ -28,6 +28,7 @@ def _line_range(issue: dict) -> list[int]:
 def normalize_issue(issue: dict, index: int) -> dict:
     return {
         "id": issue.get("id", f"issue_{index}"),
+        "agent": issue.get("agent"),  # review eval: the category expected to report it
         "file": issue["file"],
         "rule_ids": list(issue.get("rule_ids", [])),
         "severity": list(issue.get("severity", [])),  # acceptable severities; empty = any
