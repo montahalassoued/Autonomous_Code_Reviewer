@@ -6,12 +6,12 @@ Outputs: A running review service (FastAPI) that receives GitHub webhooks and po
 
 # autonomous-code-reviewer
 
-An AI code reviewer that runs entirely through GitHub. You push code or open a pull request, and a multi-agent pipeline (LangGraph, with read-only tools over your codebase) posts a review back on GitHub, grouped by category, with a recommendation for every finding.
+An AI code reviewer that runs entirely through GitHub. You open a pull request (or push to it), and a multi-agent pipeline (LangGraph, with read-only tools over your codebase) posts a review back on GitHub, grouped by category, with a recommendation for every finding.
 
 ## Architecture
 
 ```text
- GitHub (push / pull request)
+ GitHub (pull request)
         │  webhook (HMAC-signed)
         ▼
  FastAPI server ─ Azure Container Apps
@@ -47,7 +47,7 @@ cp .env.example .env          # fill in the API keys and TARGET_REPO_URL
 docker compose up --build     # API on http://localhost:8000 (GET /health), Postgres on localhost:5432
 ```
 
-Then point a GitHub webhook (pull request and push events) at `https://<your-server>/webhook/github`, with the same secret as `GITHUB_WEBHOOK_SECRET`.
+Then point a GitHub webhook at `https://<your-server>/webhook/github` with content type `application/json`, the same secret as `GITHUB_WEBHOOK_SECRET`, and only the **Pull requests** event (see [docs/SETUP.md](docs/SETUP.md)). Reviews of pushes to `main` (commit comments) are planned, not built.
 
 ## CI/CD
 

@@ -100,7 +100,7 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
 **What it measures:**
 - **Context:** symbol recall and precision, the percentage of chunks with code, the duplicate rate, context tokens.
 - **Findings:** precision and recall per category, false positives on clean PRs, the injection case.
-- **Ops:** calls per review, latency. Each configuration runs 3 times; a difference is real only when at least 2 cases change the same way in all 3 runs (one case is worth ~0.04 of a 24-case score, so a 0.02 threshold would be below a single case).
+- **Ops:** calls per review, latency. Each configuration runs 3 times; a difference is real only when at least 2 cases change the same way in all 3 runs (one case is worth ~0.033 of a 30-case score, so a 0.02 threshold would be below a single case).
 
 **Langfuse:** each eval run is logged as a Langfuse dataset run, with the scores attached to the traces, so runs can be compared in the Langfuse UI. The JSON files in `eval/results/` stay the source of truth.
 

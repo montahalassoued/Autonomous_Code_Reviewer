@@ -46,6 +46,17 @@ Follow [infra/README.md](../infra/README.md). It creates the Azure resources and
 3. Run: `ngrok http 8000`
 4. Use the generated public URL as your GitHub webhook target.
 
+## 6) GitHub webhook
+
+In the reviewed repository: **Settings → Webhooks → Add webhook**.
+
+- **Payload URL:** `https://<ngrok or server URL>/webhook/github`
+- **Content type:** `application/json` (a form-encoded delivery is rejected)
+- **Secret:** the value of `GITHUB_WEBHOOK_SECRET` in `.env`
+- **Events:** "Let me select individual events" → only **Pull requests** (push events are ignored today)
+
+Also set `ALLOWED_REPOS=owner/repo` in `.env`: an empty list ignores every event. Only authors GitHub lists as collaborators are reviewed, and draft PRs wait until they are marked ready.
+
 ---
 
 ## Final step: .env
