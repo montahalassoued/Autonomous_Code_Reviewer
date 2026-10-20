@@ -17,7 +17,8 @@ MAIN_COLUMNS = (
     ("quality", "quality", "ratio"), ("recall", "recall", "ratio"), ("strict recall", "strict_recall", "ratio"),
     ("precision", "precision", "ratio"), ("F1", "f1", "ratio"), ("clean pass", "clean_pass", "ratio"),
     ("clean strict", "clean_strict_pass", "ratio"), ("rule acc", "rule_accuracy", "ratio"),
-    ("line acc", "line_accuracy", "ratio"), ("invalid", "invalid_rate", "percent"), ("errors", "errors", "count"),
+    ("line acc", "line_accuracy", "ratio"), ("severity acc", "severity_accuracy", "ratio"),
+    ("invalid", "invalid_rate", "percent"), ("errors", "errors", "count"),
     ("legacy", "legacy_quality", "ratio"),
 )
 COST_COLUMNS = (
