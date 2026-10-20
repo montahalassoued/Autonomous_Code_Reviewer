@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -18,7 +19,7 @@ from eval.benchmark.dataset_schema import case_fingerprint, file_sha256, load_ag
 from eval.benchmark.metrics import summarize
 from eval.benchmark.report import format_markdown
 from eval.benchmark.scoring import AGENT_SPECS, SCORER_VERSION, score_case
-from review.agents.agent_runner import AGENT_TEMPERATURE, EMPTY_CONTEXT_SUMMARY
+from review.agents.agent_runner import AGENT_MAX_OUTPUT_TOKENS, AGENT_TEMPERATURE
 from review.agents.prompt_assembler import fill_prompt
 from review.untrusted_input import DIFF_LABEL, wrap_untrusted
 
@@ -45,8 +46,17 @@ DEFAULT_MODELS = [
 ]
 
 AGENT_PROMPTS = {name: spec.prompt_template for name, spec in AGENT_SPECS.items()}
+# The benchmark sends no tools; a prompt that offers them makes some models write fake tool calls instead of answering.
+NO_TOOLS_CONTEXT = "(no context prepared and no tools in this run: review the diff only)"
 
-# Same temperature production uses, so the benchmark measures the model, not a different sampling setup.
+# A provider wait longer than this means the quota is spent for now: stop calling that model.
+MAX_PROVIDER_WAIT_S = 60.0
+QUOTA_EXHAUSTED = "QuotaExhausted"
+DAILY_LIMIT = re.compile(r"per ?day", re.IGNORECASE)
+# "try again in 14m19.6s" (Groq), "retry in 43.2s" or 'retryDelay': '43s' (Gemini).
+RETRY_DELAY = re.compile(r"(?:try again|retry) in ((?:[\d.]+(?:h|ms|m|s))+)|retryDelay\W+([\d.]+)s")
+DELAY_PART = re.compile(r"([\d.]+)(h|ms|m|s)")
+DELAY_UNITS_S = {"h": 3600.0, "m": 60.0, "s": 1.0, "ms": 0.001}
 
 
 # What one model call returned, in a provider-neutral shape.
@@ -107,27 +117,52 @@ def _split_model_spec(model_spec: str) -> tuple[str, str]:
     return provider, model_name
 
 
-# A 429 on a per-day limit (Groq TPD/RPD): no retry or later call can succeed before the window frees up.
-def is_daily_quota(error: str | BaseException | None) -> bool:
-    return error is not None and "per day" in str(error)
+# Seconds the provider asks us to wait before retrying, if its error says.
+def provider_retry_delay_s(message: str) -> float | None:
+    match = RETRY_DELAY.search(message)
+    if not match:
+        return None
+    if match.group(2):
+        return float(match.group(2))
+    return sum(float(amount) * DELAY_UNITS_S[unit] for amount, unit in DELAY_PART.findall(match.group(1)))
 
 
-# Rate limits (429) and server errors (5xx) are worth retrying, except a spent daily quota.
+# A daily limit, or a wait too long for a benchmark: no retry or later call can succeed for a while.
+def is_quota_exhausted(error: str | BaseException | None) -> bool:
+    if error is None:
+        return False
+    message = str(error)
+    delay = provider_retry_delay_s(message)
+    return message.startswith(QUOTA_EXHAUSTED) or bool(DAILY_LIMIT.search(message)) or (delay or 0) > MAX_PROVIDER_WAIT_S
+
+
+# Rate limits (429) and server errors (5xx) are worth retrying, except a spent quota or a request over a per-request limit.
 def _is_retryable(exc: BaseException) -> bool:
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-    return status in (429, 500, 502, 503, 504) and not is_daily_quota(exc)
+    too_large = "request too large" in str(exc).lower()
+    return status in (429, 500, 502, 503, 504) and not too_large and not is_quota_exhausted(exc)
+
+
+_backoff = wait_exponential(multiplier=2, min=2, max=30)
+
+
+# Wait what the provider asks for (a per-minute window), else back off exponentially.
+def _wait_for_provider(retry_state) -> float:
+    delay = provider_retry_delay_s(str(retry_state.outcome.exception()))
+    return min(delay + 1.0, MAX_PROVIDER_WAIT_S) if delay is not None else _backoff(retry_state)
 
 
 # One Groq chat completion, retried on 429/5xx.
 @retry(
     retry=retry_if_exception(_is_retryable),
     stop=stop_after_attempt(4),
-    wait=wait_exponential(multiplier=2, min=2, max=30),
+    wait=_wait_for_provider,
     reraise=True,
 )
 def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int]:
     client = _build_groq_client()
     kwargs = {"temperature": temperature} if temperature is not None else {}
+    kwargs["max_completion_tokens"] = AGENT_MAX_OUTPUT_TOKENS
     response = client.chat.completions.create(
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
@@ -145,14 +180,14 @@ def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple
 @retry(
     retry=retry_if_exception(_is_retryable),
     stop=stop_after_attempt(4),
-    wait=wait_exponential(multiplier=2, min=2, max=30),
+    wait=_wait_for_provider,
     reraise=True,
 )
 def _call_gemini(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int]:
     from google.genai import types
 
     client = _build_gemini_client()
-    config = types.GenerateContentConfig(temperature=temperature) if temperature is not None else None
+    config = types.GenerateContentConfig(temperature=temperature, max_output_tokens=AGENT_MAX_OUTPUT_TOKENS)
     response = client.models.generate_content(model=model_name, contents=prompt, config=config)
     usage = response.usage_metadata
     return (
@@ -176,7 +211,9 @@ def call_model(model_spec: str, prompt: str, temperature: float | None) -> CallR
         text, input_tokens, output_tokens = call(model_name, prompt, temperature)
         return CallResult(text, time.perf_counter() - start, input_tokens, output_tokens, attempts=_attempts(call))
     except Exception as exc:  # noqa: BLE001 - any failure is a benchmark result
-        return CallResult("", time.perf_counter() - start, error=f"{type(exc).__name__}: {exc}"[:300],
+        # Marked on the full message: the stored error is cut to 300 characters, before Gemini names its daily quota.
+        kind = QUOTA_EXHAUSTED if is_quota_exhausted(exc) else type(exc).__name__
+        return CallResult("", time.perf_counter() - start, error=f"{kind}: {exc}"[:300],
                           attempts=_attempts(call) if call else 1)
 
 
@@ -210,15 +247,15 @@ def list_available_models() -> None:
 # Prompts, runs, replay
 # ---------------------------------------------------------------------
 
-# Production agent prompt for a case: the diff wrapped as untrusted data, no prepared context.
+# Production agent prompt for a case: the diff wrapped as untrusted data, no context and no tools.
 def build_agent_prompt(case: dict) -> str:
     diff = wrap_untrusted(case["diff_text"], DIFF_LABEL)
-    return fill_prompt(AGENT_PROMPTS[case["agent"]], diff, EMPTY_CONTEXT_SUMMARY)
+    return fill_prompt(AGENT_PROMPTS[case["agent"]], diff, NO_TOOLS_CONTEXT)
 
 
 # The prompt without its random nonce, so the cache key is stable across runs.
 def _cache_prompt(case: dict) -> str:
-    return fill_prompt(AGENT_PROMPTS[case["agent"]], case["diff_text"], EMPTY_CONTEXT_SUMMARY)
+    return fill_prompt(AGENT_PROMPTS[case["agent"]], case["diff_text"], NO_TOOLS_CONTEXT)
 
 
 def _record(case: dict, model: str, run: int, scored: dict, result: dict, cached: bool) -> dict:
@@ -245,13 +282,13 @@ def run_benchmark(
         quota_spent = False
         for case in cases:
             for run in range(1, runs + 1):
-                key = CallCache.key(model, AGENT_TEMPERATURE, _cache_prompt(case), run)
+                key = CallCache.key(model, AGENT_TEMPERATURE, _cache_prompt(case), run, AGENT_MAX_OUTPUT_TOKENS)
                 cached = cache.get(key) if cache else None
                 if quota_spent and not cached:
                     continue
                 result = cached or asdict(call_fn(model, build_agent_prompt(case), AGENT_TEMPERATURE))
-                if is_daily_quota(result["error"]):
-                    print(f"  {model}: daily quota spent, its remaining uncached calls are skipped")
+                if is_quota_exhausted(result["error"]):
+                    print(f"  {model}: quota spent ({result['error'][:120]}), its remaining uncached calls are skipped")
                     quota_spent = True
                     continue
                 if cache and not cached:
@@ -364,7 +401,7 @@ def main() -> None:
         missing = len(cases) * len(models) * args.runs - len(records)
         settings |= {"models": models, "runs": args.runs, "missing_calls": missing}
         if missing:
-            print(f"\nIncomplete: {missing} call(s) skipped on a daily quota. Rerun the same command once it resets; "
+            print(f"\nIncomplete: {missing} call(s) skipped on a spent quota. Rerun the same command once it resets; "
                   "cached answers cost nothing.")
 
     summary = summarize(records)

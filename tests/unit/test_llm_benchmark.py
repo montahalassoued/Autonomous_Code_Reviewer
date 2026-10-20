@@ -5,7 +5,8 @@ from eval.benchmark.dataset_schema import load_agent_cases, normalize_case
 from eval.benchmark.metrics import summarize
 from eval.benchmark.report import format_markdown
 from eval.llm_benchmark import (
-    DEFAULT_CASES_PATH, CallResult, _is_retryable, build_agent_prompt, provenance, replay, run_benchmark,
+    DEFAULT_CASES_PATH, NO_TOOLS_CONTEXT, CallResult, _is_retryable, build_agent_prompt, is_quota_exhausted, provenance,
+    provider_retry_delay_s, replay, run_benchmark,
 )
 
 
@@ -77,6 +78,31 @@ def test_daily_quota_is_not_retried_but_a_minute_limit_is():
     assert not _is_retryable(QuotaError("Rate limit reached on tokens per day (TPD)"))
     assert _is_retryable(QuotaError("Rate limit reached on tokens per minute (TPM)"))
     print("OK - waiting seconds only helps a per-minute limit")
+
+
+def test_provider_delays_decide_between_waiting_and_stopping():
+    groq_minute = "Rate limit reached on tokens per minute (TPM). Please try again in 7.5s."
+    groq_long = "Rate limit reached. Please try again in 14m19.68s."
+    gemini = "429 RESOURCE_EXHAUSTED. {'details': [{'retryDelay': '43s'}]}"
+
+    assert provider_retry_delay_s(groq_minute) == 7.5 and provider_retry_delay_s(gemini) == 43.0
+    assert abs(provider_retry_delay_s(groq_long) - 859.68) < 0.01
+    assert not is_quota_exhausted(groq_minute) and not is_quota_exhausted(gemini), "short waits are retried"
+    assert is_quota_exhausted(groq_long), "a 14-minute wait ends the model's run"
+    assert is_quota_exhausted("ClientError: quotaId GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+    print("OK - the provider's own delay picks wait or stop")
+
+
+def test_a_request_over_a_per_request_limit_is_not_retried():
+    assert not _is_retryable(QuotaError("Request too large for model on output tokens per minute (OTPM): Limit 1000"))
+    print("OK - retrying the same oversized request cannot succeed")
+
+
+def test_benchmark_prompt_does_not_offer_tools_it_will_not_send():
+    prompt = build_agent_prompt(SQL_CASE)
+
+    assert NO_TOOLS_CONTEXT in prompt and "use your tools" not in prompt
+    print("OK - the model is told to review the diff only")
 
 
 def test_replay_rescores_a_saved_file_without_calls(tmp_path):

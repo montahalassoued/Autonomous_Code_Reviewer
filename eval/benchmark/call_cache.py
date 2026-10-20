@@ -11,8 +11,8 @@ class CallCache:
         self._entries: dict[str, dict] | None = None
 
     @staticmethod
-    def key(model: str, temperature: float | None, prompt: str, run: int) -> str:
-        content = json.dumps([model, temperature, prompt, run])
+    def key(model: str, temperature: float | None, prompt: str, run: int, max_output_tokens: int | None = None) -> str:
+        content = json.dumps([model, temperature, prompt, run, max_output_tokens])
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def _load(self) -> dict[str, dict]:
