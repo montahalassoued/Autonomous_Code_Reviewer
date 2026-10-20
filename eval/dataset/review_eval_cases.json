@@ -19,6 +19,10 @@
       "expected_issues": [
         {"agent": "security", "file": "shop/users.py", "rule_ids": ["sql_injection"], "severity": ["HIGH", "CRITICAL"],
          "at": "WHERE email LIKE", "keywords": ["sql injection", "parameteriz", "cwe-89"]}
+      ],
+      "allowed_findings": [
+        {"agent": "quality", "file": "shop/users.py", "rule_ids": ["unbounded_query", "whole_data_in_memory"], "max_severity": "MEDIUM",
+         "why": "a search with no LIMIT deserves a remark, but not a blocking one"}
       ]
     },
     {

@@ -100,3 +100,13 @@ def test_a_whole_review_is_scored_per_category_and_as_posted(tmp_path, monkeypat
                                               "recorded_calls": 0, **totals})
     assert "| review |" in report and "clean_docs_only" in report
     print("OK - the production graph runs on the fixture and is scored per category and per review")
+
+
+def test_an_allowed_finding_with_an_agent_applies_to_that_category_only():
+    from eval.review_harness.review_scoring import category_case
+
+    [case] = [case for case in load_review_cases() if case["id"] == "sec_sql_injection_search"]
+
+    assert category_case(case, "quality")["allowed_findings"], "quality may remark on the missing LIMIT"
+    assert not category_case(case, "logic")["allowed_findings"], "the label is not a free pass for logic"
+    print("OK - an allowed finding labelled for quality does not excuse the other agents")

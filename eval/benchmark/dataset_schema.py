@@ -41,6 +41,7 @@ def normalize_issue(issue: dict, index: int) -> dict:
 # A finding pattern for allowed_findings / forbidden_findings: file, optional rule ids, lines and severity cap.
 def normalize_pattern(pattern: dict) -> dict:
     return {
+        "agent": pattern.get("agent"),  # review eval: the category it applies to; None = every category
         "file": pattern["file"],
         "rule_ids": list(pattern.get("rule_ids", [])),
         "line_range": list(pattern["line_range"]) if "line_range" in pattern else None,
