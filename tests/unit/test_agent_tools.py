@@ -302,7 +302,8 @@ def test_tool_calls_stop_at_the_limit(repo):
     assert len(client.requests) == SECURITY_AGENT.max_tool_calls + 1, "N tool turns, then one forced answer"
     assert client.requests[-1]["tool_choice"] == "none"
     assert client.requests[-1]["messages"][-1] == {"role": "user", "content": FINAL_ANSWER_REQUEST}
-    assert result == {"findings": []}
+    assert result["findings"] == []
+    assert result["llm_calls"] == SECURITY_AGENT.max_tool_calls + 1, "every tool round is a paid model call"
     print(f"OK - at most {SECURITY_AGENT.max_tool_calls} tool calls, then tool_choice='none'")
 
 

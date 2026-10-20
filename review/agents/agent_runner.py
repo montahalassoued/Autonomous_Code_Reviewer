@@ -155,13 +155,29 @@ def build_prompt(spec: AgentSpec, state: ReviewState) -> str:
     )
 
 
-def _ask_model(client: Groq, model: str, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
+# Model responses and tokens of one agent's conversation, tool rounds included.
+@dataclass
+class LlmUsage:
+    calls: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+    def record(self, response) -> None:
+        usage = getattr(response, "usage", None)
+        self.calls += 1
+        self.tokens_in += getattr(usage, "prompt_tokens", 0) or 0
+        self.tokens_out += getattr(usage, "completion_tokens", 0) or 0
+
+
+def _ask_model(client: Groq, model: str, usage: LlmUsage, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
     request = {"model": model, "messages": messages, "temperature": AGENT_TEMPERATURE,
                "max_completion_tokens": AGENT_MAX_OUTPUT_TOKENS}
     if tool_schemas:
         request["tools"] = tool_schemas
         request["tool_choice"] = tool_choice
-    choice = client.chat.completions.create(**request).choices[0]
+    response = client.chat.completions.create(**request)
+    usage.record(response)
+    choice = response.choices[0]
     if getattr(choice, "finish_reason", None) == "length":
         logger.warning("Agent answer cut off at %d output tokens: its findings may be lost", AGENT_MAX_OUTPUT_TOKENS)
     return choice.message
@@ -191,7 +207,7 @@ def _assistant_turn(message, tool_calls) -> dict:
 
 
 # Let the model call its tools up to the limit, then make it answer with tool_choice="none".
-def _converse(spec: AgentSpec, prompt: str, client: Groq, tool_context: ToolContext | None) -> str:
+def _converse(spec: AgentSpec, prompt: str, client: Groq, tool_context: ToolContext | None, usage: LlmUsage) -> str:
     tools = {tool.name: tool for tool in spec.tools if tool_context is not None and tool.is_available(tool_context)}
     tool_schemas = [tool.to_groq_schema() for tool in tools.values()]
     messages = [{"role": "user", "content": prompt}]
@@ -199,7 +215,8 @@ def _converse(spec: AgentSpec, prompt: str, client: Groq, tool_context: ToolCont
     models = list(dict.fromkeys(model for model in (agent_model(spec.name), fallback_agent_model()) if model))
 
     while True:
-        message = _ask_with_fallback(client, models, spec.name, messages, tool_schemas, "auto" if calls_left > 0 else "none")
+        message = _ask_with_fallback(client, models, spec.name, usage, messages, tool_schemas,
+                                     "auto" if calls_left > 0 else "none")
         tool_calls = getattr(message, "tool_calls", None) or []
         if not tool_calls or calls_left == 0:
             if tools and not message.content:
@@ -222,9 +239,10 @@ def _converse(spec: AgentSpec, prompt: str, client: Groq, tool_context: ToolCont
 
 # Run one agent: prompt -> Groq (with bounded tool calls) -> validated findings.
 def run_agent(spec: AgentSpec, state: ReviewState, client: Groq, tool_context: ToolContext | None = None) -> dict:
-    raw_output = _converse(spec, build_prompt(spec, state), client, tool_context)
+    usage = LlmUsage()
+    raw_output = _converse(spec, build_prompt(spec, state), client, tool_context, usage)
     findings, _ = postprocess_findings(raw_output, spec, state["pr_diff"], environment_secret_values())
-    return {"findings": findings}
+    return {"findings": findings, "llm_calls": usage.calls, "tokens_in": usage.tokens_in, "tokens_out": usage.tokens_out}
 
 
 # What gets posted from a model answer: parse, validate, sanitize, move to the quoted line, merge, cap.

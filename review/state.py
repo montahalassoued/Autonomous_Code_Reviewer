@@ -35,5 +35,10 @@ class ReviewState(TypedDict):
     # Agents that raised (Groq 429/5xx, timeout): the review is posted without their category
     failed_agents: Annotated[list[str], operator.add]
 
+    # What the review cost: model responses and tokens, summed over the parallel agents (stored in reviews)
+    llm_calls: Annotated[int, operator.add]
+    tokens_in: Annotated[int, operator.add]
+    tokens_out: Annotated[int, operator.add]
+
     # Final output - populated by review/synthesizer.py
     final_review_markdown: str

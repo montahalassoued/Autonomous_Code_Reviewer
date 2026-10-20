@@ -43,6 +43,7 @@ FINDING_REPLY = (
     '"title": "Empty hash accepted", "description": "d", "evidence": "e", "suggestion": "s"}]'
 )
 RECURSION_LIMIT = 15
+FAKE_TOKENS_IN, FAKE_TOKENS_OUT = 5_000, 700
 
 
 # Stand-in for a Groq client: records each request and replies with `content`.
@@ -55,7 +56,8 @@ class FakeLLM:
     def _create(self, **request) -> SimpleNamespace:
         self.calls.append((self.role, request))
         message = SimpleNamespace(content=self.content, tool_calls=None)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        usage = SimpleNamespace(prompt_tokens=FAKE_TOKENS_IN, completion_tokens=FAKE_TOKENS_OUT)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
 
 
 # Fakes every agent's Groq client; returns the recorded (role, request) calls.
@@ -103,6 +105,17 @@ def test_clean_pr_terminates_and_calls_each_agent_once(monkeypatch):
     assert final_state["findings"] == []
     assert "No issues found" in final_state["final_review_markdown"], "a clean PR must still produce a review comment"
     print(f"OK - clean PR finished in one pass, LLM calls: {roles}")
+
+
+def test_the_review_cost_adds_up_over_the_parallel_agents(monkeypatch):
+    install_fakes(monkeypatch, CLEAN_AGENT_REPLY)
+
+    final_state = run_review()
+
+    agents = len(REVIEW_AGENTS)
+    assert final_state["llm_calls"] == agents
+    assert (final_state["tokens_in"], final_state["tokens_out"]) == (agents * FAKE_TOKENS_IN, agents * FAKE_TOKENS_OUT)
+    print(f"OK - {agents} agents, one call each: the counters are summed, not overwritten")
 
 
 def test_pr_with_findings_reaches_the_synthesizer(monkeypatch):

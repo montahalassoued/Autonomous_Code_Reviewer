@@ -154,7 +154,7 @@ def test_run_agent_keeps_valid_findings_and_drops_bad_ones():
 def test_run_agent_treats_none_content_as_no_findings():
     result = run_agent(logic_agent.LOGIC_AGENT, build_state(), FakeGroq(None))
 
-    assert result == {"findings": []}
+    assert result["findings"] == []
     print("OK - None content yields no findings")
 
 
@@ -233,7 +233,7 @@ def test_a_rate_limited_agent_model_switches_to_the_fallback(monkeypatch):
 
     result = run_agent(SECURITY, build_state(), client)
 
-    assert result == {"findings": []}
+    assert result["findings"] == [] and result["llm_calls"] == 1, "the refused call is not counted"
     assert [request["model"] for request in client.requests] == ["spent-model", "spare-model"]
     print("OK - a spent daily quota costs one failed call, not the agent's review")
 

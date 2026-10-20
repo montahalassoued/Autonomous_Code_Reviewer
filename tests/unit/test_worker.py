@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from app.jobs.models import ReviewJob
 from app.jobs.queue import InMemoryJobQueue
-from app.jobs.review_status import InMemoryReviewStatusStore, ReviewStatus
+from app.jobs.review_status import InMemoryReviewStatusStore, ReviewCost, ReviewStatus
 from app.worker import process_one, review_pull_request, run_forever
 from tools.github_tools import SUMMARY_MARKER, changed_files_in_diff, upsert_summary_comment
 
@@ -200,7 +200,8 @@ def fake_review_github(monkeypatch, heads: list[tuple[str, str]]) -> list:
 
 def finished_graph(failed_agents: list[str] | None = None) -> MagicMock:
     graph = MagicMock()
-    graph.invoke.return_value = {"final_review_markdown": "# Review", "failed_agents": failed_agents or []}
+    graph.invoke.return_value = {"final_review_markdown": "# Review", "failed_agents": failed_agents or [],
+                                 "llm_calls": 3, "tokens_in": 15_000, "tokens_out": 2_000}
     return graph
 
 
@@ -236,6 +237,7 @@ def test_a_push_during_the_review_drops_the_result(monkeypatch):
 
     assert posted == [], "the review of the older commit must not overwrite the newer one"
     assert store.statuses[job.dedupe_key].status == "skipped"
+    assert store.statuses[job.dedupe_key].cost == ReviewCost(3, 15_000, 2_000), "the tokens were spent anyway"
     print("OK - the head is checked again just before posting")
 
 
@@ -249,7 +251,8 @@ def test_a_posted_review_records_latency_and_missing_categories(monkeypatch):
     status = store.statuses[job.dedupe_key]
     assert posted == ["# Review"] and status.status == "posted"
     assert status.missing_categories == ("logic",) and status.latency_ms >= 0
-    print("OK - posted, with the partial categories and the latency")
+    assert status.cost == ReviewCost(llm_calls=3, tokens_in=15_000, tokens_out=2_000)
+    print("OK - posted, with the partial categories, the latency and the LLM cost")
 
 
 def test_a_dead_lettered_job_is_recorded_as_failed_with_a_redacted_reason(monkeypatch):

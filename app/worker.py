@@ -8,7 +8,7 @@ from typing import Callable
 from app.jobs.factory import build_queue, build_review_status
 from app.jobs.models import ReviewJob
 from app.jobs.queue import JobQueue
-from app.jobs.review_status import SKIP_CLOSED, SKIP_SUPERSEDED, ReviewStatusStore
+from app.jobs.review_status import SKIP_CLOSED, SKIP_SUPERSEDED, ReviewCost, ReviewStatusStore
 from review.secret_redactor import environment_secret_values, redact_secrets
 from tools.github_tools import changed_files_in_diff, get_pr_diff, get_pull_request_head, upsert_summary_comment
 
@@ -59,19 +59,25 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
         "review_context": "",
         "findings": [],
         "failed_agents": [],
+        "llm_calls": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
         "final_review_markdown": "",
     }
 
     final_state = compiled_graph.invoke(initial_state)
+    cost = ReviewCost(final_state.get("llm_calls", 0), final_state.get("tokens_in", 0), final_state.get("tokens_out", 0))
+    logger.info("Review cost job_id=%s: %d LLM calls, %d tokens in, %d tokens out",
+                job.job_id, cost.llm_calls, cost.tokens_in, cost.tokens_out)
     reason = stale_reason(job)
     if reason:
-        status_store.mark_skipped(key, reason)
+        status_store.mark_skipped(key, reason, cost)
         logger.info("Dropped the finished review job_id=%s pr=%s sha=%s: %s", job.job_id, job.pr_number, job.head_sha, reason)
         return
 
     upsert_summary_comment(job.repo_full_name, job.pr_number, final_state["final_review_markdown"])
     latency_ms = int((time.monotonic() - started) * 1000)
-    status_store.mark_posted(key, latency_ms, final_state.get("failed_agents") or [])
+    status_store.mark_posted(key, latency_ms, final_state.get("failed_agents") or [], cost)
 
 
 # Receives at most one message and handles it.
