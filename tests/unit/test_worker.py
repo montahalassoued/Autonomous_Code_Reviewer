@@ -273,6 +273,21 @@ def test_a_dead_lettered_job_is_recorded_as_failed_with_a_redacted_reason(monkey
     print("OK - the third failure marks the review failed, without leaking the key")
 
 
+def test_a_job_whose_worker_kept_dying_is_dead_lettered_without_running():
+    queue, clock, job = make_queue_with_job()
+    store = InMemoryReviewStatusStore()
+    for _ in range(3):  # three leases that never finished: the process was killed each time
+        queue.receive(max_messages=1, visibility_timeout_s=VISIBILITY_S)
+        clock.now += VISIBILITY_S + 1
+    reviewed = []
+
+    process_one(queue, reviewed.append, max_attempts=3, visibility_timeout_s=VISIBILITY_S, status_store=store)
+
+    assert reviewed == [], "a fourth delivery must not pay for the LLM calls again"
+    assert queue.poison == [job] and store.statuses[job.dedupe_key].status == "failed"
+    print("OK - a crash loop ends in the poison queue, recorded as failed")
+
+
 def test_a_failure_below_the_cap_is_not_marked_failed():
     queue, _clock, job = make_queue_with_job()
     store = InMemoryReviewStatusStore()

@@ -94,6 +94,13 @@ def process_one(
 
     message = messages[0]
     job = message.job
+    # Over the cap before running: earlier attempts died without raising (killed, out of memory), so stop here.
+    if message.dequeue_count > max_attempts:
+        queue.dead_letter(message)
+        logger.error("Job dead-lettered job_id=%s: %s deliveries never finished", job.job_id, message.dequeue_count)
+        if status_store is not None:
+            _record_failure(status_store, job, RuntimeError(f"worker stopped {message.dequeue_count - 1} times mid-review"))
+        return True
     try:
         review_fn(job)
     except Exception as error:  # any failure must be recorded and retried, never crash the worker
