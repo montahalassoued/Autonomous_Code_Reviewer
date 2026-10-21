@@ -1,6 +1,8 @@
 from typing import TypedDict, Annotated, Literal
 import operator
 
+from review.secret_redactor import redact_for_llm
+
 
 # A single issue detected by an agent in the analyzed code.
 class Finding(TypedDict):
@@ -50,8 +52,9 @@ class ReviewState(TypedDict):
 # The state a review starts from; the worker and the review eval both build it here, so the eval runs what production runs.
 def initial_state(pr_number: int, repo_full_name: str, diff: str, changed_files: list[str],
                   unreviewed_files: list[str]) -> ReviewState:
+    # Redacted once here, so the agents, the locator and the injection detector all read the same text.
     return ReviewState(
-        pr_number=pr_number, repo_full_name=repo_full_name, pr_diff=diff, changed_files=changed_files,
+        pr_number=pr_number, repo_full_name=repo_full_name, pr_diff=redact_for_llm(diff), changed_files=changed_files,
         unreviewed_files=unreviewed_files, review_context="", findings=[], failed_agents=[],
         llm_calls=0, tokens_in=0, tokens_out=0, posted_findings=[], final_review_markdown="",
     )

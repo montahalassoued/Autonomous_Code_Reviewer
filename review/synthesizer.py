@@ -105,11 +105,18 @@ def _count_changed_lines(diff: str) -> int:
     )
 
 
+# A PR that talks to the AI reviewer may have talked it out of a finding, so it never reads as clean.
+NEEDS_HUMAN_REVIEW = ("⚠️ **Needs human review.** This pull request contains text aimed at the AI reviewer "
+                      "(listed below), so an issue may have been missed on purpose.")
+
+
 # One line telling the author whether anything must be fixed before merging.
-def _format_verdict(findings: list[Finding]) -> str:
+def _format_verdict(findings: list[Finding], injection_suspected: bool) -> str:
     blocking = sum(1 for finding in findings if review_label(finding) == "blocking")
     if blocking:
         return f"⛔ **{blocking} blocking issue(s)** to fix before merging, out of {len(findings)} finding(s)."
+    if injection_suspected:
+        return f"{NEEDS_HUMAN_REVIEW} Nothing blocking was found; {len(findings)} suggestion(s) or nit(s) below."
     return f"✅ **Nothing blocking.** {len(findings)} suggestion(s) or nit(s) below."
 
 
@@ -212,8 +219,7 @@ def unreviewable_markdown(unreviewed_files: list[str]) -> str:
 
 
 # Deterministic warning: lines of the diff that look written for the AI reviewer, so a human checks them.
-def _format_injection_note(diff: str) -> str | None:
-    signals = detect_injection(diff)
+def _format_injection_note(signals: list) -> str | None:
     if not signals:
         return None
     lines = [
@@ -232,20 +238,25 @@ def synthesizer_node(state: ReviewState) -> dict:
     findings = merge_cross_agent_findings(state["findings"])
     failed_agents = state.get("failed_agents") or []
     unreviewed = state.get("unreviewed_files") or []
+    injection_signals = detect_injection(state["pr_diff"])
     notes = [note for note in (
-        _format_partial_note(failed_agents), _format_unreviewed_note(unreviewed), _format_injection_note(state["pr_diff"]),
+        _format_partial_note(failed_agents), _format_unreviewed_note(unreviewed), _format_injection_note(injection_signals),
         _format_size_note(state["pr_diff"]),
     ) if note]
 
     if not findings:
         reviewed = [CATEGORY_TITLES[agent].split(" ", 1)[1].lower() for agent in CATEGORY_TITLES if agent not in failed_agents]
-        clean = f"No issues found by the {', '.join(reviewed)} review(s)." + ("" if failed_agents or unreviewed else " Nice work! ✅")
+        clean = f"No issues found by the {', '.join(reviewed)} review(s)."
+        if injection_signals:
+            clean = f"{NEEDS_HUMAN_REVIEW} {clean}"
+        elif not (failed_agents or unreviewed):
+            clean += " Nice work! ✅"
         sections = [REVIEW_HEADING, clean, *notes]
         return {"final_review_markdown": "\n\n".join(sections) + "\n", "posted_findings": []}
 
     diff_lines = commentable_lines(state["pr_diff"], state.get("changed_files") or ())
     groups = _group_by_category(findings)
-    sections = [REVIEW_HEADING, _format_verdict(findings), *notes, _format_summary_table(groups)]
+    sections = [REVIEW_HEADING, _format_verdict(findings, bool(injection_signals)), *notes, _format_summary_table(groups)]
 
     # The verdict and the table count every finding; only the detailed sections are budgeted.
     budget = COMMENT_BUDGET_CHARS - sum(len(section) for section in sections) - SECTION_OVERHEAD_CHARS * len(groups)

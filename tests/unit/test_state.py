@@ -71,3 +71,13 @@ if __name__ == "__main__":
     test_operator_add_merge_findings()
     test_full_state_initialization()
     print("\nAll tests passed.")
+
+
+def test_the_initial_state_holds_the_diff_with_tokens_redacted():
+    from review.state import initial_state
+
+    diff = '+++ b/app/x.py\n@@ -0,0 +1 @@\n+TOKEN = "ghp_' + "a" * 36 + '"\n'
+    state = initial_state(1, "o/r", diff, ["app/x.py"], [])
+
+    assert "ghp_" not in state["pr_diff"] and "[REDACTED:github-token]" in state["pr_diff"]
+    print("OK - a token in the diff never reaches the agents, the locator or the detector")

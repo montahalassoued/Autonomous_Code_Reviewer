@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal, get_args
 
+from review.secret_redactor import redact_for_llm
 from review.untrusted_input import TOOL_OUTPUT_LABEL, wrap_untrusted
 
 
@@ -69,4 +70,5 @@ def execute_tool_call(tools: dict[str, Tool], name: str, raw_arguments: str, con
     except Exception as error:  # a tool failure must not crash the review
         logger.warning("Tool %s failed: %s", name, error)
         output = f"Error: {error}"
-    return _wrap_tool_output(_truncate(output))
+    # A file the tool read may hold a token; redact before truncating, so a cut can't leave half of one.
+    return _wrap_tool_output(_truncate(redact_for_llm(output)))

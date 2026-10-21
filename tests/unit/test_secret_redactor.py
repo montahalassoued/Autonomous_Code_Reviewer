@@ -1,6 +1,8 @@
 import pytest
 
-from review.secret_redactor import has_secret, redact_secrets
+import os
+
+from review.secret_redactor import has_secret, redact_for_llm, redact_secrets
 
 
 # Built at runtime so secret scanners never flag the test file itself.
@@ -49,3 +51,16 @@ def test_known_values_are_redacted_exactly():
 
     assert redacted == "the key is [REDACTED:known-secret]"
     print("OK - the worker's own secret values are redacted wherever they appear")
+
+
+def test_what_goes_to_the_model_keeps_name_based_guesses_but_not_tokens(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_" + "k" * 30)
+    text = 'AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\npassword = "hunter2hunter2"\nkey = "' + os.environ["GROQ_API_KEY"] + '"'
+
+    redacted = redact_for_llm(text)
+
+    assert "AKIAIOSFODNN7EXAMPLE" not in redacted and "[REDACTED:aws-access-key]" in redacted
+    assert os.environ["GROQ_API_KEY"] not in redacted, "the worker's own key never goes to the model"
+    assert 'password = "hunter2hunter2"' in redacted, "the agent still needs to see a hardcoded password"
+    assert "hunter2hunter2" not in redact_secrets(text), "posted output still redacts the guess"
+    print("OK - token formats and our own secrets are redacted before the model, guesses only in output")

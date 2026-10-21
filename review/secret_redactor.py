@@ -19,6 +19,9 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     )),
 )
 
+# Guesses from a variable name, not a token format: skipped for what goes to the model, so it can still spot them.
+HEURISTIC_SECRET_KINDS = frozenset({"assigned-secret"})
+
 # Environment variables whose values the worker holds; their exact values are redacted wherever they appear.
 SECRET_ENV_VARS = ("GROQ_API_KEY", "GITHUB_TOKEN", "GITHUB_WEBHOOK_SECRET", "GOOGLE_API_KEY", "DATABASE_URL")
 MIN_KNOWN_VALUE_CHARS = 8
@@ -29,10 +32,12 @@ def _replacement(kind: str) -> str:
 
 
 # Text with every known secret format, and every exact known value, replaced by [REDACTED:<kind>].
-def redact_secrets(text: str, known_values: Iterable[str] = ()) -> str:
+def redact_secrets(text: str, known_values: Iterable[str] = (), include_heuristics: bool = True) -> str:
     for value in sorted({value for value in known_values if len(value) >= MIN_KNOWN_VALUE_CHARS}, key=len, reverse=True):
         text = text.replace(value, _replacement("known-secret"))
     for kind, pattern in SECRET_PATTERNS:
+        if not include_heuristics and kind in HEURISTIC_SECRET_KINDS:
+            continue
         if pattern.groups:
             text = pattern.sub(lambda match, kind=kind: match.group(0).replace(match.group(1), _replacement(kind)), text)
         else:
@@ -42,6 +47,11 @@ def redact_secrets(text: str, known_values: Iterable[str] = ()) -> str:
 
 def has_secret(text: str) -> bool:
     return any(pattern.search(text) for _kind, pattern in SECRET_PATTERNS)
+
+
+# What may be sent to the LLM provider: token formats and our own secrets redacted, the name-based guess kept.
+def redact_for_llm(text: str) -> str:
+    return redact_secrets(text, environment_secret_values(), include_heuristics=False)
 
 
 # The values of this process's own secret environment variables.

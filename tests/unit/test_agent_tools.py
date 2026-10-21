@@ -322,3 +322,13 @@ def test_no_tools_are_offered_without_their_resource(repo):
 
 if __name__ == "__main__":
     print("Run under pytest: these tests use fixtures.")
+
+
+def test_tool_output_is_redacted_before_it_reaches_the_model(tmp_path):
+    (tmp_path / "settings.py").write_text('GITHUB = "ghp_' + "b" * 36 + '"\n', encoding="utf-8")
+    tools = {tool.name: tool for tool in SECURITY_AGENT.tools}
+
+    output = execute_tool_call(tools, "read_file", json.dumps({"path": "settings.py"}), ToolContext(repo_root=tmp_path))
+
+    assert "ghp_" not in output and "[REDACTED:github-token]" in output
+    print("OK - a token in a file a tool reads is redacted in the tool output")
