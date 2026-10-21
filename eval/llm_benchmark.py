@@ -2,7 +2,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -21,6 +20,7 @@ from eval.benchmark.report import format_markdown
 from eval.benchmark.scoring import AGENT_SPECS, SCORER_VERSION, score_case
 from review.agents.agent_runner import AGENT_MAX_OUTPUT_TOKENS, AGENT_TEMPERATURE
 from review.agents.prompt_assembler import fill_prompt
+from review.llm_client import MAX_PROVIDER_WAIT_S, QUOTA_EXHAUSTED, is_quota_exhausted, provider_retry_delay_s
 from review.untrusted_input import DIFF_LABEL, wrap_untrusted
 
 
@@ -48,15 +48,6 @@ DEFAULT_MODELS = [
 AGENT_PROMPTS = {name: spec.prompt_template for name, spec in AGENT_SPECS.items()}
 # The benchmark sends no tools; a prompt that offers them makes some models write fake tool calls instead of answering.
 NO_TOOLS_CONTEXT = "(no context prepared and no tools in this run: review the diff only)"
-
-# A provider wait longer than this means the quota is spent for now: stop calling that model.
-MAX_PROVIDER_WAIT_S = 60.0
-QUOTA_EXHAUSTED = "QuotaExhausted"
-DAILY_LIMIT = re.compile(r"per ?day", re.IGNORECASE)
-# "try again in 14m19.6s" (Groq), "retry in 43.2s" or 'retryDelay': '43s' (Gemini).
-RETRY_DELAY = re.compile(r"(?:try again|retry) in ((?:[\d.]+(?:h|ms|m|s))+)|retryDelay\W+([\d.]+)s")
-DELAY_PART = re.compile(r"([\d.]+)(h|ms|m|s)")
-DELAY_UNITS_S = {"h": 3600.0, "m": 60.0, "s": 1.0, "ms": 0.001}
 
 
 # What one model call returned, in a provider-neutral shape.
@@ -115,25 +106,6 @@ def _split_model_spec(model_spec: str) -> tuple[str, str]:
             f"Bad model spec {model_spec!r}: use 'groq:<model>' or 'gemini:<model>'."
         )
     return provider, model_name
-
-
-# Seconds the provider asks us to wait before retrying, if its error says.
-def provider_retry_delay_s(message: str) -> float | None:
-    match = RETRY_DELAY.search(message)
-    if not match:
-        return None
-    if match.group(2):
-        return float(match.group(2))
-    return sum(float(amount) * DELAY_UNITS_S[unit] for amount, unit in DELAY_PART.findall(match.group(1)))
-
-
-# A daily limit, or a wait too long for a benchmark: no retry or later call can succeed for a while.
-def is_quota_exhausted(error: str | BaseException | None) -> bool:
-    if error is None:
-        return False
-    message = str(error)
-    delay = provider_retry_delay_s(message)
-    return message.startswith(QUOTA_EXHAUSTED) or bool(DAILY_LIMIT.search(message)) or (delay or 0) > MAX_PROVIDER_WAIT_S
 
 
 # Rate limits (429) and server errors (5xx) are worth retrying, except a spent quota or a request over a per-request limit.

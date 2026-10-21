@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Callable
 
 from eval.benchmark.call_cache import CallCache
-from eval.llm_benchmark import MAX_PROVIDER_WAIT_S, is_quota_exhausted, provider_retry_delay_s
+from review.llm_client import MAX_PROVIDER_WAIT_S, is_quota_exhausted, provider_retry_delay_s
 
 
 # The random nonce of the untrusted-input markers changes on every review; the cache key must not.

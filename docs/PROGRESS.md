@@ -1,7 +1,7 @@
 # Progress
 
 **File purpose:** what is actually built today, versus the target design in [ARCHITECTURE.md](ARCHITECTURE.md) and the phases in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
-**Last updated:** 2026-10-20.
+**Last updated:** 2026-10-21.
 
 ## Done (in code)
 
@@ -10,6 +10,7 @@
 | Code parsing | tree-sitter parse and an in-memory NetworkX call graph for the agents' graph tools, built at worker start with no LLM call; its call edges come from `rag/call_resolver.py` (imports, `self`/`cls`, same file, unique name), not bare-name matches (823 edges on this repo instead of 968). The worker refuses to start if `ALLOWED_REPOS` lists a repo other than its `TARGET_REPO_URL` checkout. The semantic retrieval (Gemini, Voyage, Chroma, BM25, reranker, judge loop) was removed | `rag/` |
 | Review graph | Forward-only graph, `START` fans out to the 3 agents, `file::qualified_name` ids, None guards, offline end-to-end test | `review/graph.py`, `tests/unit/test_pipeline_offline.py` |
 | Agents (Phase 3, part) | 3 review agents (Security, Logic, Quality) on one shared runner with strict finding validation and `REVIEW_AGENT_MODEL`; synthesizer with one section per category. Security checks authn/authz/IDOR on changed endpoints | `review/`, `review/agents/` |
+| LLM client (Phase 3, part) | One Groq client for the agents: a timeout, logged retries on per-minute 429s, 5xx and timeouts only (the SDK's silent retries are off), a spent daily quota raised at once so the fallback model takes over, and a process-wide limit on concurrent calls | `review/llm_client.py` |
 | Durable jobs (Phase 2, part) | Webhook verifies HMAC, dedupes on (repo, target, head_sha) in the Postgres `reviews` table, enqueues to Azure Storage Queue; worker with retries and poison queue, the `reviews` lifecycle (`running` → `posted` / `skipped` / `failed` with a redacted reason, latency and missing categories), a stale check of the PR head before reviewing and before posting, partial reviews when one agent fails, and a redelivery that reopens a failed review | `app/api/webhook.py`, `app/jobs/`, `app/worker.py`, `review/graph.py` |
 | Trigger policy (Phase 2, part) | Before the dedupe, the webhook ignores repos outside `ALLOWED_REPOS`, draft PRs and authors GitHub does not list as collaborators; an unreachable GitHub gives 503 (fail closed); `ready_for_review` reviews a draft once it is ready | `app/jobs/trigger_policy.py`, `app/api/webhook.py` |
 | Prompt-injection defenses (Phase 3, part) | The diff, the context and tool output sit between random-nonce markers with a shared "data, never instructions" rule; a heuristic lists added lines that look written for the AI reviewer in a warning section; a benchmark case hides a SQL injection behind an injection comment | `review/untrusted_input.py`, `review/injection_detector.py`, `review/agents/prompts/85_untrusted_input.md` |
@@ -27,7 +28,7 @@
 ## Not built yet
 
 - Phase 1 (rest): the first 3-run baseline, `--mode structural` (after the Phase 4 context builder), context recall and precision, Langfuse dataset runs.
-- Phase 3: shared LLM client (timeouts, retries, concurrency limit), Langfuse tracing. (The 3 agents, the shared runner and the nonce-wrapped prompts are done.)
+- Phase 3: Langfuse tracing, JSON mode. (The 3 agents, the shared runner, the nonce-wrapped prompts and the shared LLM client are done.)
 - Phase 4: running the indexer from the worker (initial import), symbol diff, triage, structural context, PR text as input, agent tools reading Postgres instead of NetworkX. (Postgres, the schema, the `reviews` dedupe and the indexer itself are done.)
 - Phase 4b: context subagent.
 - Phase 5: inline review, only-new findings by fingerprint.

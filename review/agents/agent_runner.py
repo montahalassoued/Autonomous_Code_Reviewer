@@ -3,12 +3,11 @@ import logging
 import os
 from dataclasses import dataclass
 
-from groq import Groq
-
 from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
 from review.agents.tools.tool_definition import Tool, ToolContext, execute_tool_call
 from review.finding_locator import locate_findings
 from review.finding_merger import merge_duplicate_findings
+from review.llm_client import ReviewLlmClient, build_review_llm_client
 from review.output_sanitizer import sanitize_finding
 from review.secret_redactor import environment_secret_values, redact_secrets
 from review.untrusted_input import CONTEXT_LABEL, DIFF_LABEL, wrap_untrusted
@@ -63,16 +62,9 @@ def _is_rate_limited(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) == 429
 
 
-# Builds a Groq client from GROQ_API_KEY.
-def build_groq_client() -> Groq:
-    api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "GROQ_API_KEY environment variable is not set. "
-            "Get a free key at https://console.groq.com and set it "
-            "in your .env file."
-        )
-    return Groq(api_key=api_key)
+# The agents' Groq client: timeout, retries and a concurrency limit live in review/llm_client.py.
+def build_groq_client() -> ReviewLlmClient:
+    return build_review_llm_client()
 
 
 # Parses the LLM's JSON array response into a list of dicts.
@@ -169,7 +161,7 @@ class LlmUsage:
         self.tokens_out += getattr(usage, "completion_tokens", 0) or 0
 
 
-def _ask_model(client: Groq, model: str, usage: LlmUsage, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
+def _ask_model(client: ReviewLlmClient, model: str, usage: LlmUsage, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
     request = {"model": model, "messages": messages, "temperature": AGENT_TEMPERATURE,
                "max_completion_tokens": AGENT_MAX_OUTPUT_TOKENS}
     if tool_schemas:
@@ -183,8 +175,8 @@ def _ask_model(client: Groq, model: str, usage: LlmUsage, messages: list[dict], 
     return choice.message
 
 
-# Asks models[0]; a 429 moves the rest of the conversation to the next model, if one is left.
-def _ask_with_fallback(client: Groq, models: list[str], agent_name: str, *request_args):
+# Asks models[0]; a 429 the client gave up on (spent quota, retries used) moves the conversation to the next model.
+def _ask_with_fallback(client: ReviewLlmClient, models: list[str], agent_name: str, *request_args):
     while True:
         try:
             return _ask_model(client, models[0], *request_args)
@@ -207,7 +199,7 @@ def _assistant_turn(message, tool_calls) -> dict:
 
 
 # Let the model call its tools up to the limit, then make it answer with tool_choice="none".
-def _converse(spec: AgentSpec, prompt: str, client: Groq, tool_context: ToolContext | None, usage: LlmUsage) -> str:
+def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_context: ToolContext | None, usage: LlmUsage) -> str:
     tools = {tool.name: tool for tool in spec.tools if tool_context is not None and tool.is_available(tool_context)}
     tool_schemas = [tool.to_groq_schema() for tool in tools.values()]
     messages = [{"role": "user", "content": prompt}]
@@ -245,7 +237,7 @@ class AgentFailed(Exception):
 
 
 # Run one agent: prompt -> Groq (with bounded tool calls) -> validated findings.
-def run_agent(spec: AgentSpec, state: ReviewState, client: Groq, tool_context: ToolContext | None = None) -> dict:
+def run_agent(spec: AgentSpec, state: ReviewState, client: ReviewLlmClient, tool_context: ToolContext | None = None) -> dict:
     usage = LlmUsage()
     try:
         raw_output = _converse(spec, build_prompt(spec, state), client, tool_context, usage)
