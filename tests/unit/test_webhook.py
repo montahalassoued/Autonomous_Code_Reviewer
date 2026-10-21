@@ -303,3 +303,50 @@ if __name__ == "__main__":
     test_webhook_ignores_drafts_and_reviews_them_when_ready()
     test_webhook_returns_503_when_the_collaborator_check_fails()
     print("\nAll webhook tests passed.")
+
+
+def test_an_oversized_body_is_refused_before_the_signature_check(monkeypatch):
+    monkeypatch.setenv("GITHUB_WEBHOOK_MAX_BODY_BYTES", "100")
+    job_queue = InMemoryJobQueue()
+    client = TestClient(make_app(job_queue=job_queue))
+
+    response = client.post("/webhook/github", content=b"x" * 101, headers={"X-GitHub-Event": "pull_request"})
+
+    assert response.status_code == 413, "no signature was sent, so a 401 would mean the body was read and checked first"
+    assert drain(job_queue) == []
+    print("OK - a body over the cap gets 413 without a signature check")
+
+
+def test_a_streamed_body_without_content_length_is_still_capped(monkeypatch):
+    monkeypatch.setenv("GITHUB_WEBHOOK_MAX_BODY_BYTES", "100")
+    client = TestClient(make_app())
+
+    def chunks():
+        for _ in range(5):
+            yield b"x" * 40  # 200 bytes in total, sent chunked with no Content-Length
+
+    response = client.post("/webhook/github", content=chunks(), headers={"X-GitHub-Event": "pull_request"})
+
+    assert response.status_code == 413
+    print("OK - a chunked body is capped while it is read")
+
+
+def test_a_body_under_the_cap_is_still_reviewed(monkeypatch):
+    monkeypatch.setenv("GITHUB_WEBHOOK_MAX_BODY_BYTES", "100000")
+    job_queue = InMemoryJobQueue()
+    client = TestClient(make_app(job_queue=job_queue))
+
+    assert post_event(client, PR_OPENED_PAYLOAD).status_code == 202
+    assert len(drain(job_queue)) == 1
+    print("OK - a normal delivery passes the size cap")
+
+
+def test_a_signed_body_that_is_not_json_gets_400():
+    client = TestClient(make_app())
+    body = b"not json"
+
+    response = client.post("/webhook/github", content=body,
+                           headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": sign(body)})
+
+    assert response.status_code == 400
+    print("OK - a signed non-JSON body is refused with 400, not a 500")

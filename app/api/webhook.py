@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import logging
 import os
 
@@ -17,6 +18,8 @@ router = APIRouter()
 
 # ready_for_review: a draft is skipped, so it is reviewed when it is marked ready.
 HANDLED_ACTIONS = {"opened", "synchronize", "ready_for_review"}
+# GitHub caps deliveries at 25 MB, but a pull_request event is usually well under 1 MB.
+DEFAULT_WEBHOOK_MAX_BODY_BYTES = 5 * 1024 * 1024
 
 
 # GITHUB_WEBHOOK_SECRET, or a clear error; the API calls it at startup so a missing secret never reaches a request.
@@ -29,6 +32,28 @@ def webhook_secret() -> str:
             "on the GitHub webhook."
         )
     return secret
+
+
+def webhook_max_body_bytes() -> int:
+    try:
+        value = int(os.environ.get("GITHUB_WEBHOOK_MAX_BODY_BYTES", "").strip() or DEFAULT_WEBHOOK_MAX_BODY_BYTES)
+    except ValueError:
+        return DEFAULT_WEBHOOK_MAX_BODY_BYTES
+    return value if value > 0 else DEFAULT_WEBHOOK_MAX_BODY_BYTES
+
+
+# The body, read in chunks and refused with 413 past the cap, so an unsigned flood can't fill memory.
+async def _read_limited_body(request: Request, max_bytes: int) -> bytes:
+    too_large = HTTPException(status_code=413, detail=f"Webhook payload larger than {max_bytes} bytes")
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > max_bytes:
+        raise too_large
+    body = bytearray()
+    async for chunk in request.stream():  # a missing or false Content-Length is still capped here
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            raise too_large
+    return bytes(body)
 
 
 # Reject the request unless its HMAC signature proves it came from GitHub.
@@ -71,13 +96,16 @@ async def github_webhook(
     x_github_event: str | None = Header(default=None),
     x_github_delivery: str | None = Header(default=None),
 ):
-    payload_body = await request.body()
+    payload_body = await _read_limited_body(request, webhook_max_body_bytes())
     _verify_signature(payload_body, x_hub_signature_256)
 
     if x_github_event != "pull_request":
         return {"status": "ignored", "reason": f"unhandled event type: {x_github_event}"}
 
-    payload = await request.json()
+    try:
+        payload = json.loads(payload_body)
+    except ValueError as exc:  # signed but not JSON: GitHub never sends that, so refuse it cleanly
+        raise HTTPException(status_code=400, detail="Webhook payload is not valid JSON") from exc
     if payload.get("action") not in HANDLED_ACTIONS:
         return {"status": "ignored", "reason": f"unhandled action: {payload.get('action')}"}
 

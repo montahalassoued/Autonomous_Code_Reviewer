@@ -20,7 +20,8 @@ async def lifespan(app: FastAPI):
     app.state.dedupe.close()
 
 
-app = FastAPI(title="Autonomous Code Reviewer", lifespan=lifespan)
+# No /docs, /redoc or /openapi.json: GitHub is the only client, so the API's shape stays private.
+app = FastAPI(title="Autonomous Code Reviewer", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(webhook_router)
 
 

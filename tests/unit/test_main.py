@@ -60,3 +60,12 @@ def test_webhook_router_is_mounted():
 
 if __name__ == "__main__":
     print("Run under pytest.")
+
+
+def test_the_api_docs_and_schema_are_not_served():
+    from app.main import app
+
+    with TestClient(app) as client:
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            assert client.get(path).status_code == 404, path
+    print("OK - FastAPI's docs and OpenAPI schema are turned off")
