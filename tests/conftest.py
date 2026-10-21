@@ -1,6 +1,10 @@
+import os
 from pathlib import Path
 
 import pytest
+
+# Forced, not setdefault: the real .env may hold Langfuse keys, and a test must never send a trace.
+os.environ["LANGFUSE_TRACING_ENABLED"] = "false"
 
 
 INTEGRATION_DIR = Path(__file__).parent / "integration"

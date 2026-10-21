@@ -9,6 +9,7 @@ from review.finding_locator import locate_findings
 from review.finding_merger import merge_duplicate_findings
 from review.llm_client import ReviewLlmClient, build_review_llm_client
 from review.output_sanitizer import sanitize_finding
+from review.review_tracing import TraceContext, record_llm_response, traced_step
 from review.secret_redactor import environment_secret_values, redact_secrets
 from review.untrusted_input import CONTEXT_LABEL, DIFF_LABEL, wrap_untrusted
 from review.state import ReviewState, Finding
@@ -161,13 +162,20 @@ class LlmUsage:
         self.tokens_out += getattr(usage, "completion_tokens", 0) or 0
 
 
-def _ask_model(client: ReviewLlmClient, model: str, usage: LlmUsage, messages: list[dict], tool_schemas: list[dict], tool_choice: str):
+def _ask_model(client: ReviewLlmClient, model: str, trace_context: TraceContext | None, usage: LlmUsage,
+               messages: list[dict], tool_schemas: list[dict], tool_choice: str):
     request = {"model": model, "messages": messages, "temperature": AGENT_TEMPERATURE,
                "max_completion_tokens": AGENT_MAX_OUTPUT_TOKENS}
     if tool_schemas:
         request["tools"] = tool_schemas
         request["tool_choice"] = tool_choice
-    response = client.chat.completions.create(**request)
+    parameters = {"temperature": AGENT_TEMPERATURE, "max_completion_tokens": AGENT_MAX_OUTPUT_TOKENS,
+                  "tool_choice": request.get("tool_choice")}
+    # list(): the conversation grows after this call, the trace keeps what was actually sent.
+    with traced_step(trace_context, "llm call", "generation", model=model, input=list(messages),
+                     model_parameters=parameters) as step:
+        response = client.chat.completions.create(**request)
+        record_llm_response(step, response)
     usage.record(response)
     choice = response.choices[0]
     if getattr(choice, "finish_reason", None) == "length":
@@ -176,10 +184,11 @@ def _ask_model(client: ReviewLlmClient, model: str, usage: LlmUsage, messages: l
 
 
 # Asks models[0]; a 429 the client gave up on (spent quota, retries used) moves the conversation to the next model.
-def _ask_with_fallback(client: ReviewLlmClient, models: list[str], agent_name: str, *request_args):
+def _ask_with_fallback(client: ReviewLlmClient, models: list[str], agent_name: str,
+                       trace_context: TraceContext | None, *request_args):
     while True:
         try:
-            return _ask_model(client, models[0], *request_args)
+            return _ask_model(client, models[0], trace_context, *request_args)
         except Exception as exc:
             if not _is_rate_limited(exc) or len(models) == 1:
                 raise
@@ -199,7 +208,8 @@ def _assistant_turn(message, tool_calls) -> dict:
 
 
 # Let the model call its tools up to the limit, then make it answer with tool_choice="none".
-def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_context: ToolContext | None, usage: LlmUsage) -> str:
+def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_context: ToolContext | None, usage: LlmUsage,
+              trace_context: TraceContext | None = None) -> str:
     tools = {tool.name: tool for tool in spec.tools if tool_context is not None and tool.is_available(tool_context)}
     tool_schemas = [tool.to_groq_schema() for tool in tools.values()]
     messages = [{"role": "user", "content": prompt}]
@@ -207,7 +217,7 @@ def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_contex
     models = list(dict.fromkeys(model for model in (agent_model(spec.name), fallback_agent_model()) if model))
 
     while True:
-        message = _ask_with_fallback(client, models, spec.name, usage, messages, tool_schemas,
+        message = _ask_with_fallback(client, models, spec.name, trace_context, usage, messages, tool_schemas,
                                      "auto" if calls_left > 0 else "none")
         tool_calls = getattr(message, "tool_calls", None) or []
         if not tool_calls or calls_left == 0:
@@ -220,7 +230,9 @@ def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_contex
         for call in tool_calls:
             # Every tool_call_id needs a reply, even the calls made past the limit.
             if calls_left > 0:
-                output = execute_tool_call(tools, call.function.name, call.function.arguments, tool_context)
+                with traced_step(trace_context, call.function.name, "tool", input=call.function.arguments) as step:
+                    output = execute_tool_call(tools, call.function.name, call.function.arguments, tool_context)
+                    step.update(output=output)
                 calls_left -= 1
             else:
                 output = "Not run: tool call limit reached."
@@ -239,11 +251,14 @@ class AgentFailed(Exception):
 # Run one agent: prompt -> Groq (with bounded tool calls) -> validated findings.
 def run_agent(spec: AgentSpec, state: ReviewState, client: ReviewLlmClient, tool_context: ToolContext | None = None) -> dict:
     usage = LlmUsage()
-    try:
-        raw_output = _converse(spec, build_prompt(spec, state), client, tool_context, usage)
-    except Exception as exc:
-        raise AgentFailed(spec.name, usage) from exc
-    findings, _ = postprocess_findings(raw_output, spec, state["pr_diff"], environment_secret_values())
+    with traced_step(state.get("trace_context"), spec.name, "agent") as agent_step:
+        try:
+            raw_output = _converse(spec, build_prompt(spec, state), client, tool_context, usage, agent_step.context)
+        except Exception as exc:
+            raise AgentFailed(spec.name, usage) from exc
+        findings, raw_count = postprocess_findings(raw_output, spec, state["pr_diff"], environment_secret_values())
+        agent_step.update(output={"findings": len(findings), "raw_findings": raw_count,
+                                  "llm_calls": usage.calls, "tokens_in": usage.tokens_in, "tokens_out": usage.tokens_out})
     return {"findings": findings, "llm_calls": usage.calls, "tokens_in": usage.tokens_in, "tokens_out": usage.tokens_out}
 
 

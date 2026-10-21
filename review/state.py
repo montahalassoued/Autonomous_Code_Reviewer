@@ -48,6 +48,9 @@ class ReviewState(TypedDict):
     posted_findings: list[Finding]
     final_review_markdown: str
 
+    # Where this review's Langfuse trace hangs (review/review_tracing.py); None when tracing is off
+    trace_context: dict[str, str] | None
+
 
 # The state a review starts from; the worker and the review eval both build it here, so the eval runs what production runs.
 def initial_state(pr_number: int, repo_full_name: str, diff: str, changed_files: list[str],
@@ -56,5 +59,5 @@ def initial_state(pr_number: int, repo_full_name: str, diff: str, changed_files:
     return ReviewState(
         pr_number=pr_number, repo_full_name=repo_full_name, pr_diff=redact_for_llm(diff), changed_files=changed_files,
         unreviewed_files=unreviewed_files, review_context="", findings=[], failed_agents=[],
-        llm_calls=0, tokens_in=0, tokens_out=0, posted_findings=[], final_review_markdown="",
+        llm_calls=0, tokens_in=0, tokens_out=0, posted_findings=[], final_review_markdown="", trace_context=None,
     )

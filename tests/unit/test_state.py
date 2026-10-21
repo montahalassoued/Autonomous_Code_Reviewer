@@ -61,6 +61,7 @@ def test_full_state_initialization():
         "tokens_out": 0,
         "posted_findings": [],
         "final_review_markdown": "",
+        "trace_context": None,
     }
     assert set(state) == set(ReviewState.__annotations__), "the test state covers every ReviewState field"
     print("OK - ReviewState initializes correctly")

@@ -10,6 +10,7 @@ from app.jobs.models import ReviewJob
 from app.jobs.queue import JobQueue
 from app.jobs.review_status import SKIP_CLOSED, SKIP_SUPERSEDED, ReviewCost, ReviewStatusStore
 from review.diff_budget import fit_diff, max_diff_chars
+from review.review_tracing import flush_tracing, review_trace
 from review.secret_redactor import environment_secret_values, redact_secrets
 from review.state import initial_state
 from review.synthesizer import unreviewable_markdown
@@ -64,7 +65,11 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
 
     review_state = initial_state(job.pr_number, job.repo_full_name, diff, changed_files_in_diff(diff), unreviewed)
 
-    final_state = compiled_graph.invoke(review_state)
+    with review_trace(job.repo_full_name, job.pr_number, job.head_sha, job.job_id) as trace:
+        review_state["trace_context"] = trace.context if trace else None
+        final_state = compiled_graph.invoke(review_state)
+        if trace:
+            trace.record_outcome(final_state)
     cost = ReviewCost(final_state.get("llm_calls", 0), final_state.get("tokens_in", 0), final_state.get("tokens_out", 0))
     logger.info("Review cost job_id=%s: %d LLM calls, %d tokens in, %d tokens out",
                 job.job_id, cost.llm_calls, cost.tokens_in, cost.tokens_out)
@@ -191,6 +196,7 @@ def main() -> None:
         status_store=status_store,
     )
     status_store.close()
+    flush_tracing()
     logger.info("Worker stopped")
 
 
