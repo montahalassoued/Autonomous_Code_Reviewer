@@ -2,11 +2,14 @@ import json
 import re
 from types import SimpleNamespace
 
+import pytest
+
 from review.agents.agent_runner import (
     AGENT_MAX_OUTPUT_TOKENS,
     AgentFailed,
     DEFAULT_REVIEW_AGENT_MODEL,
     EMPTY_CONTEXT_SUMMARY,
+    UnusableAgentAnswer,
     parse_findings,
     review_agent_model,
     run_agent,
@@ -34,15 +37,15 @@ VALID_RAW = {
 # Stand-in for a Groq client: returns `content` and records each request.
 class FakeGroq:
 
-    def __init__(self, content: str | None) -> None:
-        self.content = content
+    def __init__(self, content: str | None, finish_reason: str = "stop") -> None:
+        self.content, self.finish_reason = content, finish_reason
         self.requests: list[dict] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     def _create(self, **request) -> SimpleNamespace:
         self.requests.append(request)
         message = SimpleNamespace(content=self.content)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason=self.finish_reason)])
 
 
 # Builds a minimal ReviewState-shaped dict for the node under test.
@@ -152,11 +155,29 @@ def test_run_agent_keeps_valid_findings_and_drops_bad_ones():
     print("OK - one bad entry is dropped, the valid one is kept")
 
 
-def test_run_agent_treats_none_content_as_no_findings():
-    result = run_agent(logic_agent.LOGIC_AGENT, build_state(), FakeGroq(None))
+def test_an_empty_or_unparseable_answer_fails_the_agent_instead_of_reading_as_clean():
+    for content in (None, "   ", "I looked at the diff and it seems fine.", '[{"severity": "HIGH", "title": "cut'):
+        with pytest.raises(AgentFailed) as failed:
+            run_agent(logic_agent.LOGIC_AGENT, build_state(), FakeGroq(content))
+        assert isinstance(failed.value.__cause__, UnusableAgentAnswer), content
+        assert failed.value.usage.calls == 1, "the spent call is still counted in the review's cost"
+    print("OK - no answer, prose or a broken array is a failed agent, so its category is not posted as clean")
 
-    assert result["findings"] == []
-    print("OK - None content yields no findings")
+
+def test_an_empty_array_still_means_no_findings():
+    assert run_agent(logic_agent.LOGIC_AGENT, build_state(), FakeGroq("[]"))["findings"] == []
+    assert run_agent(logic_agent.LOGIC_AGENT, build_state(), FakeGroq("```json\n[]\n```"))["findings"] == []
+    print("OK - a real [] is a clean answer")
+
+
+def test_an_answer_cut_off_at_the_output_cap_fails_the_agent():
+    client = FakeGroq(json.dumps([VALID_RAW]), finish_reason="length")
+
+    with pytest.raises(AgentFailed) as failed:
+        run_agent(SECURITY, build_state(), client)
+
+    assert "cut off" in str(failed.value.__cause__)
+    print("OK - a truncated answer may have lost findings, so it is not trusted")
 
 
 def test_run_agent_sends_diff_context_model_and_temperature(monkeypatch):

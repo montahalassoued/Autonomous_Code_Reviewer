@@ -151,14 +151,12 @@ def test_agents_get_their_tools_through_the_graph(monkeypatch, tmp_path):
     print("OK - build_graph hands the checkout and the call graph to the agents' tools")
 
 
-def test_none_llm_content_does_not_crash(monkeypatch):
+def test_no_answer_from_every_agent_retries_the_job_instead_of_posting_no_issues(monkeypatch):
     install_fakes(monkeypatch, None)
 
-    final_state = run_review()
-
-    assert final_state["findings"] == []
-    assert "No issues found" in final_state["final_review_markdown"]
-    print("OK - None content from every agent degraded gracefully")
+    with pytest.raises(ReviewAgentsUnavailable):
+        run_review()
+    print("OK - None content from every agent is never posted as a clean review")
 
 
 def test_one_failing_agent_gives_a_partial_review(monkeypatch):

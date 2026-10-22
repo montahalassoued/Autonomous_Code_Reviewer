@@ -68,8 +68,8 @@ def build_groq_client() -> ReviewLlmClient:
     return build_review_llm_client()
 
 
-# Parses the LLM's JSON array response into a list of dicts.
-def parse_findings(raw_output: str) -> list[dict]:
+# The JSON array in the LLM's answer, or None when there is none (so "no findings" and "no answer" differ).
+def parse_findings_array(raw_output: str) -> list[dict] | None:
     cleaned = raw_output.strip().strip("`").removeprefix("json").strip()
 
     # strict=False keeps raw newlines in strings (multi-line code in a suggestion); the sanitizer drops other controls.
@@ -90,9 +90,14 @@ def parse_findings(raw_output: str) -> list[dict]:
             if isinstance(parsed, list):
                 return [item for item in parsed if isinstance(item, dict)]
         except json.JSONDecodeError:
-            pass  # unparseable: degrade to no findings
+            pass  # unparseable: the caller decides what that means
 
-    return []
+    return None
+
+
+# Parses the LLM's JSON array response into a list of dicts; [] when it can't be parsed (the benchmark scores that).
+def parse_findings(raw_output: str) -> list[dict]:
+    return parse_findings_array(raw_output) or []
 
 
 # Positive int from an int or numeric string; None otherwise (bool rejected).
@@ -179,7 +184,7 @@ def _ask_model(client: ReviewLlmClient, model: str, trace_context: TraceContext 
     usage.record(response)
     choice = response.choices[0]
     if getattr(choice, "finish_reason", None) == "length":
-        logger.warning("Agent answer cut off at %d output tokens: its findings may be lost", AGENT_MAX_OUTPUT_TOKENS)
+        raise UnusableAgentAnswer(f"answer cut off at {AGENT_MAX_OUTPUT_TOKENS} output tokens: findings may be lost")
     return choice.message
 
 
@@ -221,10 +226,10 @@ def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_contex
                                      "auto" if calls_left > 0 else "none")
         tool_calls = getattr(message, "tool_calls", None) or []
         if not tool_calls or calls_left == 0:
-            if tools and not message.content:
-                logger.warning("%s returned no answer after using its tools", spec.name)
-            # content can be None (a filtered or empty completion): no findings.
-            return message.content or ""
+            # content can be None (a filtered or empty completion): that is no answer, not "no findings".
+            if not (message.content or "").strip():
+                raise UnusableAgentAnswer("empty answer" + (" after using its tools" if tools else ""))
+            return message.content
 
         messages.append(_assistant_turn(message, tool_calls))
         for call in tool_calls:
@@ -241,6 +246,11 @@ def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_contex
             messages.append({"role": "user", "content": FINAL_ANSWER_REQUEST})
 
 
+# An answer that can't be trusted to hold every finding: posting it would read as "no issues" for that category.
+class UnusableAgentAnswer(RuntimeError):
+    pass
+
+
 # An agent that fails mid-conversation still spent quota: the graph adds this usage to the partial review's cost.
 class AgentFailed(Exception):
     def __init__(self, agent_name: str, usage: LlmUsage) -> None:
@@ -254,6 +264,8 @@ def run_agent(spec: AgentSpec, state: ReviewState, client: ReviewLlmClient, tool
     with traced_step(state.get("trace_context"), spec.name, "agent") as agent_step:
         try:
             raw_output = _converse(spec, build_prompt(spec, state), client, tool_context, usage, agent_step.context)
+            if parse_findings_array(raw_output) is None:
+                raise UnusableAgentAnswer(f"answer is not a JSON array: {redact_secrets(raw_output[:120])!r}")
         except Exception as exc:
             raise AgentFailed(spec.name, usage) from exc
         findings, raw_count = postprocess_findings(raw_output, spec, state["pr_diff"], environment_secret_values())

@@ -5,7 +5,7 @@ import pytest
 
 from rag.ast_parser import parse_file
 from rag.knowledge_graph import build_knowledge_graph
-from review.agents.agent_runner import FINAL_ANSWER_REQUEST, run_agent
+from review.agents.agent_runner import FINAL_ANSWER_REQUEST, AgentFailed, UnusableAgentAnswer, run_agent
 from review.agents.logic.agent import LOGIC_AGENT
 from review.agents.logic.tools.find_exception_handlers import find_exception_handlers
 from review.agents.quality.agent import QUALITY_AGENT
@@ -297,14 +297,15 @@ def test_tool_calls_stop_at_the_limit(repo):
     keeps_asking = tool_call_reply("c", "search_code", {"text": "login"})
     client = ScriptedGroq([keeps_asking] * 10)
 
-    result = run_agent(SECURITY_AGENT, build_state(), client, repo)
+    with pytest.raises(AgentFailed) as failed:
+        run_agent(SECURITY_AGENT, build_state(), client, repo)
 
     assert len(client.requests) == SECURITY_AGENT.max_tool_calls + 1, "N tool turns, then one forced answer"
     assert client.requests[-1]["tool_choice"] == "none"
     assert client.requests[-1]["messages"][-1] == {"role": "user", "content": FINAL_ANSWER_REQUEST}
-    assert result["findings"] == []
-    assert result["llm_calls"] == SECURITY_AGENT.max_tool_calls + 1, "every tool round is a paid model call"
-    print(f"OK - at most {SECURITY_AGENT.max_tool_calls} tool calls, then tool_choice='none'")
+    assert isinstance(failed.value.__cause__, UnusableAgentAnswer), "a model that never answers gave no review"
+    assert failed.value.usage.calls == SECURITY_AGENT.max_tool_calls + 1, "every tool round is a paid model call"
+    print(f"OK - at most {SECURITY_AGENT.max_tool_calls} tool calls, then tool_choice='none'; no answer fails the agent")
 
 
 def test_no_tools_are_offered_without_their_resource(repo):
