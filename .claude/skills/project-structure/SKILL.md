@@ -14,7 +14,7 @@ description: Decide where new code, tests and docs go and how to name them, so e
 | `app/api/` | HTTP layer | FastAPI routers only: parse the request, validate it, delegate. No business logic. |
 | `app/jobs/` | Background job infrastructure | Queue, dedupe, job models, backend factory |
 | `app/` (top level) | Process entry points | `main.py` (API), `worker.py` (worker), `bootstrap.py` (shared startup) |
-| `review/` | Review pipeline | `graph.py` (LangGraph orchestrator), `state.py`, `synthesizer.py`, `llm_client.py` (the agents' Groq calls), input safety (`untrusted_input.py`, `injection_detector.py`), output safety (`output_sanitizer.py`, `secret_redactor.py`) |
+| `review/` | Review pipeline | `graph.py` (LangGraph orchestrator), `state.py`, `synthesizer.py`, `llm_client.py` (the agents' Groq calls), `review_tracing.py` (Langfuse), input safety (`untrusted_input.py`, `injection_detector.py`), output safety (`output_sanitizer.py`, `secret_redactor.py`) |
 | `review/agents/` | The review agents | `agent_runner.py` (executes any agent), `prompt_assembler.py`, shared `prompts/`, and one folder per category |
 | `review/agents/<category>/` | One review agent | `agent.py`, `prompts/NN_topic.md`, `rules.py`, `examples.json`, `tools/` (`toolset.py` + one `find_*.py` per tool only this agent uses, + a role-named helper shared by those tools, e.g. `python_source_scan.py`) |
 | `review/agents/tools/` | Read-only tools shared by agents | `tool_definition.py` (Tool, ToolContext, safe execution), one module per tool family |

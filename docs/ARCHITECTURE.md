@@ -144,7 +144,7 @@ Long symbols are truncated to signature + first lines + the call site. Each bloc
 
 ## Observability
 
-`reviews` stores per-review LLM calls, tokens and latency (built), so cost is queryable without a tracing backend. Langfuse tracing of every LLM call, one trace per review, is planned (Phase 3).
+`reviews` stores per-review LLM calls, tokens and latency (built), so cost is queryable without a tracing backend. Langfuse tracing is built (`review/review_tracing.py`): one trace per review (agents, LLM calls with tokens and latency, tool calls, and whether it was posted or skipped), secret-masked, on only when the keys are set.
 
 ## Open points: proposed resolutions
 
@@ -165,5 +165,5 @@ Proposed by the ai-engineer review (2026-10-14). Each must be confirmed by the m
 - **Incoming edges lost by the cascade:** deleting and re-inserting a file's symbols cascades away the edges that point *into* them from other files. The sync must upsert on `(file_id, qualified_name)` so symbol ids survive, then re-resolve the files that import the changed module.
 - **Call resolution accuracy:** dynamic Python (`Depends(...)`, dependency injection, `getattr`) escapes static resolution. The indexer publishes its resolution rate and edge precision on the eval fixture, never guesses, and lists the rest under "Not verifiable".
 - **Small eval dataset:** with 30 cases one case is worth ~0.033, so results are compared case by case (a gap of at least 2 cases, stable over 3 runs), not by a 0.02 threshold.
-- **LLM rate limits:** 3 agents x ~12k tokens in parallel can hit Groq's free-tier tokens-per-minute limit. The shared LLM client caps concurrency, backs off on 429 and can fall back to Gemini.
+- **LLM rate limits:** 3 agents x ~12k tokens in parallel can hit Groq's free-tier tokens-per-minute limit. The shared LLM client caps concurrency, retries per-minute 429s, gives up at a review deadline, and switches to `FALLBACK_AGENT_MODEL` on a spent quota. No free model fits as that fallback today (gpt-oss-20b gets 413 at Groq's 8k tokens/min), so a spent quota gives a partial review.
 - **GitHub API:** a 422 on a line outside the diff and secondary rate limits. One "create review" request with all comments, lines checked against the patch, a cap on inline comments, and a summary-only fallback.
