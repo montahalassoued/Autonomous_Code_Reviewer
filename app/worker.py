@@ -68,23 +68,26 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
     review_state = initial_state(job.pr_number, job.repo_full_name, diff, changed_files_in_diff(diff), unreviewed)
     review_state["review_deadline"] = started + review_deadline_s()
 
+    # The trace spans the post too, so Langfuse shows whether the review was posted, skipped or failed to post.
     with review_trace(job.repo_full_name, job.pr_number, job.head_sha, job.job_id) as trace:
         review_state["trace_context"] = trace.context if trace else None
         final_state = compiled_graph.invoke(review_state)
-        if trace:
-            trace.record_outcome(final_state)
-    cost = ReviewCost(final_state.get("llm_calls", 0), final_state.get("tokens_in", 0), final_state.get("tokens_out", 0))
-    logger.info("Review cost job_id=%s: %d LLM calls, %d tokens in, %d tokens out",
-                job.job_id, cost.llm_calls, cost.tokens_in, cost.tokens_out)
-    reason = stale_reason(job)
-    if reason:
-        status_store.mark_skipped(key, reason, cost)
-        logger.info("Dropped the finished review job_id=%s pr=%s sha=%s: %s", job.job_id, job.pr_number, job.head_sha, reason)
-        return
+        cost = ReviewCost(final_state.get("llm_calls", 0), final_state.get("tokens_in", 0), final_state.get("tokens_out", 0))
+        logger.info("Review cost job_id=%s: %d LLM calls, %d tokens in, %d tokens out",
+                    job.job_id, cost.llm_calls, cost.tokens_in, cost.tokens_out)
+        reason = stale_reason(job)
+        if reason:
+            status_store.mark_skipped(key, reason, cost)
+            logger.info("Dropped the finished review job_id=%s pr=%s sha=%s: %s", job.job_id, job.pr_number, job.head_sha, reason)
+            if trace:
+                trace.record_outcome(final_state, f"skipped: {reason}")
+            return
 
-    upsert_summary_comment(job.repo_full_name, job.pr_number, final_state["final_review_markdown"])
-    latency_ms = int((time.monotonic() - started) * 1000)
-    status_store.mark_posted(key, latency_ms, final_state.get("failed_agents") or [], cost)
+        upsert_summary_comment(job.repo_full_name, job.pr_number, final_state["final_review_markdown"])
+        latency_ms = int((time.monotonic() - started) * 1000)
+        status_store.mark_posted(key, latency_ms, final_state.get("failed_agents") or [], cost)
+        if trace:
+            trace.record_outcome(final_state, "posted")
 
 
 # Receives at most one message and handles it.

@@ -2,6 +2,8 @@ import time
 import threading
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.jobs.models import ReviewJob
 from app.jobs.queue import InMemoryJobQueue
 from app.jobs.review_status import InMemoryReviewStatusStore, ReviewCost, ReviewStatus
@@ -354,3 +356,56 @@ def test_the_review_gets_a_deadline_under_the_visibility_timeout(monkeypatch):
     deadline = graph.invoke.call_args.args[0]["review_deadline"]
     assert before + 300 <= deadline <= time.monotonic() + 300
     print("OK - every review carries a deadline the LLM client stops at")
+
+
+# The real review_trace with a fake Langfuse client that only records observations.
+def fake_langfuse(monkeypatch):
+    from review import review_tracing
+    from tests.unit.test_review_tracing import FakeLangfuse
+
+    client = FakeLangfuse()
+    monkeypatch.setattr(review_tracing, "_client", client)
+    monkeypatch.setattr(review_tracing, "_client_built", True)
+    return client
+
+
+def test_the_trace_records_a_posted_review(monkeypatch):
+    fake_review_github(monkeypatch, [("open", "abc123"), ("open", "abc123")])
+    langfuse = fake_langfuse(monkeypatch)
+    graph = finished_graph()
+
+    review_pull_request(graph, ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123"),
+                        InMemoryReviewStatusStore())
+
+    review = langfuse.named("review")
+    assert review.fields["output"]["status"] == "posted" and review.ended
+    assert graph.invoke.call_args.args[0]["trace_context"]["parent_span_id"] == review.id
+    print("OK - the trace ends after the post and says it was posted")
+
+
+def test_the_trace_records_a_review_dropped_as_stale(monkeypatch):
+    fake_review_github(monkeypatch, [("open", "abc123"), ("open", "newer-sha")])
+    langfuse = fake_langfuse(monkeypatch)
+
+    review_pull_request(finished_graph(), ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123"),
+                        InMemoryReviewStatusStore())
+
+    assert langfuse.named("review").fields["output"]["status"] == "skipped: superseded"
+    print("OK - a review dropped after a push shows as skipped in the trace")
+
+
+def test_a_failed_post_marks_the_trace_as_an_error(monkeypatch):
+    fake_review_github(monkeypatch, [("open", "abc123"), ("open", "abc123")])
+
+    def github_down(repo, pr, markdown):
+        raise RuntimeError("GitHub 502")
+
+    monkeypatch.setattr("app.worker.upsert_summary_comment", github_down)
+    langfuse = fake_langfuse(monkeypatch)
+
+    with pytest.raises(RuntimeError):
+        review_pull_request(finished_graph(), ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123"),
+                            InMemoryReviewStatusStore())
+
+    assert langfuse.named("review").fields["level"] == "ERROR"
+    print("OK - a review that could not be posted is an error trace, not a silent gap")

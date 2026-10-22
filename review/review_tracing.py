@@ -112,9 +112,10 @@ class ReviewTrace:
         self.span = span
         self.context = _context_of(span)
 
-    def record_outcome(self, final_state: dict) -> None:
+    def record_outcome(self, final_state: dict, status: str = "reviewed") -> None:
         findings = final_state.get("posted_findings") or []
         _safely(self.span.update, output={
+            "status": status,
             "findings": len(findings),
             "blocking": sum(1 for finding in findings if finding.get("severity") in ("CRITICAL", "HIGH")),
             "failed_agents": final_state.get("failed_agents") or [],
