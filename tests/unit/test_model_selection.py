@@ -67,3 +67,52 @@ def test_report_shows_the_picks_as_env_lines():
     assert "## Best model per agent" in markdown and "SECURITY_AGENT_MODEL=a" in markdown
     assert "groq:b has 6 of 12 security calls" in markdown, "a partial run is flagged"
     print("OK - the report names each agent's model and flags incomplete runs")
+
+
+TOO_LARGE = ("APIStatusError: Error code: 413 - Request too large for model `openai/gpt-oss-20b` on tokens per minute "
+             "(TPM): Limit 8000, Requested 9300")
+
+
+# Turns the scored record of one run into a 413: the model never saw the prompt.
+def make_too_large(record: dict) -> dict:
+    return {**record, "error": TOO_LARGE, "score": 0.0}
+
+
+def test_a_model_too_small_for_an_agents_prompt_is_not_eligible_for_it():
+    small = records_for("groq:small", "security", found=4, tokens=10)
+    small[0] = make_too_large(small[0])
+    records = records_for("groq:big", "security", found=4, tokens=900) + small
+
+    recommendation = recommend_models(records)["security"]
+
+    assert recommendation["choice"] == "groq:big", "the cheaper model would fail on real prompts this size"
+    assert recommendation["too_small"] == ["groq:small"] and "groq:small" not in recommendation["top"]
+    print("OK - a single 413 on an agent's prompt rules the model out for that agent")
+
+
+def test_a_413_is_left_out_of_the_scores_instead_of_counting_as_a_wrong_answer():
+    from eval.benchmark.metrics import aggregate
+
+    records = records_for("groq:small", "security", found=4)
+    records[0] = make_too_large(records[0])
+
+    metrics = aggregate(records)
+
+    assert metrics["quality"] == 1.0 and metrics["errors"] == 0, "the call the model never saw is not scored"
+    assert metrics["too_large"] == 1 and metrics["calls"] == 12
+    print("OK - too-large calls are counted apart from errors and wrong answers")
+
+
+def test_cut_off_answers_are_counted_and_the_report_shows_both_columns():
+    from eval.benchmark.metrics import aggregate, summarize
+
+    records = records_for("groq:a", "security", found=4) + records_for("groq:b", "security", found=4)
+    records[0] = {**records[0], "finish_reason": "length"}
+    records[-1] = make_too_large(records[-1])
+
+    assert aggregate(records[:12])["cut_off"] == 1
+    markdown = format_markdown(summarize(records), records, {"runs": 3})
+    assert "| cut off |" in markdown and "| too large |" in markdown
+    assert "too large for the model's per-minute token limit" in markdown
+    assert "not eligible (too large)" in markdown
+    print("OK - the report shows cut-off answers and models too small for a prompt")

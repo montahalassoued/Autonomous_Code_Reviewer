@@ -20,7 +20,8 @@ from eval.benchmark.report import format_markdown
 from eval.benchmark.scoring import AGENT_SPECS, SCORER_VERSION, score_case
 from review.agents.agent_runner import AGENT_MAX_OUTPUT_TOKENS, AGENT_TEMPERATURE
 from review.agents.prompt_assembler import fill_prompt
-from review.llm_client import MAX_PROVIDER_WAIT_S, QUOTA_EXHAUSTED, is_quota_exhausted, provider_retry_delay_s
+from review.llm_client import (MAX_PROVIDER_WAIT_S, QUOTA_EXHAUSTED, is_quota_exhausted, is_request_too_large,
+                               provider_retry_delay_s)
 from review.untrusted_input import DIFF_LABEL, wrap_untrusted
 
 
@@ -59,6 +60,7 @@ class CallResult:
     output_tokens: int = 0
     error: str | None = None
     attempts: int = 1  # 1 + retries after a 429/5xx, so latency can be read honestly
+    finish_reason: str | None = None  # "length" (Groq) or "MAX_TOKENS" (Gemini): the answer was cut off at the cap
 
 
 # Signature of the function that talks to a model:
@@ -111,8 +113,7 @@ def _split_model_spec(model_spec: str) -> tuple[str, str]:
 # Rate limits (429) and server errors (5xx) are worth retrying, except a spent quota or a request over a per-request limit.
 def _is_retryable(exc: BaseException) -> bool:
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-    too_large = "request too large" in str(exc).lower()
-    return status in (429, 500, 502, 503, 504) and not too_large and not is_quota_exhausted(exc)
+    return status in (429, 500, 502, 503, 504) and not is_request_too_large(exc) and not is_quota_exhausted(exc)
 
 
 _backoff = wait_exponential(multiplier=2, min=2, max=30)
@@ -131,7 +132,7 @@ def _wait_for_provider(retry_state) -> float:
     wait=_wait_for_provider,
     reraise=True,
 )
-def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int]:
+def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int, str | None]:
     client = _build_groq_client()
     kwargs = {"temperature": temperature} if temperature is not None else {}
     kwargs["max_completion_tokens"] = AGENT_MAX_OUTPUT_TOKENS
@@ -145,6 +146,7 @@ def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple
         response.choices[0].message.content or "",
         getattr(usage, "prompt_tokens", 0) or 0,
         getattr(usage, "completion_tokens", 0) or 0,
+        getattr(response.choices[0], "finish_reason", None),
     )
 
 
@@ -155,17 +157,20 @@ def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple
     wait=_wait_for_provider,
     reraise=True,
 )
-def _call_gemini(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int]:
+def _call_gemini(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int, str | None]:
     from google.genai import types
 
     client = _build_gemini_client()
     config = types.GenerateContentConfig(temperature=temperature, max_output_tokens=AGENT_MAX_OUTPUT_TOKENS)
     response = client.models.generate_content(model=model_name, contents=prompt, config=config)
     usage = response.usage_metadata
+    candidates = getattr(response, "candidates", None) or []
+    finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
     return (
         response.text or "",
         getattr(usage, "prompt_token_count", 0) or 0,
         getattr(usage, "candidates_token_count", 0) or 0,
+        getattr(finish_reason, "name", None) or (str(finish_reason) if finish_reason else None),
     )
 
 
@@ -180,8 +185,9 @@ def call_model(model_spec: str, prompt: str, temperature: float | None) -> CallR
     try:
         provider, model_name = _split_model_spec(model_spec)
         call = _call_groq if provider == "groq" else _call_gemini
-        text, input_tokens, output_tokens = call(model_name, prompt, temperature)
-        return CallResult(text, time.perf_counter() - start, input_tokens, output_tokens, attempts=_attempts(call))
+        text, input_tokens, output_tokens, finish_reason = call(model_name, prompt, temperature)
+        return CallResult(text, time.perf_counter() - start, input_tokens, output_tokens, attempts=_attempts(call),
+                          finish_reason=finish_reason)
     except Exception as exc:  # noqa: BLE001 - any failure is a benchmark result
         # Marked on the full message: the stored error is cut to 300 characters, before Gemini names its daily quota.
         kind = QUOTA_EXHAUSTED if is_quota_exhausted(exc) else type(exc).__name__
@@ -288,7 +294,8 @@ def replay(results_path: Path, cases: list[dict]) -> list[dict]:
         if old.get("case_fingerprint") and old["case_fingerprint"] != case_fingerprint(case):
             print(f"  warning: {old['case_id']} changed since this run; it is scored against the current labels")
         result = {key: old.get(key, default) for key, default in
-                  (("text", ""), ("latency_s", 0.0), ("input_tokens", 0), ("output_tokens", 0), ("error", None), ("attempts", 1))}
+                  (("text", ""), ("latency_s", 0.0), ("input_tokens", 0), ("output_tokens", 0), ("error", None), ("attempts", 1),
+                   ("finish_reason", None))}
         scored = score_case(case, result["text"]) if result["error"] is None else _empty_score(case)
         records.append(_record(case, old["model"], old["run"], scored, result, cached=False))
     return records

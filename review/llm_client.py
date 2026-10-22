@@ -75,12 +75,19 @@ def is_quota_exhausted(error: str | BaseException | None) -> bool:
     return message.startswith(QUOTA_EXHAUSTED) or bool(DAILY_LIMIT.search(message)) or (delay or 0) > MAX_PROVIDER_WAIT_S
 
 
+# A request bigger than the model's per-minute token limit (413): no retry or wait can make it fit.
+def is_request_too_large(error: str | BaseException | None) -> bool:
+    if error is None:
+        return False
+    return getattr(error, "status_code", None) == 413 or "request too large" in str(error).lower() or "error code: 413" in str(error).lower()
+
+
 # Per-minute 429s, 5xx, dropped connections and timeouts pass on their own; a spent quota or an oversized request never does.
 def is_retryable_llm_error(exc: BaseException) -> bool:
     if isinstance(exc, groq.APIConnectionError):  # APITimeoutError is a subclass
         return True
-    too_large = "request too large" in str(exc).lower()
-    return getattr(exc, "status_code", None) in RETRYABLE_STATUSES and not too_large and not is_quota_exhausted(exc)
+    return (getattr(exc, "status_code", None) in RETRYABLE_STATUSES and not is_request_too_large(exc)
+            and not is_quota_exhausted(exc))
 
 
 def _read_positive_env(name: str, default: float) -> float:

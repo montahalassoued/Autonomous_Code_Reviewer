@@ -1,5 +1,14 @@
 import statistics
 
+from review.llm_client import is_request_too_large
+
+CUT_OFF_REASONS = ("length", "MAX_TOKENS")
+
+
+# A call the model never saw because it was over its per-minute token limit: says the model doesn't fit, not how it answers.
+def is_too_large(record: dict) -> bool:
+    return is_request_too_large(record.get("error"))
+
 
 def _ratio(numerator: float, denominator: float) -> float | None:
     return numerator / denominator if denominator else None
@@ -11,6 +20,8 @@ def _sum(records: list[dict], key: str) -> int:
 
 # Micro-averaged metrics over scored records: recall and precision count findings, not cases.
 def aggregate(records: list[dict]) -> dict:
+    too_large = [record for record in records if is_too_large(record)]
+    records = [record for record in records if not is_too_large(record)]
     ok = [record for record in records if record.get("error") is None]
     buggy = [record for record in ok if not record["clean"]]
     clean = [record for record in ok if record["clean"]]
@@ -36,6 +47,8 @@ def aggregate(records: list[dict]) -> dict:
         "invalid_rate": _ratio(sum(1 for record in ok if not record["valid"]), len(ok)),
         "dropped_findings": _sum(ok, "n_dropped"),
         "errors": len(records) - len(ok),
+        "too_large": len(too_large),
+        "cut_off": sum(1 for record in ok if record.get("finish_reason") in CUT_OFF_REASONS),
         "latency_mean_s": statistics.mean(latencies),
         "latency_p95_s": latencies[min(len(latencies) - 1, int(0.95 * len(latencies)))],
         "input_tokens": _sum(ok, "input_tokens"),
@@ -43,7 +56,7 @@ def aggregate(records: list[dict]) -> dict:
         "tokens_per_tp": _ratio(tokens, tp),
         "retries": sum(max(0, record.get("attempts", 1) - 1) for record in ok),
         "cached_calls": sum(1 for record in records if record.get("cached")),
-        "calls": len(records),
+        "calls": len(records) + len(too_large),
         "cases": len({record["case_id"] for record in records}),
     }
 

@@ -1,4 +1,4 @@
-from eval.benchmark.metrics import aggregate
+from eval.benchmark.metrics import aggregate, is_too_large
 
 # A model beats another only on at least this many more cases won in every common run (see IMPLEMENTATION_PLAN).
 MIN_CASE_GAP = 2
@@ -51,11 +51,20 @@ def _tokens_per_tp(records: list[dict], model: str) -> float:
     return value if value is not None else float("inf")
 
 
+# Models with a request over their per-minute token limit on this agent's prompt: they can't serve it, whatever they score.
+def models_too_small(records: list[dict]) -> list[str]:
+    return sorted({record["model"] for record in records if is_too_large(record)})
+
+
 # Per agent: the tied best models, and one production (Groq) model each, spread so no model serves two agents when a tie allows.
 def recommend_models(records: list[dict]) -> dict[str, dict]:
     by_agent: dict[str, list[dict]] = {}
+    too_small: dict[str, list[str]] = {}
     for record in records:
         by_agent.setdefault(record["agent"], []).append(record)
+    for agent, agent_records in list(by_agent.items()):
+        too_small[agent] = models_too_small(agent_records)
+        by_agent[agent] = [record for record in agent_records if record["model"] not in too_small[agent]]
     tops = {agent: top_models(agent_records) for agent, agent_records in by_agent.items()}
 
     recommendations, used = {}, set()
@@ -71,5 +80,6 @@ def recommend_models(records: list[dict]) -> dict[str, dict]:
         choice = candidates[0] if candidates else None
         if choice:
             used.add(choice)
-        recommendations[agent] = {"top": tops[agent], "choice": choice, "cases": len({r["case_id"] for r in agent_records})}
+        recommendations[agent] = {"top": tops[agent], "choice": choice, "too_small": too_small[agent],
+                                  "cases": len({r["case_id"] for r in agent_records})}
     return recommendations

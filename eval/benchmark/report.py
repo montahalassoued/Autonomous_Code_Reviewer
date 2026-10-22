@@ -1,3 +1,4 @@
+from eval.benchmark.metrics import is_too_large
 from eval.benchmark.model_selection import MIN_CASE_GAP, PRODUCTION_PROVIDER, recommend_models
 
 
@@ -18,7 +19,8 @@ MAIN_COLUMNS = (
     ("precision", "precision", "ratio"), ("F1", "f1", "ratio"), ("clean pass", "clean_pass", "ratio"),
     ("clean strict", "clean_strict_pass", "ratio"), ("rule acc", "rule_accuracy", "ratio"),
     ("line acc", "line_accuracy", "ratio"), ("severity acc", "severity_accuracy", "ratio"),
-    ("invalid", "invalid_rate", "percent"), ("errors", "errors", "count"),
+    ("invalid", "invalid_rate", "percent"), ("cut off", "cut_off", "count"), ("errors", "errors", "count"),
+    ("too large", "too_large", "count"),
     ("legacy", "legacy_quality", "ratio"),
 )
 COST_COLUMNS = (
@@ -41,6 +43,9 @@ def _table(rows: list[dict], columns, first: tuple[str, str]) -> list[str]:
 def _failures(records: list[dict]) -> list[str]:
     lines = []
     for record in records:
+        if is_too_large(record):
+            lines.append(f"- `{record['case_id']}` run {record['run']} ({record['model']}): too large for the model's per-minute token limit")
+            continue
         if record.get("error"):
             lines.append(f"- `{record['case_id']}` run {record['run']} ({record['model']}): error {record['error']}")
             continue
@@ -67,13 +72,15 @@ def _model_choice(records: list[dict]) -> list[str]:
         "## Best model per agent", "",
         f"A model beats another when it wins at least {MIN_CASE_GAP} more cases, each one in every run both models have; "
         "models nobody beats are tied. The pick is a Groq model (production calls Groq only), a different one per agent "
-        "when a tie allows it so each model's daily quota serves one agent, then the fewest tokens per true positive.", "",
-        "| agent | cases | tied best | pick |", "|---|---|---|---|",
+        "when a tie allows it so each model's daily quota serves one agent, then the fewest tokens per true positive. "
+        "A model with any request over its per-minute token limit (413) on an agent's prompt is not eligible for it.", "",
+        "| agent | cases | tied best | pick | not eligible (too large) |", "|---|---|---|---|---|",
     ]
     env_lines, partial = [], []
     for agent, recommendation in sorted(recommendations.items()):
         choice = recommendation["choice"] or "-"
-        lines.append(f"| {agent} | {recommendation['cases']} | {', '.join(recommendation['top'])} | {choice} |")
+        lines.append(f"| {agent} | {recommendation['cases']} | {', '.join(recommendation['top'])} | {choice} "
+                     f"| {', '.join(recommendation['too_small']) or '-'} |")
         if recommendation["choice"]:
             env_lines.append(f"{agent.upper()}_AGENT_MODEL={recommendation['choice'].removeprefix(PRODUCTION_PROVIDER)}")
         calls = {}
