@@ -51,6 +51,9 @@ class ReviewState(TypedDict):
     # Where this review's Langfuse trace hangs (review/review_tracing.py); None when tracing is off
     trace_context: dict[str, str] | None
 
+    # time.monotonic() after which no LLM call starts or waits (set by app/worker.py); None: no deadline
+    review_deadline: float | None
+
 
 # The state a review starts from; the worker and the review eval both build it here, so the eval runs what production runs.
 def initial_state(pr_number: int, repo_full_name: str, diff: str, changed_files: list[str],
@@ -60,4 +63,5 @@ def initial_state(pr_number: int, repo_full_name: str, diff: str, changed_files:
         pr_number=pr_number, repo_full_name=repo_full_name, pr_diff=redact_for_llm(diff), changed_files=changed_files,
         unreviewed_files=unreviewed_files, review_context="", findings=[], failed_agents=[],
         llm_calls=0, tokens_in=0, tokens_out=0, posted_findings=[], final_review_markdown="", trace_context=None,
+        review_deadline=None,
     )

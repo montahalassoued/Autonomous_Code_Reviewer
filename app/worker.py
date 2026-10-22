@@ -20,6 +20,8 @@ from tools.github_tools import changed_files_in_diff, get_pr_diff, get_pull_requ
 logger = logging.getLogger(__name__)
 
 DEFAULT_VISIBILITY_TIMEOUT_S = 900
+# Well under the visibility timeout: the post and one in-flight call (60s timeout) still fit before the job reappears.
+DEFAULT_REVIEW_DEADLINE_S = 600
 DEFAULT_MAX_ATTEMPTS = 3
 MIN_POLL_S = 1.0
 MAX_POLL_S = 10.0
@@ -64,6 +66,7 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
         return
 
     review_state = initial_state(job.pr_number, job.repo_full_name, diff, changed_files_in_diff(diff), unreviewed)
+    review_state["review_deadline"] = started + review_deadline_s()
 
     with review_trace(job.repo_full_name, job.pr_number, job.head_sha, job.job_id) as trace:
         review_state["trace_context"] = trace.context if trace else None
@@ -159,6 +162,10 @@ def run_forever(
 
 
 # Reads a positive integer from the environment, falling back to default if unset.
+def review_deadline_s() -> int:
+    return _read_int_env("REVIEW_DEADLINE_S", DEFAULT_REVIEW_DEADLINE_S)
+
+
 def _read_int_env(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if not raw:
@@ -177,6 +184,9 @@ def main() -> None:
 
     max_attempts = _read_int_env("MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS)
     visibility_timeout_s = _read_int_env("REVIEW_VISIBILITY_TIMEOUT_S", DEFAULT_VISIBILITY_TIMEOUT_S)
+    if review_deadline_s() >= visibility_timeout_s:
+        logger.warning("REVIEW_DEADLINE_S=%s is not below REVIEW_VISIBILITY_TIMEOUT_S=%s: a slow review can run twice",
+                       review_deadline_s(), visibility_timeout_s)
 
     queue = build_queue()
     status_store = build_review_status()

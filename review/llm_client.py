@@ -3,8 +3,9 @@ import os
 import re
 import threading
 import time
+from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Callable
+from typing import Callable, Iterator
 
 import groq
 from groq import Groq
@@ -30,6 +31,29 @@ DELAY_UNITS_S = {"h": 3600.0, "m": 60.0, "s": 1.0, "ms": 0.001}
 
 _call_slots: threading.BoundedSemaphore | None = None
 _call_slots_lock = threading.Lock()
+# Each agent runs in its own thread, so the review's deadline is held per thread.
+_deadline = threading.local()
+
+
+# Raised instead of calling or waiting past the review's deadline, so a slow provider can't outlive the job's lease.
+class ReviewDeadlineExceeded(RuntimeError):
+    pass
+
+
+# Every LLM call made in this thread inside the block stops at `deadline_monotonic` (None: no deadline).
+@contextmanager
+def llm_deadline(deadline_monotonic: float | None) -> Iterator[None]:
+    previous = getattr(_deadline, "at", None)
+    _deadline.at = deadline_monotonic
+    try:
+        yield
+    finally:
+        _deadline.at = previous
+
+
+def _seconds_left() -> float | None:
+    at = getattr(_deadline, "at", None)
+    return None if at is None else at - time.monotonic()
 
 
 # Seconds the provider asks us to wait before retrying, if its error says.
@@ -96,6 +120,9 @@ class ReviewLlmClient:
 
     def _create(self, **request):
         for attempt in range(1, self._max_attempts + 1):
+            seconds_left = _seconds_left()
+            if seconds_left is not None and seconds_left <= 0:
+                raise ReviewDeadlineExceeded(f"review deadline passed before calling {request.get('model')}")
             try:
                 with self._slots:
                     return self._groq.chat.completions.create(**request)
@@ -103,6 +130,9 @@ class ReviewLlmClient:
                 if attempt == self._max_attempts or not is_retryable_llm_error(exc):
                     raise
                 wait_s = self._retry_wait_s(exc, attempt)
+                seconds_left = _seconds_left()
+                if seconds_left is not None and wait_s >= seconds_left:
+                    raise  # the wait alone would pass the deadline: give up with the provider's error
                 logger.warning("%s failed (%s), retrying in %.1fs (attempt %d/%d)", request.get("model"),
                                getattr(exc, "status_code", None) or type(exc).__name__, wait_s, attempt, self._max_attempts)
                 self._sleep(wait_s)  # outside the slot, so a waiting call doesn't block the others

@@ -7,7 +7,7 @@ from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
 from review.agents.tools.tool_definition import Tool, ToolContext, execute_tool_call
 from review.finding_locator import locate_findings
 from review.finding_merger import merge_duplicate_findings
-from review.llm_client import ReviewLlmClient, build_review_llm_client
+from review.llm_client import ReviewLlmClient, build_review_llm_client, llm_deadline
 from review.output_sanitizer import sanitize_finding
 from review.review_tracing import TraceContext, record_llm_response, traced_step
 from review.secret_redactor import environment_secret_values, redact_secrets
@@ -263,7 +263,8 @@ def run_agent(spec: AgentSpec, state: ReviewState, client: ReviewLlmClient, tool
     usage = LlmUsage()
     with traced_step(state.get("trace_context"), spec.name, "agent") as agent_step:
         try:
-            raw_output = _converse(spec, build_prompt(spec, state), client, tool_context, usage, agent_step.context)
+            with llm_deadline(state.get("review_deadline")):
+                raw_output = _converse(spec, build_prompt(spec, state), client, tool_context, usage, agent_step.context)
             if parse_findings_array(raw_output) is None:
                 raise UnusableAgentAnswer(f"answer is not a JSON array: {redact_secrets(raw_output[:120])!r}")
         except Exception as exc:

@@ -120,3 +120,34 @@ def test_build_without_a_key_says_what_to_set(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
         build_review_llm_client()
+
+
+def test_no_call_starts_after_the_review_deadline():
+    fake = FakeGroq()
+    client, _ = make_client(fake)
+
+    with llm_client.llm_deadline(time.monotonic() - 1):
+        with pytest.raises(llm_client.ReviewDeadlineExceeded):
+            client.chat.completions.create(model="m")
+    assert fake.calls == 0, "past the deadline the provider is never called"
+
+
+def test_a_retry_wait_that_would_pass_the_deadline_gives_up_with_the_provider_error():
+    fake = FakeGroq([PER_MINUTE_429])
+    client, waits = make_client(fake)
+
+    with llm_client.llm_deadline(time.monotonic() + 5):  # Groq asks for 7.5s, only 5s are left
+        with pytest.raises(StatusError):
+            client.chat.completions.create(model="m")
+    assert fake.calls == 1 and waits == [], "no sleep that would end after the deadline"
+
+
+def test_the_deadline_is_per_thread_and_restored_after_the_block():
+    with llm_client.llm_deadline(123.0):
+        seen_in_other_thread = []
+        thread = threading.Thread(target=lambda: seen_in_other_thread.append(llm_client._seconds_left()))
+        thread.start()
+        thread.join()
+        assert llm_client._seconds_left() is not None
+    assert seen_in_other_thread == [None], "another agent's thread is not limited by this one"
+    assert llm_client._seconds_left() is None

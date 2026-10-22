@@ -1,3 +1,4 @@
+import time
 import threading
 from unittest.mock import MagicMock
 
@@ -336,3 +337,20 @@ if __name__ == "__main__":
     test_process_one_returns_false_on_empty_queue()
     test_run_forever_stops_when_event_is_set()
     print("\nWorker tests passed (GitHub tests need pytest's monkeypatch).")
+
+
+def test_the_review_gets_a_deadline_under_the_visibility_timeout(monkeypatch):
+    monkeypatch.setattr("app.worker.get_pr_diff", lambda repo, pr: PullRequestDiff(SMALL_DIFF))
+    monkeypatch.setattr("app.worker.get_pull_request_head", lambda repo, pr: ("open", "abc123"))
+    monkeypatch.setattr("app.worker.upsert_summary_comment", lambda repo, pr, md: None)
+    monkeypatch.setenv("REVIEW_DEADLINE_S", "300")
+    graph = MagicMock()
+    graph.invoke.return_value = {"final_review_markdown": "# Review"}
+    before = time.monotonic()
+
+    review_pull_request(graph, ReviewJob(repo_full_name="owner/repo", pr_number=7, head_sha="abc123"),
+                        InMemoryReviewStatusStore())
+
+    deadline = graph.invoke.call_args.args[0]["review_deadline"]
+    assert before + 300 <= deadline <= time.monotonic() + 300
+    print("OK - every review carries a deadline the LLM client stops at")
