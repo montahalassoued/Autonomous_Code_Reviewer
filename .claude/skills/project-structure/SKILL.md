@@ -24,7 +24,7 @@ description: Decide where new code, tests and docs go and how to name them, so e
 | `eval/` | Quality measurement | Benchmarks and harnesses. Data goes in `eval/dataset/`, outputs in `eval/results/` |
 | `tests/unit/` | Offline tests | No network, no API keys. CI runs this whole folder |
 | `tests/integration/` | Real-API tests | Auto-marked `integration`, run manually |
-| `infra/` | Cloud setup | Azure scripts and their guide |
+| `infra/` | Cloud setup | Azure scripts and their guide; `gateway/` (the Nginx reverse proxy config, its IP allowlists and their refresh script) |
 | `docs/` | Project docs | The plan, CI, setup, architecture, `DECISIONS.md` |
 | `.github/workflows/` | CI/CD | One workflow per purpose |
 

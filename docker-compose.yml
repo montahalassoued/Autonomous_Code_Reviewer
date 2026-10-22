@@ -1,9 +1,10 @@
 # File purpose: Local multi-service orchestration for the durable review pipeline.
 # Inputs: Environment variables from .env and the container image built from this repository.
-# Outputs: Four containers on one network:
+# Outputs: Five containers on one network:
 #   azurite  - local emulator of Azure Storage (review queue), data kept in a named volume
 #   postgres - code index and review history (reviews table = webhook dedupe)
-#   api      - FastAPI webhook receiver (verify, dedupe, enqueue, 202); no indexing
+#   gateway  - Nginx reverse proxy, the only way in: http://localhost:8000 (infra/gateway/)
+#   api      - FastAPI webhook receiver (verify, dedupe, enqueue, 202); no indexing, reached only through the gateway
 #   worker   - python -m app.worker; builds the index once and consumes the queue
 # The api and worker share one image and talk through Azurite and Postgres.
 
@@ -57,10 +58,30 @@ services:
       retries: 10
     restart: unless-stopped
 
+  gateway:
+    image: nginxinc/nginx-unprivileged:1.27.4-alpine
+    # Same public port as before, so `ngrok http 8000` and the GitHub webhook URL don't change.
+    ports:
+      - "8000:8080"
+    volumes:
+      - ./infra/gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # any (default, for ngrok) or github_hooks (only GitHub's webhook IPs; run the refresh script first).
+      - ./infra/gateway/allowlist/${GATEWAY_WEBHOOK_ALLOWLIST:-any}.conf:/etc/nginx/allowlist.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   api:
     build: .
-    ports:
-      - "8000:8000"
+    # Not published on your machine: only the gateway reaches it, on the compose network.
+    expose:
+      - "8000"
     env_file:
       - .env
     environment:
