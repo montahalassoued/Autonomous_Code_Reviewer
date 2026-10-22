@@ -14,8 +14,8 @@
 #   5. User-assigned managed identity with AcrPull on the registry
 #   6. Storage account (queues review-jobs + review-jobs-poison) + the queue
 #      data role for the managed identity
-#   NOT YET: the Postgres server the apps need for DATABASE_URL (dedupe and
-#   code index). See infra/README.md, "Postgres (not provisioned yet)".
+#   NOT CREATED HERE: the Postgres server behind DATABASE_URL (dedupe and review
+#   status). Create it first and export its URL. See infra/README.md, "Postgres".
 #   7. API Container App   (external ingress, 0.5 vCPU / 1Gi, min=max=1)
 #   8. Worker Container App (no ingress, 2 vCPU / 4Gi, min=max=1)
 #   9. GitHub Actions OIDC: Entra app + service principal + federated credential
@@ -28,6 +28,8 @@
 #        export GITHUB_WEBHOOK_SECRET='...'
 #        export GITHUB_TOKEN='...'
 #        export ALLOWED_REPOS='owner/repo'          # repos the webhook accepts, comma-separated
+#        # Both apps need (the reviews table: API dedupe, worker review status):
+#        export DATABASE_URL='postgresql://user:password@host:5432/dbname?sslmode=require'
 #        # Worker needs:
 #        export TARGET_REPO_URL='https://github.com/owner/repo.git'
 #        export GROQ_API_KEY='...'
@@ -96,6 +98,8 @@ WORKER_MAX_REPLICAS=1
 # killed and simply reappears on the queue after the visibility timeout.
 WORKER_TERMINATION_GRACE_S=600
 REVIEW_VISIBILITY_TIMEOUT_S=900   # must exceed the longest review
+# LLM calls stop here, leaving the post step time to finish within the 600s grace and the 900s visibility.
+REVIEW_DEADLINE_S=500
 MAX_ATTEMPTS=3
 
 PLACEHOLDER_IMAGE="mcr.microsoft.com/k8se/quickstart:latest"
@@ -114,8 +118,8 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 # App secrets are read from YOUR shell environment, split per app. Required ones
 # must be set, because Container Apps refuses empty secret values.
-API_REQUIRED_SECRETS=(GITHUB_WEBHOOK_SECRET GITHUB_TOKEN)
-WORKER_REQUIRED_SECRETS=(TARGET_REPO_URL GROQ_API_KEY GITHUB_TOKEN)
+API_REQUIRED_SECRETS=(GITHUB_WEBHOOK_SECRET GITHUB_TOKEN DATABASE_URL)
+WORKER_REQUIRED_SECRETS=(TARGET_REPO_URL GROQ_API_KEY GITHUB_TOKEN DATABASE_URL)
 WORKER_OPTIONAL_SECRETS=(LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY)
 missing=0
 for v in "${API_REQUIRED_SECRETS[@]}" "${WORKER_REQUIRED_SECRETS[@]}"; do
@@ -126,6 +130,7 @@ for v in "${WORKER_OPTIONAL_SECRETS[@]}"; do
 done
 [ "$missing" = "0" ] || die "Export the missing variables listed above, then re-run."
 [ -n "${ALLOWED_REPOS:-}" ] || die "Export ALLOWED_REPOS='owner/repo' (the webhook ignores every other repo)."
+[[ "$DATABASE_URL" =~ ^postgres(ql)?:// ]] || die "DATABASE_URL must start with postgresql:// (see infra/README.md, \"Postgres\")."
 
 # Env var NAME -> Container Apps secret name (lowercase, dashes; secret names cannot contain '_').
 secret_name() { echo "$1" | tr 'A-Z_' 'a-z-'; }
@@ -381,7 +386,7 @@ for stale in TARGET_REPO_URL GROQ_API_KEY GOOGLE_API_KEY VOYAGE_API_KEY LANGFUSE
 done
 
 YAML_KIND="api"
-YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure" "ALLOWED_REPOS=$ALLOWED_REPOS"
+YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure" "DEDUPE_BACKEND=postgres" "ALLOWED_REPOS=$ALLOWED_REPOS"
   "AZURE_STORAGE_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" "AZURE_CLIENT_ID=$IDENTITY_CLIENT_ID")
 # The YAML update first (it removes the old secretRef env vars), then the secrets
 # can be deleted without leaving a dangling reference.
@@ -401,9 +406,11 @@ ensure_app "$WORKER_APP_NAME" "$WORKER_CPU" "$WORKER_MEMORY" \
   --min-replicas "$WORKER_MIN_REPLICAS" --max-replicas "$WORKER_MAX_REPLICAS"
 
 YAML_KIND="worker"
-YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure"
+# ALLOWED_REPOS here too: the worker refuses to start if it lists a repo other than its checkout.
+YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure" "DEDUPE_BACKEND=postgres" "ALLOWED_REPOS=$ALLOWED_REPOS"
   "AZURE_STORAGE_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" "AZURE_CLIENT_ID=$IDENTITY_CLIENT_ID"
   "REVIEW_VISIBILITY_TIMEOUT_S=$REVIEW_VISIBILITY_TIMEOUT_S" "MAX_ATTEMPTS=$MAX_ATTEMPTS"
+  "REVIEW_DEADLINE_S=$REVIEW_DEADLINE_S"
   "LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}")
 apply_yaml "$WORKER_APP_NAME" "$WORKER_CPU" "$WORKER_MEMORY"
 

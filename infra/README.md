@@ -11,7 +11,7 @@ GitHub (pull_request webhook)
         |  HTTPS POST /webhook/github
         v
 +------------------------------+        +-------------------------------+
-| API Container App            | claim  | Postgres (NOT provisioned yet)|
+| API Container App            | claim  | Postgres (you create it)      |
 | ca-code-reviewer             |------->|  reviews table: one row per   |
 | - verify HMAC signature      |        |  (repo, target, head sha)     |
 | - claim dedupe row           |        +-------------------------------+
@@ -73,7 +73,7 @@ A job is deleted from the queue only after it succeeded. If the worker crashes o
 
 **Storage.** `allow-shared-key-access` is false, so there are no account keys to leak. Consequences: use `--auth-mode login` with `az storage` commands, and the portal's data browser needs your own data-role assignment (see "Inspecting the queues"). Local development with Azurite uses a connection string and never touches this account. The queues are created through the Azure Resource Manager API (`az rest`), which needs only Contributor on the resource group, not a data role. The app also creates them on start if they are missing.
 
-**Postgres (not provisioned yet).** The API and the worker need `DATABASE_URL` for the `reviews` table (the API dedupes on it, the worker records each review's status), which replaced the Azure Table dedupe (`docs/DECISIONS.md`). This script does not create a Postgres server yet, so until it does, a deployed API and worker fail at startup with "DATABASE_URL is not set". That is deliberate: falling back to in-memory dedupe would let two replicas review the same commit twice. Where to host it (Azure Database for PostgreSQL Flexible Server, tier and cost) is an open decision in `docs/ARCHITECTURE.md`.
+**Postgres (create it before running the script).** The API and the worker need `DATABASE_URL` for the `reviews` table (the API dedupes on it, the worker records each review's status), which replaced the Azure Table dedupe (`docs/DECISIONS.md`). The script does not create a Postgres server: create one, then `export DATABASE_URL='postgresql://user:password@host:5432/dbname?sslmode=require'` before running it. The script stops at once if it is missing, and stores it as a secret on both apps with `DEDUPE_BACKEND=postgres`; the API applies the migrations at startup. There is deliberately no fallback to in-memory dedupe, because it would let two replicas review the same commit twice. Plain Postgres is enough (no migration needs pgvector). Where to host it (Azure Database for PostgreSQL Flexible Server, tier and cost) is an open decision in `docs/ARCHITECTURE.md`.
 
 ## Prerequisites
 
