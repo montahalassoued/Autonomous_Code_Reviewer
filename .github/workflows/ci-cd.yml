@@ -61,6 +61,40 @@ jobs:
         run: python -m pytest tests/unit -q
 
   # ---------------------------------------------------------------------------
+  # 1a. eval-gate - replays the recorded model answers of the review eval
+  #     through the current code (agents, tools, synthesizer) and fails if any
+  #     golden PR now gets a worse review: a bug no longer found, more noise,
+  #     a new error. Offline: no API keys, no quota. A replay is deterministic,
+  #     so every change it reports comes from the code.
+  # ---------------------------------------------------------------------------
+  eval-gate:
+    name: Review eval gate (recorded answers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install project requirements
+        run: pip install -r requirements.txt
+
+      - name: Replay the golden PRs against the baseline
+        run: >-
+          python -m eval.review_eval --offline
+          --cache eval/recordings/review_eval_calls.jsonl
+          --baseline eval/baselines/review_eval_baseline.json
+          --results-dir "$RUNNER_TEMP/review_eval"
+
+      - name: Show the eval report on the run page
+        if: always()
+        run: cat "$RUNNER_TEMP"/review_eval/*.md >> "$GITHUB_STEP_SUMMARY" || true
+
+  # ---------------------------------------------------------------------------
   # 1b. postgres - the Postgres tests (dedupe, review lifecycle and cost, index
   #     writer) against a throwaway Postgres service: no API keys, no quota.
   #     Same image as docker-compose.yml, so the migrations are tested on it.
@@ -140,7 +174,7 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     name: Push and deploy to Azure Container Apps
-    needs: [build, postgres]   # never deploy migrations or Postgres code that failed against Postgres
+    needs: [build, postgres, eval-gate]   # never deploy code that failed against Postgres or made a golden review worse
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.ACR_NAME != ''
     runs-on: ubuntu-latest
     timeout-minutes: 60

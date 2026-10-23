@@ -38,6 +38,17 @@ venv/Scripts/python.exe -m eval.review_eval --runs 3 --offline             # re-
 
 The models are the production ones (`SECURITY_/LOGIC_/QUALITY_AGENT_MODEL`, `FALLBACK_AGENT_MODEL` from `.env`). Before giving a real run, say roughly what it costs: an agent prompt is 3.5-5k tokens and every tool round resends it, so an estimated ~15k tokens per agent per case (2-3 calls), about 180k per agent per run of 12 cases. Against Groq's ~200k tokens per model per day, one run fits in a day only when the three agents use three different models; with one shared model it takes about three days, resumed from the recorded calls. Planned: `--mode structural` after the Phase 4 context builder, context recall and precision, Langfuse dataset runs.
 
+## The CI eval gate
+
+`eval/recordings/review_eval_calls.jsonl` (committed) holds the recorded answers and `eval/baselines/review_eval_baseline.json` the outcome of each (case, run, row). CI replays them offline and fails on any case that got worse (`eval/review_harness/eval_gate.py`). After a code change that improves a case, or after new live runs, refresh both, in the commit that explains the change:
+
+```bash
+cp eval/cache/review_eval_calls.jsonl eval/recordings/review_eval_calls.jsonl     # after a live run: the new answers
+venv/Scripts/python.exe -m eval.review_eval --offline --cache eval/recordings/review_eval_calls.jsonl --write-baseline eval/baselines/review_eval_baseline.json
+```
+
+Check the recording for secrets before committing it (it holds model answers about the fixture repo only). Never rewrite the baseline to make a regression pass: fix the code, or say plainly why the new outcome is right.
+
 ## Comparing before and after a change
 
 1. Keep the dataset fixed between the runs.

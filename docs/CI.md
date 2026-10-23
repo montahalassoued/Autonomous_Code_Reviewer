@@ -30,6 +30,10 @@ This job installs Python 3.11 (the same version as the Docker image) and `requir
 
 The other tests in `tests/` call real APIs (Groq, GitHub) and use quota. They run only on demand, through the separate **integration-tests** workflow (Actions tab, then "Run workflow").
 
+## Job 1a: Review eval gate
+
+Replays the recorded model answers of the review eval (`eval/recordings/review_eval_calls.jsonl`) through the current code, with `python -m eval.review_eval --offline --baseline eval/baselines/review_eval_baseline.json`, and fails if any golden PR now gets a worse review than the baseline: a lower score, fewer bugs found, more noise, duplicates or forbidden findings, or a new error. A replay is deterministic, so every change it reports comes from the code (post-processing, merger, locator, synthesizer, scoring), not from the model. No API key, no quota; the report is added to the run's summary page. A case whose requests changed (a prompt, a tool or the client) is listed as stale instead of failing, and a gate that could replay no case fails. The deploy waits for it.
+
 ## Job 1b: Postgres tests
 
 Runs next to the offline tests, against a throwaway `pgvector/pgvector:pg16` service container (the image docker compose uses) with `DATABASE_URL` set. It applies the migrations and runs `tests/integration/test_postgres_dedupe.py` (dedupe claim and release, the review lifecycle, the stored LLM cost) and `tests/integration/test_index_writer.py` (the code index). No API key, no quota. The deploy waits for it, so a migration that fails on Postgres is never deployed.
