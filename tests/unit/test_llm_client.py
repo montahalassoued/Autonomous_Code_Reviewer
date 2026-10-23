@@ -49,7 +49,7 @@ class FakeGroq:
 
 def make_client(fake: FakeGroq, max_attempts: int = 3, slots: int = 3):
     waits: list[float] = []
-    client = ReviewLlmClient(fake, max_attempts, threading.BoundedSemaphore(slots), sleep=waits.append)
+    client = ReviewLlmClient(lambda provider: fake, max_attempts, threading.BoundedSemaphore(slots), sleep=waits.append)
     return client, waits
 
 
@@ -109,17 +109,62 @@ def test_build_turns_off_the_sdk_retries_and_reads_the_env(monkeypatch):
     monkeypatch.setattr(llm_client, "_call_slots", None)
     try:
         client = build_review_llm_client()
-        assert client._groq.max_retries == 0, "the SDK's silent retries would double ours"
-        assert client._groq.timeout == 12.0
+        groq_client = client.client_for("groq")
+        assert groq_client.max_retries == 0, "the SDK's silent retries would double ours"
+        assert groq_client.timeout == 12.0
         assert client._max_attempts == llm_client.DEFAULT_LLM_MAX_ATTEMPTS
     finally:
         del os.environ["REVIEW_LLM_TIMEOUT_S"], os.environ["REVIEW_LLM_MAX_ATTEMPTS"]
 
 
-def test_build_without_a_key_says_what_to_set(monkeypatch):
+def test_a_groq_call_without_a_key_says_what_to_set(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    client = build_review_llm_client()
     with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
-        build_review_llm_client()
+        client.chat.completions.create(model="openai/gpt-oss-120b", messages=[])
+    assert llm_client.provider_config_problems(["openai/gpt-oss-120b"]), "the worker's startup check sees it too"
+    assert not llm_client.provider_config_problems(["ollama:qwen2.5-coder:7b"]), "a local model needs no Groq key"
+
+
+def test_a_model_prefix_picks_the_provider_and_a_bare_model_stays_on_groq(monkeypatch):
+    monkeypatch.setenv("VLLM_BASE_URL", "http://vllm:8000/v1")
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+
+    assert llm_client.split_model("openai/gpt-oss-120b") == ("groq", "openai/gpt-oss-120b")
+    assert llm_client.split_model("groq:openai/gpt-oss-20b") == ("groq", "openai/gpt-oss-20b")
+    assert llm_client.split_model("ollama:qwen2.5-coder:7b") == ("ollama", "qwen2.5-coder:7b")
+    assert llm_client.split_model("vllm:Qwen/Qwen2.5-Coder-7B-Instruct") == ("vllm", "Qwen/Qwen2.5-Coder-7B-Instruct")
+    assert llm_client.split_model("qwen2.5-coder:7b") == ("groq", "qwen2.5-coder:7b"), "no provider is named 'qwen2.5-coder'"
+    print("OK - provider:model routes; a bare model, or an unconfigured prefix, is a Groq model")
+
+
+def test_each_provider_gets_its_own_client_and_the_bare_model_name():
+    groq_fake, ollama_fake = FakeGroq(), FakeGroq()
+    built: list[str] = []
+
+    def provider_clients(provider: str):
+        built.append(provider)
+        return {"groq": groq_fake, "ollama": ollama_fake}[provider]
+
+    client = ReviewLlmClient(provider_clients, 3, threading.BoundedSemaphore(3), sleep=lambda _s: None)
+    answers = [client.chat.completions.create(model=model, messages=[]).model
+               for model in ("ollama:qwen2.5-coder:7b", "openai/gpt-oss-120b", "ollama:qwen2.5-coder:7b")]
+
+    assert answers == ["qwen2.5-coder:7b", "openai/gpt-oss-120b", "qwen2.5-coder:7b"], "the provider gets its own model id"
+    assert (groq_fake.calls, ollama_fake.calls) == (1, 2) and built == ["ollama", "groq"], "one client per provider, reused"
+    print("OK - calls go to the model's provider without its prefix; each provider client is built once")
+
+
+def test_an_openai_compatible_server_gets_its_url_key_and_no_sdk_retries(monkeypatch):
+    monkeypatch.setenv("VLLM_BASE_URL", "http://vllm:8000/v1")
+    monkeypatch.setenv("VLLM_API_KEY", "local-key")
+
+    vllm = llm_client.build_provider_client("vllm")
+    ollama = llm_client.build_provider_client("ollama")
+
+    assert str(vllm.base_url).rstrip("/") == "http://vllm:8000/v1" and vllm.api_key == "local-key" and vllm.max_retries == 0
+    assert str(ollama.base_url).rstrip("/") == "http://localhost:11434/v1" and ollama.api_key == "not-needed"
+    print("OK - vLLM reads VLLM_BASE_URL and VLLM_API_KEY; Ollama works with no setting at all")
 
 
 def test_no_call_starts_after_the_review_deadline():

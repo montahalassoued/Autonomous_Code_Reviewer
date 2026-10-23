@@ -31,3 +31,21 @@ def test_matching_or_unknown_checkouts_start_normally(monkeypatch):
     monkeypatch.setenv("ALLOWED_REPOS", "owner/a, owner/b")
     check_allowed_repos_match_checkout()  # REPO_PATH: the local checkout's name is unknown
     print("OK - the same repo (any case) or a local REPO_PATH checkout passes")
+
+
+def test_the_worker_refuses_agent_models_whose_provider_is_not_configured(monkeypatch):
+    from app.bootstrap import check_agent_model_providers
+
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    for name in ("REVIEW_AGENT_MODEL", "SECURITY_AGENT_MODEL", "LOGIC_AGENT_MODEL", "QUALITY_AGENT_MODEL", "FALLBACK_AGENT_MODEL"):
+        monkeypatch.setenv(name, "ollama:qwen2.5-coder:7b")
+    check_agent_model_providers()  # every model is local: no Groq key needed
+
+    monkeypatch.setenv("FALLBACK_AGENT_MODEL", "openai/gpt-oss-20b")
+    try:
+        check_agent_model_providers()
+    except RuntimeError as error:
+        assert "GROQ_API_KEY" in str(error)
+        print("OK - a model routed to Groq without a key stops the worker at startup")
+    else:
+        raise AssertionError("every review would fail on its first Groq call")

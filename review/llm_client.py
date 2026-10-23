@@ -8,7 +8,9 @@ from types import SimpleNamespace
 from typing import Callable, Iterator
 
 import groq
+import openai
 from groq import Groq
+from openai import OpenAI
 
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,12 @@ DAILY_LIMIT = re.compile(r"per ?day", re.IGNORECASE)
 RETRY_DELAY = re.compile(r"(?:try again|retry) in ((?:[\d.]+(?:h|ms|m|s))+)|retryDelay\W+([\d.]+)s")
 DELAY_PART = re.compile(r"([\d.]+)(h|ms|m|s)")
 DELAY_UNITS_S = {"h": 3600.0, "m": 60.0, "s": 1.0, "ms": 0.001}
+
+# "provider:model" routes a call; a bare model (or one whose prefix is no configured provider) goes to Groq.
+GROQ_PROVIDER = "groq"
+PROVIDER_PREFIX = re.compile(r"^([a-z][a-z0-9_]*):(.+)$")
+# OpenAI-compatible servers that need no setting to try locally; any other prefix needs <PREFIX>_BASE_URL.
+DEFAULT_BASE_URLS = {"ollama": "http://localhost:11434/v1"}
 
 _call_slots: threading.BoundedSemaphore | None = None
 _call_slots_lock = threading.Lock()
@@ -84,7 +92,7 @@ def is_request_too_large(error: str | BaseException | None) -> bool:
 
 # Per-minute 429s, 5xx, dropped connections and timeouts pass on their own; a spent quota or an oversized request never does.
 def is_retryable_llm_error(exc: BaseException) -> bool:
-    if isinstance(exc, groq.APIConnectionError):  # APITimeoutError is a subclass
+    if isinstance(exc, (groq.APIConnectionError, openai.APIConnectionError)):  # APITimeoutError is a subclass
         return True
     return (getattr(exc, "status_code", None) in RETRYABLE_STATUSES and not is_request_too_large(exc)
             and not is_quota_exhausted(exc))
@@ -107,6 +115,40 @@ def llm_max_attempts() -> int:
     return max(1, int(_read_positive_env("REVIEW_LLM_MAX_ATTEMPTS", DEFAULT_LLM_MAX_ATTEMPTS)))
 
 
+def _base_url(provider: str) -> str | None:
+    return os.environ.get(f"{provider.upper()}_BASE_URL", "").strip() or DEFAULT_BASE_URLS.get(provider)
+
+
+# ("ollama", "qwen2.5-coder:7b") for "ollama:qwen2.5-coder:7b"; ("groq", model) for a bare Groq model like "openai/gpt-oss-120b".
+def split_model(model: str) -> tuple[str, str]:
+    match = PROVIDER_PREFIX.match(model)
+    if match and (match.group(1) == GROQ_PROVIDER or _base_url(match.group(1))):
+        return match.group(1), match.group(2)
+    return GROQ_PROVIDER, model
+
+
+# What is missing to call these models, as messages; the worker checks its agents' models at startup.
+def provider_config_problems(models) -> list[str]:
+    problems = []
+    for provider in sorted({split_model(model)[0] for model in models if model}):
+        if provider == GROQ_PROVIDER and not os.environ.get("GROQ_API_KEY", "").strip():
+            problems.append("GROQ_API_KEY is not set, but an agent model routes to Groq. Get a free key at "
+                            "https://console.groq.com and set it in your .env file.")
+    return problems
+
+
+# One SDK client per provider; the SDKs' own silent retries are off, ReviewLlmClient's log.
+def build_provider_client(provider: str):
+    if provider == GROQ_PROVIDER:
+        problems = provider_config_problems([GROQ_PROVIDER + ":model"])
+        if problems:
+            raise RuntimeError(problems[0])
+        return Groq(api_key=os.environ["GROQ_API_KEY"], timeout=llm_timeout_s(), max_retries=0)
+    # Ollama and a local vLLM ignore the key, but the SDK refuses an empty one.
+    api_key = os.environ.get(f"{provider.upper()}_API_KEY", "").strip() or "not-needed"
+    return OpenAI(base_url=_base_url(provider), api_key=api_key, timeout=llm_timeout_s(), max_retries=0)
+
+
 # One process-wide pool of call slots, sized from REVIEW_LLM_MAX_CONCURRENCY on first use.
 def shared_call_slots() -> threading.BoundedSemaphore:
     global _call_slots
@@ -117,22 +159,34 @@ def shared_call_slots() -> threading.BoundedSemaphore:
         return _call_slots
 
 
-# Same call shape as a Groq client (chat.completions.create), plus a concurrency limit and visible, quota-aware retries.
+# The LLM gateway: the Groq call shape (chat.completions.create), routed to the model's provider, with a concurrency
+# limit, visible quota-aware retries and the review deadline. Provider clients are built on first use.
 class ReviewLlmClient:
 
-    def __init__(self, groq_client, max_attempts: int, call_slots: threading.BoundedSemaphore,
+    def __init__(self, provider_clients: Callable[[str], object], max_attempts: int, call_slots: threading.BoundedSemaphore,
                  sleep: Callable[[float], None] = time.sleep) -> None:
-        self._groq, self._max_attempts, self._slots, self._sleep = groq_client, max_attempts, call_slots, sleep
+        self._build_client, self._max_attempts, self._slots, self._sleep = provider_clients, max_attempts, call_slots, sleep
+        self._clients: dict[str, object] = {}
+        self._clients_lock = threading.Lock()  # the three agents share one client
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
+    def client_for(self, provider: str):
+        with self._clients_lock:
+            if provider not in self._clients:
+                self._clients[provider] = self._build_client(provider)
+            return self._clients[provider]
+
     def _create(self, **request):
+        provider, model = split_model(request["model"])
+        provider_client = self.client_for(provider)
+        request = {**request, "model": model}
         for attempt in range(1, self._max_attempts + 1):
             seconds_left = _seconds_left()
             if seconds_left is not None and seconds_left <= 0:
                 raise ReviewDeadlineExceeded(f"review deadline passed before calling {request.get('model')}")
             try:
                 with self._slots:
-                    return self._groq.chat.completions.create(**request)
+                    return provider_client.chat.completions.create(**request)
             except Exception as exc:
                 if attempt == self._max_attempts or not is_retryable_llm_error(exc):
                     raise
@@ -153,14 +207,6 @@ class ReviewLlmClient:
         return min(delay + 1.0, MAX_PROVIDER_WAIT_S)
 
 
-# Builds the review agents' client from GROQ_API_KEY; the SDK's own silent retries are off, ours log.
+# The review agents' gateway; a provider's settings are read when a model first routes to it.
 def build_review_llm_client() -> ReviewLlmClient:
-    api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "GROQ_API_KEY environment variable is not set. "
-            "Get a free key at https://console.groq.com and set it "
-            "in your .env file."
-        )
-    groq_client = Groq(api_key=api_key, timeout=llm_timeout_s(), max_retries=0)
-    return ReviewLlmClient(groq_client, llm_max_attempts(), shared_call_slots())
+    return ReviewLlmClient(build_provider_client, llm_max_attempts(), shared_call_slots())
