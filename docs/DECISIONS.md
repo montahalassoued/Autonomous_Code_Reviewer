@@ -45,6 +45,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - Langfuse traces with explicit parents and masking, off unless both keys are set, over implicit OpenTelemetry context: the three agents run in parallel threads, and no secret or test run may reach the tracing backend
 - A cut-off, empty or unparseable answer fails its agent, and a review deadline stops calls under the visibility timeout, over "no findings" and unbounded retries: a category never reads as clean without a real answer, and a slow provider can't make a review run twice
 - A 413 rules a model out for that agent in the benchmark, over scoring it 0: "doesn't fit" and "answers badly" are different findings
+- LLM gateway in our own client, routing by a `provider:model` prefix to Groq, Ollama or any OpenAI-compatible server, with a per-agent token budget and no response cache, over LiteLLM or Groq only: self-hosted serving needs no agent change, and nonce-wrapped prompts never repeat
 
 **Superseded by the structural-context design (kept for history):**
 
@@ -687,3 +688,11 @@ When the injection detector lists added lines aimed at the AI reviewer, the verd
 A cut-off answer (`finish_reason=length`), an empty one or text without a JSON array used to parse to zero findings, so that category was posted as "No issues found"; an attacker could even aim for it with a diff that makes the model ramble. Now it raises `UnusableAgentAnswer`, the agent fails, the review says which category is missing, and the job is retried only if all three fail. A real `[]` still means no findings. The benchmark keeps its forgiving parser and counts such answers as invalid or cut off.
 
 One call could take about five minutes (three attempts of 60 s plus waits) and an agent makes up to four, more than the queue's 900 s visibility timeout, after which the job reappears and the review runs and is paid for twice. The worker now sets `REVIEW_DEADLINE_S` (600 s) per review; the LLM client holds it per thread (one agent per thread), starts no call after it and skips a retry wait that would overrun it.
+
+## Why the LLM gateway routes by a "provider:model" prefix in our own client, with no response cache
+
+Every agent called Groq, so serving a model ourselves (Ollama locally, vLLM on a GPU) would have meant changing the agent code. `review/llm_client.py` now routes each call by its model name. A bare model, or `groq:<model>`, goes to Groq. `ollama:<model>` goes to a local Ollama, and any other prefix goes to the OpenAI-compatible server in `<PREFIX>_BASE_URL`. A prefix that names no configured provider is part of a Groq model id, so `qwen2.5-coder:7b` alone is never misread. Provider clients are built on first use, so a Groq key is needed only when a model routes to Groq. The worker checks its agents' models at startup and refuses to start on a provider it cannot reach.
+
+The alternative was a gateway library such as LiteLLM. It is one more dependency and one more retry layer stacked on ours, for the two request shapes we use, both of which the Groq and OpenAI SDKs already speak. A response cache was considered and left out: every production prompt wraps the diff in a random nonce, so no two calls are identical. The eval's recording client already caches on the nonce-free request, where repeats happen.
+
+An agent that has spent `AGENT_TOKEN_BUDGET` tokens (default 24,000, about 3-4 calls of a ~5k prompt) gets no more tool rounds. This bounds one review's cost on a 200k-tokens-a-day quota, at the risk of an agent answering before a check it wanted to run.
