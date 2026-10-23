@@ -24,6 +24,8 @@ AGENT_MAX_OUTPUT_TOKENS = 4096
 # Each extra call resends the whole prompt, so tool use is capped per agent and per review.
 DEFAULT_MAX_TOOL_CALLS = 3
 FINAL_ANSWER_REQUEST = "Tool call limit reached. Answer now with the JSON array only."
+# Tokens (in + out) an agent may spend before it must answer without more tool rounds: about 3-4 calls of a ~5k prompt.
+DEFAULT_AGENT_TOKEN_BUDGET = 24_000
 VALID_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
 SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 # A flood of findings is noise or an injection; the most severe ones are kept.
@@ -52,6 +54,15 @@ def review_agent_model() -> str:
 # One agent's model: SECURITY_AGENT_MODEL and so on, else REVIEW_AGENT_MODEL. Groq limits each model separately.
 def agent_model(agent_name: str) -> str:
     return os.environ.get(f"{agent_name.upper()}_AGENT_MODEL", "").strip() or review_agent_model()
+
+
+# AGENT_TOKEN_BUDGET, else the default; a value that is not a positive number keeps the default.
+def agent_token_budget() -> int:
+    try:
+        budget = int(os.environ.get("AGENT_TOKEN_BUDGET", "").strip() or DEFAULT_AGENT_TOKEN_BUDGET)
+    except ValueError:
+        return DEFAULT_AGENT_TOKEN_BUDGET
+    return budget if budget > 0 else DEFAULT_AGENT_TOKEN_BUDGET
 
 
 # The model an agent switches to when its own is rate limited; None when unset.
@@ -242,6 +253,11 @@ def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_contex
             else:
                 output = "Not run: tool call limit reached."
             messages.append({"role": "tool", "tool_call_id": call.id, "content": output})
+        # Every round resends the whole conversation: past the budget, the next call is the last one.
+        if calls_left > 0 and usage.tokens_in + usage.tokens_out >= agent_token_budget():
+            logger.warning("%s spent %d tokens, over its budget of %d: asking for the final answer",
+                           spec.name, usage.tokens_in + usage.tokens_out, agent_token_budget())
+            calls_left = 0
         if calls_left == 0:
             messages.append({"role": "user", "content": FINAL_ANSWER_REQUEST})
 

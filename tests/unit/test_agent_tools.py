@@ -308,6 +308,29 @@ def test_tool_calls_stop_at_the_limit(repo):
     print(f"OK - at most {SECURITY_AGENT.max_tool_calls} tool calls, then tool_choice='none'; no answer fails the agent")
 
 
+# Every reply costs 15k tokens, like a ~5k prompt resent with growing tool output.
+class CostlyScriptedGroq(ScriptedGroq):
+
+    def _create(self, **request) -> SimpleNamespace:
+        response = super()._create(**request)
+        response.usage = SimpleNamespace(prompt_tokens=14_000, completion_tokens=1_000)
+        return response
+
+
+def test_an_agent_over_its_token_budget_answers_without_more_tool_rounds(repo, monkeypatch):
+    monkeypatch.delenv("AGENT_TOKEN_BUDGET", raising=False)
+    keeps_asking = tool_call_reply("c", "search_code", {"text": "login"})
+    client = CostlyScriptedGroq([keeps_asking, keeps_asking, answer_reply([FINDING])])
+
+    result = run_agent(SECURITY_AGENT, build_state(), client, repo)
+
+    assert len(client.requests) == 3, "30k tokens after two rounds is over the 24k budget: the third call is the answer"
+    assert client.requests[-1]["tool_choice"] == "none"
+    assert client.requests[-1]["messages"][-1] == {"role": "user", "content": FINAL_ANSWER_REQUEST}
+    assert result["findings"] and result["tokens_in"] + result["tokens_out"] == 45_000
+    print("OK - past AGENT_TOKEN_BUDGET the agent answers with what it has instead of another tool round")
+
+
 def test_no_tools_are_offered_without_their_resource(repo):
     no_context = ScriptedGroq([answer_reply([])])
     repo_only = ScriptedGroq([answer_reply([])])
