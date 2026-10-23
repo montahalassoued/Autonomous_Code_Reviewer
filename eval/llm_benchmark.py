@@ -7,6 +7,7 @@ import sys
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Callable
 
@@ -20,8 +21,8 @@ from eval.benchmark.report import format_markdown
 from eval.benchmark.scoring import AGENT_SPECS, SCORER_VERSION, score_case
 from review.agents.agent_runner import AGENT_MAX_OUTPUT_TOKENS, AGENT_TEMPERATURE
 from review.agents.prompt_assembler import fill_prompt
-from review.llm_client import (MAX_PROVIDER_WAIT_S, QUOTA_EXHAUSTED, is_quota_exhausted, is_request_too_large,
-                               provider_retry_delay_s)
+from review.llm_client import (MAX_PROVIDER_WAIT_S, QUOTA_EXHAUSTED, build_provider_client, is_quota_exhausted,
+                               is_request_too_large, provider_retry_delay_s, split_model)
 from review.untrusted_input import DIFF_LABEL, wrap_untrusted
 
 
@@ -72,20 +73,6 @@ CallFn = Callable[[str, str, float | None], CallResult]
 # Model calls
 # ---------------------------------------------------------------------
 
-# Reads GROQ_API_KEY from the environment.
-def _build_groq_client():
-    from groq import Groq
-
-    api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "GROQ_API_KEY environment variable is not set. "
-            "Get a free key at https://console.groq.com and set it "
-            "in your .env file."
-        )
-    return Groq(api_key=api_key)
-
-
 # Reads GOOGLE_API_KEY from the environment.
 def _build_gemini_client():
     from google import genai
@@ -100,14 +87,15 @@ def _build_gemini_client():
     return genai.Client(api_key=api_key)
 
 
-# Splits "provider:model" into its two parts.
+# Splits "provider:model": gemini, or any provider the review gateway routes (groq, ollama, <PREFIX>_BASE_URL).
 def _split_model_spec(model_spec: str) -> tuple[str, str]:
     provider, _, model_name = model_spec.partition(":")
-    if provider not in ("groq", "gemini") or not model_name:
-        raise ValueError(
-            f"Bad model spec {model_spec!r}: use 'groq:<model>' or 'gemini:<model>'."
-        )
-    return provider, model_name
+    if provider == "gemini" and model_name:
+        return provider, model_name
+    if model_name and split_model(model_spec) == (provider, model_name):
+        return provider, model_name
+    raise ValueError(f"Bad model spec {model_spec!r}: use 'groq:<model>', 'ollama:<model>', 'gemini:<model>', "
+                     "or '<prefix>:<model>' with <PREFIX>_BASE_URL set.")
 
 
 # Rate limits (429) and server errors (5xx) are worth retrying, except a spent quota or a request over a per-request limit.
@@ -125,15 +113,15 @@ def _wait_for_provider(retry_state) -> float:
     return min(delay + 1.0, MAX_PROVIDER_WAIT_S) if delay is not None else _backoff(retry_state)
 
 
-# One Groq chat completion, retried on 429/5xx.
+# One chat completion through the production gateway's provider client (Groq, Ollama, vLLM), retried on 429/5xx.
 @retry(
     retry=retry_if_exception(_is_retryable),
     stop=stop_after_attempt(4),
     wait=_wait_for_provider,
     reraise=True,
 )
-def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int, str | None]:
-    client = _build_groq_client()
+def _call_chat(provider: str, model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int, str | None]:
+    client = build_provider_client(provider)
     kwargs = {"temperature": temperature} if temperature is not None else {}
     kwargs["max_completion_tokens"] = AGENT_MAX_OUTPUT_TOKENS
     response = client.chat.completions.create(
@@ -157,7 +145,7 @@ def _call_groq(model_name: str, prompt: str, temperature: float | None) -> tuple
     wait=_wait_for_provider,
     reraise=True,
 )
-def _call_gemini(model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int, str | None]:
+def _call_gemini(_provider: str, model_name: str, prompt: str, temperature: float | None) -> tuple[str, int, int, str | None]:
     from google.genai import types
 
     client = _build_gemini_client()
@@ -184,8 +172,8 @@ def call_model(model_spec: str, prompt: str, temperature: float | None) -> CallR
     call = None
     try:
         provider, model_name = _split_model_spec(model_spec)
-        call = _call_groq if provider == "groq" else _call_gemini
-        text, input_tokens, output_tokens, finish_reason = call(model_name, prompt, temperature)
+        call = _call_gemini if provider == "gemini" else _call_chat
+        text, input_tokens, output_tokens, finish_reason = call(provider, model_name, prompt, temperature)
         return CallResult(text, time.perf_counter() - start, input_tokens, output_tokens, attempts=_attempts(call),
                           finish_reason=finish_reason)
     except Exception as exc:  # noqa: BLE001 - any failure is a benchmark result
@@ -197,8 +185,8 @@ def call_model(model_spec: str, prompt: str, temperature: float | None) -> CallR
 
 # Print the model ids each provider key can call right now.
 def list_available_models() -> None:
-    def list_groq() -> list[str]:
-        return sorted(m.id for m in _build_groq_client().models.list().data)
+    def list_openai_compatible(provider: str) -> list[str]:
+        return sorted(model.id for model in build_provider_client(provider).models.list().data)
 
     def list_gemini() -> list[str]:
         # Keep the client in a variable: the model list is fetched page
@@ -212,7 +200,8 @@ def list_available_models() -> None:
             if m.supported_actions is None or "generateContent" in m.supported_actions
         )
 
-    for name, lister in (("groq", list_groq), ("gemini", list_gemini)):
+    for name, lister in (("groq", partial(list_openai_compatible, "groq")), ("gemini", list_gemini),
+                         ("ollama", partial(list_openai_compatible, "ollama"))):
         try:
             print(f"\n{name}:")
             for model_id in lister():
@@ -332,7 +321,7 @@ def save_results(records: list[dict], summary: list[dict], results_dir: Path, se
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark LLMs on the review agents' production prompts.")
     parser.add_argument("--models", default=",".join(DEFAULT_MODELS),
-                        help="comma-separated 'groq:<model>' / 'gemini:<model>' specs")
+                        help="comma-separated 'groq:<model>', 'ollama:<model>' or 'gemini:<model>' specs")
     parser.add_argument("--runs", type=int, default=1, help="repetitions per case (3 before deciding anything)")
     parser.add_argument("--delay", type=float, default=2.0,
                         help="seconds to wait between real calls, for free-tier rate limits (default 2)")

@@ -125,3 +125,19 @@ def test_real_dataset_builds_production_prompts_and_provenance():
     settings = provenance(DEFAULT_CASES_PATH)
     assert settings["scorer_version"] == 2 and set(settings["prompt_sha256"]) == {"security", "logic", "quality"}
     print(f"OK - {len(cases)} cases build production prompts; results record what produced them")
+
+
+def test_model_specs_route_through_the_review_gateway_providers(monkeypatch):
+    import pytest
+
+    from eval.llm_benchmark import _split_model_spec
+
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("NOPE_BASE_URL", raising=False)
+    assert _split_model_spec("groq:openai/gpt-oss-120b") == ("groq", "openai/gpt-oss-120b")
+    assert _split_model_spec("ollama:granite4.2:8b") == ("ollama", "granite4.2:8b")
+    assert _split_model_spec("gemini:gemini-2.5-flash") == ("gemini", "gemini-2.5-flash")
+    for bad in ("openai/gpt-oss-120b", "nope:model", "groq:"):
+        with pytest.raises(ValueError, match="Bad model spec"):
+            _split_model_spec(bad)
+    print("OK - the benchmark compares Groq, local Ollama and Gemini models; an unknown provider is refused")
