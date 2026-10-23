@@ -54,7 +54,7 @@ class RecordedGroq:
     def __init__(self, cache: CallCache, run: int, live_client: Callable[[], object] | None) -> None:
         self.cache, self.run, self._live_client, self._live = cache, run, live_client, None
         self._lock = threading.Lock()  # the three agents call in parallel
-        self.recorded_calls = self.live_calls = 0
+        self.recorded_calls = self.live_calls = self.missing_calls = 0
         self.exhausted_models: set[str] = set()
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
@@ -65,6 +65,8 @@ class RecordedGroq:
             if record is not None:
                 self.recorded_calls += 1
                 return record_to_response(record)
+            if self._live_client is None:
+                self.missing_calls += 1
         if self._live_client is None:
             raise CallNotRecorded(f"{request['model']}: this call is not recorded yet (run without --offline)")
         started = time.monotonic()

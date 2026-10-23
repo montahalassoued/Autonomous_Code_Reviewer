@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import io
 import json
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from dotenv import load_dotenv
 
 from eval.benchmark.call_cache import CallCache
 from eval.llm_benchmark import provenance
+from eval.review_harness.eval_gate import compare_to_baseline, format_gate_report, write_baseline
 from eval.review_harness.case_builder import FIXTURE_REPO, REVIEW_CASES, load_review_cases
 from eval.review_harness.recorded_client import RecordedGroq
 from eval.review_harness.review_report import format_review_markdown, summarize_review_records
@@ -61,7 +63,11 @@ def run_eval(cases: list[dict], runs: int, label: str, cache: CallCache,
         use_client(client)
         for case in cases:
             print(f"run {run}/{runs} {case['id']}...", flush=True)
-            records += run_case(compiled_graph, case, run, label)
+            missing_before = client.missing_calls
+            case_records = run_case(compiled_graph, case, run, label)
+            # An unrecorded call in --offline mode means the requests changed: the case cannot be replayed, not a regression.
+            stale = client.missing_calls > missing_before
+            records += [{**record, "stale": stale} for record in case_records]
             if client.exhausted_models:
                 stopped = f"daily quota spent for {', '.join(sorted(client.exhausted_models))} at run {run}, case {case['id']}"
                 break
@@ -81,6 +87,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--offline", action="store_true", help="replay recorded calls only; an unrecorded call fails its agent")
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE_PATH)
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
+    parser.add_argument("--baseline", type=Path, help="compare with this baseline; exit 1 if any case got worse (the CI gate)")
+    parser.add_argument("--write-baseline", type=Path, help="save this run's outcomes as the new baseline")
     return parser.parse_args()
 
 
@@ -108,6 +116,21 @@ def main() -> None:
     stem.with_suffix(".md").write_text(markdown, encoding="utf-8")
     print(markdown)
     print(f"Saved {stem}.json and .md")
+    if arguments.write_baseline:
+        write_baseline(arguments.write_baseline, records, settings)
+        print(f"Baseline written to {arguments.write_baseline}")
+    if arguments.baseline:
+        sys.exit(run_gate(json.loads(arguments.baseline.read_text(encoding="utf-8")), records))
+
+
+# Prints the gate report; 1 on a regression, or when no gated case could be replayed (a gate that checks nothing must not pass).
+def run_gate(baseline: dict, records: list[dict]) -> int:
+    result = compare_to_baseline(baseline, records)
+    print(format_gate_report(result))
+    compared = len(baseline["outcomes"]) - len(result["stale"])
+    if not compared:
+        print("No baseline case could be replayed: re-record the calls with a live run.")
+    return 1 if result["regressions"] or not compared else 0
 
 
 if __name__ == "__main__":

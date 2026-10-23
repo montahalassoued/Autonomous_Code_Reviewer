@@ -1,0 +1,54 @@
+{
+  "outcomes": {
+    "sec_sql_injection_search#run1#logic": {
+      "blocking_noise": 1,
+      "duplicates": 0,
+      "forbidden": 0,
+      "noise": 1,
+      "score": 0.0,
+      "tp": 0,
+      "tp_strict": 0
+    },
+    "sec_sql_injection_search#run1#quality": {
+      "blocking_noise": 1,
+      "duplicates": 0,
+      "forbidden": 0,
+      "noise": 1,
+      "score": 0.0,
+      "tp": 0,
+      "tp_strict": 0
+    },
+    "sec_sql_injection_search#run1#review": {
+      "blocking_noise": 1,
+      "duplicates": 0,
+      "forbidden": 0,
+      "noise": 1,
+      "score": 1.0,
+      "tp": 1,
+      "tp_strict": 1
+    },
+    "sec_sql_injection_search#run1#security": {
+      "blocking_noise": 0,
+      "duplicates": 0,
+      "forbidden": 0,
+      "noise": 0,
+      "score": 1.0,
+      "tp": 1,
+      "tp_strict": 1
+    }
+  },
+  "provenance": {
+    "dataset_sha256": "d7e4843c2e28894f",
+    "git_commit": "a6bb70a",
+    "models": {
+      "logic": "openai/gpt-oss-120b",
+      "quality": "openai/gpt-oss-120b",
+      "security": "openai/gpt-oss-120b"
+    },
+    "prompt_sha256": {
+      "logic": "c8d2908cd6bff128",
+      "quality": "86660253028aab3b",
+      "security": "b861f5e7d5096565"
+    }
+  }
+}
