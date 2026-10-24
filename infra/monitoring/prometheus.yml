@@ -1,0 +1,11 @@
+# Scrapes the reviewer every 15 s inside the compose network; nothing here is reachable from outside.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: api
+    static_configs:
+      - targets: ["api:8000"]
+  - job_name: worker
+    static_configs:
+      - targets: ["worker:9100"]
