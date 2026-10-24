@@ -6,6 +6,9 @@ groq>=0.37.0                       # Groq SDK - REVIEW_AGENT_MODEL, free tier
 openai>=1.40.0                     # OpenAI-compatible servers (Ollama, vLLM) routed by review/llm_client.py
 google-genai>=1.0.0                # Gemini SDK, used by eval/llm_benchmark.py to compare models
 
+# --- Metrics (review/review_metrics.py: /metrics on the API, port 9100 on the worker) ---
+prometheus-client>=0.20.0
+
 # --- Tracing (review/review_tracing.py, on only when LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set) ---
 langfuse>=5.0.4,<6                 # the API changes between majors (v2 -> v3 -> v5), so stay on 5.x
 

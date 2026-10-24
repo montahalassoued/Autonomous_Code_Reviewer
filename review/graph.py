@@ -5,6 +5,7 @@ from typing import Callable
 
 from langgraph.graph import StateGraph, START, END
 from review.agents.agent_runner import AgentFailed, LlmUsage
+from review.review_metrics import AGENT_FAILURES
 from review.agents.tools.tool_definition import ToolContext
 from review.state import ReviewState
 from review.agents.security.agent import security_node
@@ -32,6 +33,7 @@ def isolate_agent_failure(name: str, node: Callable[[ReviewState], dict]) -> Cal
             return node(state)
         except Exception as exc:  # an API error, a timeout or a bug in one agent must not lose the others
             logger.exception("Review agent %s failed; the review will be partial", name)
+            AGENT_FAILURES.labels(name).inc()
             usage = exc.usage if isinstance(exc, AgentFailed) else LlmUsage()
             return {"findings": [], "failed_agents": [name], "llm_calls": usage.calls,
                     "tokens_in": usage.tokens_in, "tokens_out": usage.tokens_out}

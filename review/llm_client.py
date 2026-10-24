@@ -12,6 +12,8 @@ import openai
 from groq import Groq
 from openai import OpenAI
 
+from review.review_metrics import LLM_CALLS, LLM_RETRIES, error_reason, record_llm_success
+
 
 logger = logging.getLogger(__name__)
 
@@ -186,14 +188,20 @@ class ReviewLlmClient:
                 raise ReviewDeadlineExceeded(f"review deadline passed before calling {request.get('model')}")
             try:
                 with self._slots:
-                    return provider_client.chat.completions.create(**request)
+                    started = time.monotonic()
+                    response = provider_client.chat.completions.create(**request)
+                record_llm_success(provider, model, response, time.monotonic() - started)
+                return response
             except Exception as exc:
                 if attempt == self._max_attempts or not is_retryable_llm_error(exc):
+                    LLM_CALLS.labels(provider, model, "error").inc()
                     raise
                 wait_s = self._retry_wait_s(exc, attempt)
                 seconds_left = _seconds_left()
                 if seconds_left is not None and wait_s >= seconds_left:
+                    LLM_CALLS.labels(provider, model, "error").inc()
                     raise  # the wait alone would pass the deadline: give up with the provider's error
+                LLM_RETRIES.labels(provider, model, error_reason(exc)).inc()
                 logger.warning("%s failed (%s), retrying in %.1fs (attempt %d/%d)", request.get("model"),
                                getattr(exc, "status_code", None) or type(exc).__name__, wait_s, attempt, self._max_attempts)
                 self._sleep(wait_s)  # outside the slot, so a waiting call doesn't block the others

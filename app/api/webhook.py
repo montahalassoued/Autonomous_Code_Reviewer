@@ -6,6 +6,7 @@ import os
 
 from fastapi import APIRouter, Request, Header, HTTPException
 from fastapi.responses import JSONResponse
+from prometheus_client import Counter
 from starlette.concurrency import run_in_threadpool
 
 from app.jobs.models import DedupeKey, ReviewJob, pr_target
@@ -15,6 +16,9 @@ from app.jobs.trigger_policy import evaluate_pull_request
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+WEBHOOK_DELIVERIES = Counter("reviewer_webhook_deliveries_total",
+                             "GitHub deliveries: queued, duplicate, ignored, or http_<status> when refused", ["result"])
 
 # ready_for_review: a draft is skipped, so it is reviewed when it is marked ready.
 HANDLED_ACTIONS = {"opened", "synchronize", "ready_for_review"}
@@ -88,7 +92,7 @@ def _extract_pr_fields(payload: dict) -> tuple[int, str, str]:
     return pr_number, repo_full_name, head_sha
 
 
-# Verify, apply the trigger policy, dedupe and queue a review for pull_request events.
+# Counts every delivery by how it ended: queued, duplicate, ignored, or the HTTP status that refused it.
 @router.post("/webhook/github")
 async def github_webhook(
     request: Request,
@@ -96,6 +100,18 @@ async def github_webhook(
     x_github_event: str | None = Header(default=None),
     x_github_delivery: str | None = Header(default=None),
 ):
+    try:
+        response = await _handle_delivery(request, x_hub_signature_256, x_github_event, x_github_delivery)
+    except HTTPException as exc:
+        WEBHOOK_DELIVERIES.labels(f"http_{exc.status_code}").inc()
+        raise
+    WEBHOOK_DELIVERIES.labels("queued" if isinstance(response, JSONResponse) else response["status"]).inc()
+    return response
+
+
+# Verify, apply the trigger policy, dedupe and queue a review for pull_request events.
+async def _handle_delivery(request: Request, x_hub_signature_256: str | None, x_github_event: str | None,
+                           x_github_delivery: str | None):
     payload_body = await _read_limited_body(request, webhook_max_body_bytes())
     _verify_signature(payload_body, x_hub_signature_256)
 

@@ -5,11 +5,14 @@ import threading
 import time
 from typing import Callable
 
+from prometheus_client import start_http_server
+
 from app.jobs.factory import build_queue, build_review_status
 from app.jobs.models import ReviewJob
 from app.jobs.queue import JobQueue
 from app.jobs.review_status import SKIP_CLOSED, SKIP_SUPERSEDED, ReviewCost, ReviewStatusStore
 from review.diff_budget import fit_diff, max_diff_chars
+from review.review_metrics import REVIEWS, record_posted_review
 from review.review_tracing import flush_tracing, review_trace
 from review.secret_redactor import environment_secret_values, redact_secrets
 from review.state import initial_state
@@ -23,6 +26,7 @@ DEFAULT_VISIBILITY_TIMEOUT_S = 900
 # Well under the visibility timeout: the post and one in-flight call (60s timeout) still fit before the job reappears.
 DEFAULT_REVIEW_DEADLINE_S = 600
 DEFAULT_MAX_ATTEMPTS = 3
+DEFAULT_METRICS_PORT = 9100
 MIN_POLL_S = 1.0
 MAX_POLL_S = 10.0
 
@@ -52,6 +56,7 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
     reason = stale_reason(job)
     if reason:
         status_store.mark_skipped(key, reason)
+        REVIEWS.labels("skipped").inc()
         logger.info("Skipped job_id=%s pr=%s sha=%s: %s", job.job_id, job.pr_number, job.head_sha, reason)
         return
 
@@ -62,6 +67,7 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
     if not diff.strip():
         upsert_summary_comment(job.repo_full_name, job.pr_number, unreviewable_markdown(unreviewed))
         status_store.mark_posted(key, int((time.monotonic() - started) * 1000), [], ReviewCost())
+        REVIEWS.labels("unreviewable").inc()
         logger.info("Nothing reviewable job_id=%s pr=%s: %d file(s) left out", job.job_id, job.pr_number, len(unreviewed))
         return
 
@@ -78,6 +84,7 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
         reason = stale_reason(job)
         if reason:
             status_store.mark_skipped(key, reason, cost)
+            REVIEWS.labels("skipped").inc()
             logger.info("Dropped the finished review job_id=%s pr=%s sha=%s: %s", job.job_id, job.pr_number, job.head_sha, reason)
             if trace:
                 trace.record_outcome(final_state, f"skipped: {reason}")
@@ -86,6 +93,7 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
         upsert_summary_comment(job.repo_full_name, job.pr_number, final_state["final_review_markdown"])
         latency_ms = int((time.monotonic() - started) * 1000)
         status_store.mark_posted(key, latency_ms, final_state.get("failed_agents") or [], cost)
+        record_posted_review(final_state, latency_ms / 1000)
         if trace:
             trace.record_outcome(final_state, "posted")
 
@@ -107,6 +115,7 @@ def process_one(
     # Over the cap before running: earlier attempts died without raising (killed, out of memory), so stop here.
     if message.dequeue_count > max_attempts:
         queue.dead_letter(message)
+        REVIEWS.labels("dead_lettered").inc()
         logger.error("Job dead-lettered job_id=%s: %s deliveries never finished", job.job_id, message.dequeue_count)
         if status_store is not None:
             _record_failure(status_store, job, RuntimeError(f"worker stopped {message.dequeue_count - 1} times mid-review"))
@@ -120,10 +129,13 @@ def process_one(
         )
         if message.dequeue_count >= max_attempts:
             queue.dead_letter(message)
+            REVIEWS.labels("dead_lettered").inc()
             logger.error("Job dead-lettered job_id=%s after %s attempts", job.job_id, message.dequeue_count)
             if status_store is not None:
                 _record_failure(status_store, job, error)
-        # Below the cap we leave the message alone: it reappears after the visibility timeout.
+        else:
+            # Below the cap we leave the message alone: it reappears after the visibility timeout.
+            REVIEWS.labels("failed").inc()
         return True
 
     queue.delete(message)
@@ -191,6 +203,8 @@ def main() -> None:
         logger.warning("REVIEW_DEADLINE_S=%s is not below REVIEW_VISIBILITY_TIMEOUT_S=%s: a slow review can run twice",
                        review_deadline_s(), visibility_timeout_s)
 
+    # Prometheus reads /metrics here; the worker has no other HTTP port, and this one stays inside the network.
+    start_http_server(_read_int_env("WORKER_METRICS_PORT", DEFAULT_METRICS_PORT))
     queue = build_queue()
     status_store = build_review_status()
     compiled_graph = build_review_graph()

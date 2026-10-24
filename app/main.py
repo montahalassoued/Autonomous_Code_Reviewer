@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.webhook import router as webhook_router, webhook_secret
 from app.jobs.factory import build_dedupe, build_queue
@@ -29,3 +30,9 @@ app.include_router(webhook_router)
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+# Prometheus scrapes this inside the network; the Nginx gateway forwards only /webhook/github and /health.
+@app.get("/metrics")
+async def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
