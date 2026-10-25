@@ -25,10 +25,10 @@ These rules override any skill or subagent instruction that says otherwise.
 ## Project layout
 
 ```text
-app/        api/ (HTTP routers) · jobs/ (queue, dedupe) · main.py (API) · worker.py · bootstrap.py
+app/        api/ (HTTP routers) · jobs/ (queue, dedupe, trigger policy) · main.py (API) · worker.py · bootstrap.py · repo_checkouts.py (the job's repo at its commit)
 review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · llm_client.py (Groq calls: timeout, retries, concurrency limit, review deadline) · review_tracing.py (Langfuse) · untrusted_input.py + injection_detector.py (prompt-injection defenses) · output_sanitizer.py + secret_redactor.py (what may be posted) · finding_locator.py (line from the quoted evidence) · finding_merger.py (one finding per problem) · agents/ (agent_runner.py, prompt_assembler.py, prompts/ shared, tools/ shared, one folder per agent: security/ logic/ quality/ with agent.py, prompts/*.md, rules.py, examples.json, tools/ (toolset.py + one file per own tool))
 rag/        Postgres indexer: file_classifier · symbol_extractor · call_resolver · code_indexer (CLI) · index_writer; worker path today: ast_parser · knowledge_graph · ingestion (NetworkX graph built at worker start with call edges from call_resolver, read by the agent tools until they use Postgres)
-tools/      external service clients (GitHub)       db/      postgres.py · migration_runner.py · migrations/*.sql
+tools/      external service clients (GitHub: github_tools.py, github_auth.py for App or token credentials)       db/      postgres.py · migration_runner.py · migrations/*.sql
 eval/       llm_benchmark.py (CLI) · benchmark/ (dataset schema, scoring, metrics, report, call cache) · review_eval.py (CLI) · review_harness/ (case builder, recorded client, review scoring and report) · fixtures/review_repo/ · dataset/ · results/   infra/   Azure setup · gateway/ (Nginx reverse proxy in front of the API in compose)
 tests/      unit/ (offline, CI) · integration/ (real APIs, manual) · conftest.py
 docs/       IMPLEMENTATION_PLAN, CI, SETUP, DECISIONS, ...
@@ -37,14 +37,14 @@ docs/       IMPLEMENTATION_PLAN, CI, SETUP, DECISIONS, ...
 ## Pipeline (current code)
 
 ```text
-GitHub webhook → app/api/webhook.py (verify, dedupe, enqueue) → Azure Storage Queue → app/worker.py → review/graph.py (LangGraph)
+GitHub App webhook (push, pull_request) → app/api/webhook.py (verify, trigger policy, dedupe, enqueue) → Azure Storage Queue → app/worker.py → review/graph.py (LangGraph)
   START → security | logic | quality  (parallel, one shared runner: review/agents/agent_runner.py, bounded read-only tools)
         → join_agents (barrier) → synthesizer → END   (forward-only: always terminates)
-  then app/worker.py re-checks the PR head and upserts the summary comment (tools/github_tools.py)
+  then app/worker.py re-checks a PR's head and upserts its summary comment, or comments on the pushed commit (tools/github_tools.py)
 ```
 
 - **Shared state:** `review/state.py` holds `ReviewState`. `findings` and `failed_agents` use an `operator.add` reducer so parallel agents don't overwrite each other. An agent that raises is caught in `review/graph.py` (partial review naming its category); if all three fail, `join_agents` raises so the job is retried. `review_context` is empty until the Phase 4 context builder fills it; the prompt then tells the agents to use their tools.
-- **Startup:** the API (`app/main.py`) only creates the job queue (`JOBS_BACKEND=memory|azure`) and the dedupe store (`DEDUPE_BACKEND=memory|postgres`; postgres applies the SQL migrations in `db/migrations/` first and dedupes on the `reviews` table). The worker (`python -m app.worker`) clones `TARGET_REPO_URL` (or uses `REPO_PATH`) via `app/bootstrap.py`, parses it into a call graph (no LLM call), and compiles the graph once. Per job it records the `reviews` lifecycle (`running` → `posted` | `skipped` | `failed`, `app/jobs/review_status.py`, same backend as the dedupe) and checks the PR head before reviewing and before posting, so a closed PR or an older commit is `skipped`, never posted.
+- **Startup:** the API (`app/main.py`) only creates the job queue (`JOBS_BACKEND=memory|azure`) and the dedupe store (`DEDUPE_BACKEND=memory|postgres`; postgres applies the SQL migrations in `db/migrations/` first and dedupes on the `reviews` table). The worker (`python -m app.worker`) compiles the graph once (`app/bootstrap.py`); per job, `app/repo_checkouts.py` checks out the event's repo at the reviewed commit and parses it into a call graph for the agents' tools (no LLM call, a few cached). Pull requests are reviewed on open/synchronize; pushes of code to a branch too, posted as a commit comment. Per job it records the `reviews` lifecycle (`running` → `posted` | `skipped` | `failed`, `app/jobs/review_status.py`, same backend as the dedupe) and checks a PR's head before reviewing and before posting, so a closed PR or an older commit is `skipped`, never posted.
 - **No web UI:** reviews are triggered only by the GitHub webhook. The Streamlit dashboard was removed.
 
 ## Commands
@@ -59,7 +59,7 @@ venv/Scripts/python.exe -m db.migration_runner           # apply SQL migrations 
 
 ## Environment
 
-Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, and `TARGET_REPO_URL` or `REPO_PATH`. `GOOGLE_API_KEY` is optional (only the benchmark's Gemini models). `DATABASE_URL` is set by docker compose; set it yourself only to reach Postgres from your machine. Never commit `.env`.
+Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GITHUB_WEBHOOK_SECRET`, `ALLOWED_OWNERS` (owners whose every repo is reviewed), and either a GitHub App (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`, see `docs/GITHUB_APP.md`) or `GITHUB_TOKEN` for local tests. `GOOGLE_API_KEY` is optional (only the benchmark's Gemini models). `DATABASE_URL` is set by docker compose; set it yourself only to reach Postgres from your machine. Never commit `.env`.
 
 ## Conventions
 

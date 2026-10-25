@@ -43,7 +43,7 @@ An AI code reviewer that runs entirely through GitHub. You open a pull request (
 ## Quick start
 
 ```bash
-cp .env.example .env          # fill in the API keys and TARGET_REPO_URL
+cp .env.example .env          # fill in the API keys, ALLOWED_OWNERS and the GitHub App (docs/GITHUB_APP.md)
 docker compose up --build     # API on http://localhost:8000 (GET /health), Postgres on localhost:5432
 ```
 

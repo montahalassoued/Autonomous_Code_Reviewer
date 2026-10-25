@@ -46,6 +46,7 @@ Older entries mention five domain agents, a retriever and Chroma: the reasoning 
 - A cut-off, empty or unparseable answer fails its agent, and a review deadline stops calls under the visibility timeout, over "no findings" and unbounded retries: a category never reads as clean without a real answer, and a slow provider can't make a review run twice
 - A 413 rules a model out for that agent in the benchmark, over scoring it 0: "doesn't fit" and "answers badly" are different findings
 - LLM gateway in our own client, routing by a `provider:model` prefix to Groq, Ollama or any OpenAI-compatible server, with a per-agent token budget and no response cache, over LiteLLM or Groq only: self-hosted serving needs no agent change, and nonce-wrapped prompts never repeat
+- GitHub App on all repositories, with each job checking out its event's repo at the reviewed commit, over one `TARGET_REPO_URL` per worker: any push to any allowed owner's repo is reviewed, no repo to configure, the tools read the change itself
 
 **Superseded by the structural-context design (kept for history):**
 
@@ -696,3 +697,9 @@ Every agent called Groq, so serving a model ourselves (Ollama locally, vLLM on a
 The alternative was a gateway library such as LiteLLM. It is one more dependency and one more retry layer stacked on ours, for the two request shapes we use, both of which the Groq and OpenAI SDKs already speak. A response cache was considered and left out: every production prompt wraps the diff in a random nonce, so no two calls are identical. The eval's recording client already caches on the nonce-free request, where repeats happen.
 
 An agent that has spent `AGENT_TOKEN_BUDGET` tokens (default 24,000, about 3-4 calls of a ~5k prompt) gets no more tool rounds. This bounds one review's cost on a 200k-tokens-a-day quota, at the risk of an agent answering before a check it wanted to run.
+
+## Why a GitHub App with a checkout per job over one repo URL per worker
+
+The worker cloned `TARGET_REPO_URL` once at startup, so it reviewed one repo, and a new repo meant a new webhook, a new setting and a restart. The goal is "any push to any of my repos is reviewed". A GitHub App installed on all repositories sends every push and pull request to one webhook. Each event carries its repo and installation, and the worker checks out that repo at the reviewed commit per job (`app/repo_checkouts.py`: only that commit is fetched, a few call graphs are cached). The agents' tools therefore read the change itself, not a `main` frozen at startup. `ALLOWED_OWNERS` replaces the repo list, so a repo created tomorrow is covered while other people's installations spend nothing. A push of code to a branch is reviewed over before..after and posted as a commit comment; docs-only pushes, tags and deleted branches are skipped before any LLM call.
+
+Alternatives: a repository webhook per repo (manual for every repo, and comments posted as the token's user) or an organization webhook (needs an organization). A personal token stays as the local fallback. The App's installation tokens last an hour, are minted once per installation and are scoped to the repos it is installed on. The current installation is a context variable set per job and per delivery, so the GitHub functions kept their signatures. The trade-off: commit comments need Contents: write, broader than reading. Check runs (Checks: write) would be narrower and are the next step. Reviewing every push also spends the free quota faster, about 5-10 reviewed pushes a day.

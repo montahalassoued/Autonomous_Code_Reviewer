@@ -56,18 +56,18 @@ A job is deleted from the queue only after it succeeded. If the worker crashes o
 - **0.5 vCPU / 1 GiB.** The API only verifies the signature, inserts one `reviews` row in Postgres, enqueues and returns 202. It no longer clones or ingests anything, so it starts in seconds and needs little memory.
 - **Min replicas = 1 (recommended), max 2.** GitHub gives up on a webhook after about 10 seconds. Scale-to-zero is now technically possible because startup is fast, but a cold start still includes allocating a replica, pulling the image and starting Python plus the Azure SDKs. That can take several seconds, close enough to the limit to fail some deliveries, and a failed delivery means a PR that silently never gets reviewed. At 0.5 vCPU / 1Gi the always-on cost is small, so we keep 1. The API is stateless (dedupe is in Postgres, the queue in Storage), so a second replica is safe.
 - **Startup probe** is short (5s initial delay, 10s period, 6 failures = about 65s) because the app listens almost immediately. Liveness and readiness use `/health`.
-- Env vars: `JOBS_BACKEND=azure`, `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_CLIENT_ID` (see below), `ALLOWED_REPOS` (export it before running the script), and secrets `GITHUB_WEBHOOK_SECRET` and `GITHUB_TOKEN` (the webhook asks GitHub whether the PR author is a collaborator). It no longer needs the LLM keys or `TARGET_REPO_URL`; re-running the script removes those stale secrets from the API app.
+- Env vars: `JOBS_BACKEND=azure`, `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_CLIENT_ID` (see below), `ALLOWED_OWNERS` / `ALLOWED_REPOS` and `GITHUB_APP_ID` (export them before running the script), and secrets `GITHUB_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY` (the webhook asks GitHub, with the event's installation token, whether a PR author is a collaborator).
 
 **Worker (`WORKER_APP_NAME`, default `ca-code-reviewer-worker`)**
 
 - **2 vCPU / 4 GiB** (a valid Consumption combination). Sized for the removed semantic retrieval (torch reranker, Chroma); the worker now only holds the parsed repo and its call graph, so lower it once real usage (metrics) confirms.
 - **Command override.** The container runs `python -m app.worker` instead of the image's default (uvicorn). The script sets `command: ["python"]` and `args: ["-m", "app.worker"]` in YAML. Later `az containerapp update --image ...` keeps this command; only the image changes.
 - **No ingress and no probes.** It has no HTTP port. If the process dies, Container Apps restarts it and the unfinished message reappears on the queue.
-- **Min = max = 1 replica.** The call graph is built in memory when the worker starts (clone, parse). Each extra replica would repeat that work (more vCPU cost). Scaling out is correct but costly; do it only if the queue backs up. A KEDA queue-length scale rule is included, commented out, at the end of step 8 in the script. Do not set min replicas to 0: every cold start would re-clone and re-parse before the first job.
+- **Min = max = 1 replica.** Each job checks out its repo and builds its call graph (a few are cached in memory). Extra replicas would each keep their own cache (more memory and vCPU). Scaling out is correct but costly; do it only if the queue backs up. A KEDA queue-length scale rule is included, commented out, at the end of step 8 in the script. Do not set min replicas to 0: every cold start would re-clone and re-parse before the first job.
 - **Termination grace period 600s.** On a new revision or restart, Container Apps sends SIGTERM and waits up to this long. The worker finishes its current job before exiting. As far as I know 600 seconds is the platform maximum (default 30); verify with the command below. If a review is killed mid-way, nothing is lost: it is retried after the visibility timeout.
 - `REVIEW_VISIBILITY_TIMEOUT_S=900` must be longer than the longest review. If it is shorter, a second worker (or the same one after a restart) could receive the same message while the first is still running.
-- Secrets: `TARGET_REPO_URL`, `GROQ_API_KEY`, `GITHUB_TOKEN`, optional `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` (plus plain `LANGFUSE_HOST`).
-- **No persistent volume.** The cloned repo is on the container's temporary disk. Every worker restart or new revision re-clones and re-parses it (no API quota). Queued jobs just wait meanwhile. An Azure Files volume would avoid that but is not set up yet.
+- Env vars `GITHUB_APP_ID`; secrets `GROQ_API_KEY`, `GITHUB_APP_PRIVATE_KEY`, optional `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` (plus plain `LANGFUSE_HOST`).
+- **No persistent volume.** Each job checks out the event's repo at the reviewed commit on the container's temporary disk (only that commit is fetched); a restart fetches again on the next job. An Azure Files volume would keep the checkouts but is not set up yet.
 
 **Identity.** Because both apps use a *user-assigned* identity, the Azure SDK's `DefaultAzureCredential` cannot guess which identity to use. The script sets `AZURE_CLIENT_ID` (the identity's client id) on both apps so it picks the right one.
 
@@ -101,20 +101,20 @@ A job is deleted from the queue only after it succeeded. If the worker crashes o
 Put the secrets in your shell (they are only read from the environment, never written to a file). In Git Bash or Cloud Shell:
 
 ```bash
-# API
-export GITHUB_WEBHOOK_SECRET='choose-a-long-random-string'
-export ALLOWED_REPOS='owner/repo'   # the webhook ignores every other repo
+# Both apps: the GitHub App (docs/GITHUB_APP.md)
+export GITHUB_WEBHOOK_SECRET='the-apps-webhook-secret'
+export GITHUB_APP_ID='123456'
+export GITHUB_APP_PRIVATE_KEY='...'   # the .pem on one line (docs/GITHUB_APP.md prints it)
+export ALLOWED_OWNERS='your-login'    # every repo of these owners is reviewed; others are ignored
 # Worker
-export TARGET_REPO_URL='https://github.com/owner/repo-to-review.git'
 export GROQ_API_KEY='...'
-export GITHUB_TOKEN='...'
 # optional (worker)
 export LANGFUSE_PUBLIC_KEY='...'
 export LANGFUSE_SECRET_KEY='...'
 export LANGFUSE_HOST='https://cloud.langfuse.com'   # or your self-hosted Langfuse URL
 ```
 
-If `TARGET_REPO_URL` is a private repo, the clone needs credentials, and `clone_repository` in `rag/ingestion.py` has no credential handling yet: use a public repo for now.
+Private repos work: the worker clones each one with the installation token of the event that asked for it.
 
 Then run the script, pausing between steps so you can read the output:
 

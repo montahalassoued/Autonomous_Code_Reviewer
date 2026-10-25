@@ -48,14 +48,16 @@ Follow [infra/README.md](../infra/README.md). It creates the Azure resources and
 
 ## 6) GitHub webhook
 
-In the reviewed repository: **Settings → Webhooks → Add webhook**.
+**Recommended: a GitHub App** installed on all your repositories, which sends every push and pull request of every repo to the webhook. Follow `docs/GITHUB_APP.md`.
+
+**Without the App** (one repo, for a quick test): in that repository, **Settings → Webhooks → Add webhook**, with `GITHUB_TOKEN` set in `.env`.
 
 - **Payload URL:** `https://<ngrok or server URL>/webhook/github`
 - **Content type:** `application/json` (a form-encoded delivery is rejected)
 - **Secret:** the value of `GITHUB_WEBHOOK_SECRET` in `.env`
-- **Events:** "Let me select individual events" → only **Pull requests** (push events are ignored today)
+- **Events:** "Let me select individual events" → **Pushes** and **Pull requests**
 
-Also set `ALLOWED_REPOS=owner/repo` in `.env`: an empty list ignores every event. Only authors GitHub lists as collaborators are reviewed, and draft PRs wait until they are marked ready.
+Either way, set `ALLOWED_OWNERS=<your login>` in `.env` (or `ALLOWED_REPOS=owner/repo` for single repos): with both empty every event is ignored. Pushes are reviewed when they add or change code on a branch; pull requests when their author is a collaborator, drafts once they are marked ready.
 
 ---
 

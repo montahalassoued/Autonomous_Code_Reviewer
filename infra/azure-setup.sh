@@ -24,16 +24,17 @@
 # Usage (Azure Cloud Shell or Git Bash, after `az login`):
 #   1. Choose ACR_NAME, STORAGE_ACCOUNT_NAME, GITHUB_REPO (env vars or edit CONFIG).
 #   2. Export the app secrets in your shell (never put them in this file):
-#        # API needs (the token checks that PR authors are collaborators):
-#        export GITHUB_WEBHOOK_SECRET='...'
-#        export GITHUB_TOKEN='...'
-#        export ALLOWED_REPOS='owner/repo'          # repos the webhook accepts, comma-separated
+#        # Both apps need the GitHub App (docs/GITHUB_APP.md): the API checks PR authors, the worker reads
+#        # repos and posts reviews, each with the installation token of the event's repo:
+#        export GITHUB_WEBHOOK_SECRET='...'           # the App's webhook secret (API)
+#        export GITHUB_APP_ID='123456'
+#        export GITHUB_APP_PRIVATE_KEY='...'         # the .pem on one line, \n for each line break
+#        export ALLOWED_OWNERS='your-login'          # owners whose every repo is reviewed, comma-separated
+#        export ALLOWED_REPOS=''                     # optional: single repos on top, owner/repo
 #        # Both apps need (the reviews table: API dedupe, worker review status):
 #        export DATABASE_URL='postgresql://user:password@host:5432/dbname?sslmode=require'
 #        # Worker needs:
-#        export TARGET_REPO_URL='https://github.com/owner/repo.git'
 #        export GROQ_API_KEY='...'
-#        export GITHUB_TOKEN='...'
 #        # optional (Langfuse tracing, worker only):
 #        export LANGFUSE_PUBLIC_KEY='...' LANGFUSE_SECRET_KEY='...'
 #   3. Run:   ACR_NAME=... STORAGE_ACCOUNT_NAME=... GITHUB_REPO=owner/repo \
@@ -118,8 +119,8 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 # App secrets are read from YOUR shell environment, split per app. Required ones
 # must be set, because Container Apps refuses empty secret values.
-API_REQUIRED_SECRETS=(GITHUB_WEBHOOK_SECRET GITHUB_TOKEN DATABASE_URL)
-WORKER_REQUIRED_SECRETS=(TARGET_REPO_URL GROQ_API_KEY GITHUB_TOKEN DATABASE_URL)
+API_REQUIRED_SECRETS=(GITHUB_WEBHOOK_SECRET GITHUB_APP_PRIVATE_KEY DATABASE_URL)
+WORKER_REQUIRED_SECRETS=(GROQ_API_KEY GITHUB_APP_PRIVATE_KEY DATABASE_URL)
 WORKER_OPTIONAL_SECRETS=(LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY)
 missing=0
 for v in "${API_REQUIRED_SECRETS[@]}" "${WORKER_REQUIRED_SECRETS[@]}"; do
@@ -129,7 +130,8 @@ for v in "${WORKER_OPTIONAL_SECRETS[@]}"; do
   if [ -z "${!v:-}" ]; then echo "NOTE: optional variable $v is empty; it will be skipped."; fi
 done
 [ "$missing" = "0" ] || die "Export the missing variables listed above, then re-run."
-[ -n "${ALLOWED_REPOS:-}" ] || die "Export ALLOWED_REPOS='owner/repo' (the webhook ignores every other repo)."
+[ -n "${ALLOWED_OWNERS:-}${ALLOWED_REPOS:-}" ] || die "Export ALLOWED_OWNERS='your-login' (the webhook ignores every other owner's repos)."
+[[ "${GITHUB_APP_ID:-}" =~ ^[0-9]+$ ]] || die "Export GITHUB_APP_ID, the number on the GitHub App's page (docs/GITHUB_APP.md)."
 [[ "$DATABASE_URL" =~ ^postgres(ql)?:// ]] || die "DATABASE_URL must start with postgresql:// (see infra/README.md, \"Postgres\")."
 
 # Env var NAME -> Container Apps secret name (lowercase, dashes; secret names cannot contain '_').
@@ -375,8 +377,8 @@ ensure_app "$APP_NAME" "$API_CPU" "$API_MEMORY" \
   --min-replicas "$API_MIN_REPLICAS" --max-replicas "$API_MAX_REPLICAS"
 
 # Old single-container layout stored the LLM keys on this app. The API no longer
-# needs them; drop them so they are not kept in two places (GITHUB_TOKEN stays: author check).
-for stale in TARGET_REPO_URL GROQ_API_KEY GOOGLE_API_KEY VOYAGE_API_KEY LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY; do
+# needs them; drop them so they are not kept in two places (the GitHub App replaced GITHUB_TOKEN).
+for stale in TARGET_REPO_URL GITHUB_TOKEN GROQ_API_KEY GOOGLE_API_KEY VOYAGE_API_KEY LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY; do
   sname="$(secret_name "$stale")"
   if az containerapp secret list --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
         --query "[?name=='$sname'].name" -o tsv | grep -q .; then
@@ -386,7 +388,8 @@ for stale in TARGET_REPO_URL GROQ_API_KEY GOOGLE_API_KEY VOYAGE_API_KEY LANGFUSE
 done
 
 YAML_KIND="api"
-YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure" "DEDUPE_BACKEND=postgres" "ALLOWED_REPOS=$ALLOWED_REPOS"
+YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure" "DEDUPE_BACKEND=postgres" "ALLOWED_OWNERS=${ALLOWED_OWNERS:-}"
+  "ALLOWED_REPOS=${ALLOWED_REPOS:-}" "GITHUB_APP_ID=$GITHUB_APP_ID"
   "AZURE_STORAGE_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" "AZURE_CLIENT_ID=$IDENTITY_CLIENT_ID")
 # The YAML update first (it removes the old secretRef env vars), then the secrets
 # can be deleted without leaving a dangling reference.
@@ -406,8 +409,8 @@ ensure_app "$WORKER_APP_NAME" "$WORKER_CPU" "$WORKER_MEMORY" \
   --min-replicas "$WORKER_MIN_REPLICAS" --max-replicas "$WORKER_MAX_REPLICAS"
 
 YAML_KIND="worker"
-# ALLOWED_REPOS here too: the worker refuses to start if it lists a repo other than its checkout.
-YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure" "DEDUPE_BACKEND=postgres" "ALLOWED_REPOS=$ALLOWED_REPOS"
+# The worker checks out each event's repo itself (no repo URL); the App's installation token reads it.
+YAML_PLAIN_ENV=("ENV=production" "JOBS_BACKEND=azure" "DEDUPE_BACKEND=postgres" "GITHUB_APP_ID=$GITHUB_APP_ID"
   "AZURE_STORAGE_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" "AZURE_CLIENT_ID=$IDENTITY_CLIENT_ID"
   "REVIEW_VISIBILITY_TIMEOUT_S=$REVIEW_VISIBILITY_TIMEOUT_S" "MAX_ATTEMPTS=$MAX_ATTEMPTS"
   "REVIEW_DEADLINE_S=$REVIEW_DEADLINE_S"
