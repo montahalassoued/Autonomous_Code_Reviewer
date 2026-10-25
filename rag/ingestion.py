@@ -1,5 +1,6 @@
 import base64
 import os
+import re
 
 import git
 import networkx as nx
@@ -11,12 +12,14 @@ from rag.knowledge_graph import build_resolved_graph
 
 
 GITHUB_HTTPS = "https://github.com/"
+REPO_FULL_NAME = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
+COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 
-# GITHUB_TOKEN as an HTTP header for github.com, passed in the environment: it never lands in the URL, .git/config,
+# A GitHub token as an HTTP header for github.com, passed in the environment: it never lands in the URL, .git/config,
 # the process list or an error message. Empty for another host or without a token (a public repo needs none).
-def git_auth_environment(repo_url: str) -> dict[str, str]:
-    token = os.environ.get("GITHUB_TOKEN", "").strip()
+def git_auth_environment(repo_url: str, token: str | None = None) -> dict[str, str]:
+    token = (token if token is not None else os.environ.get("GITHUB_TOKEN", "")).strip()
     if not token or not repo_url.startswith(GITHUB_HTTPS):
         return {}
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
@@ -24,19 +27,27 @@ def git_auth_environment(repo_url: str) -> dict[str, str]:
             "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"}
 
 
-# Clone a remote repo into target_dir; a private GitHub repo is read with GITHUB_TOKEN.
-def clone_repository(repo_url: str, target_dir: str) -> str:
-    auth = git_auth_environment(repo_url)
-    if os.path.isdir(os.path.join(target_dir, ".git")):
-        print(f"Existing checkout found at {target_dir}, pulling latest changes...")
-        repo = git.Repo(target_dir)
-        with repo.git.custom_environment(**auth):
-            repo.remotes.origin.pull()
+# owner/repo at one commit under checkouts_root/owner/repo: only that commit is fetched, and the folder is reused
+# by the next review of the same repo. The working tree is the reviewed code, so the tools see the change itself.
+# Both come from a webhook: a name like ../.. would leave checkouts_root, a "sha" starting with - would be a git option.
+def checkout_commit(repo_full_name: str, sha: str, checkouts_root: str, token: str | None = None,
+                    remote_url: str | None = None) -> str:
+    if not REPO_FULL_NAME.fullmatch(repo_full_name) or ".." in repo_full_name:
+        raise ValueError(f"not a GitHub owner/repo name: {repo_full_name!r}")
+    if not COMMIT_SHA.fullmatch(sha):
+        raise ValueError(f"not a commit sha: {sha!r}")
+    owner, name = repo_full_name.split("/", 1)
+    path = os.path.join(checkouts_root, owner, name)
+    repo_url = remote_url or f"{GITHUB_HTTPS}{repo_full_name}.git"
+    if os.path.isdir(os.path.join(path, ".git")):
+        repo = git.Repo(path)
     else:
-        print(f"Cloning {repo_url} into {target_dir}...")
-        git.Repo.clone_from(repo_url, target_dir, depth=1, env={**os.environ, **auth})
-
-    return target_dir
+        repo = git.Repo.init(path)
+        repo.create_remote("origin", repo_url)
+    with repo.git.custom_environment(**git_auth_environment(repo_url, token)):
+        repo.git.fetch("--depth", "1", "--no-tags", "origin", sha)
+    repo.git.checkout("--force", "--detach", sha)
+    return path
 
 
 # Walks a repo checkout and collects every .py file's path.

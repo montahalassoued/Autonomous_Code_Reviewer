@@ -114,6 +114,22 @@ def test_review_pull_request_runs_graph_and_upserts(monkeypatch):
     print("OK - review_pull_request invokes the graph and upserts the comment")
 
 
+def test_the_review_reads_the_jobs_own_repo_at_its_commit(monkeypatch):
+    monkeypatch.setattr("app.worker.get_pr_diff", lambda repo, pr: PullRequestDiff(SMALL_DIFF))
+    monkeypatch.setattr("app.worker.get_pull_request_head", lambda repo, pr: ("open", "abc123"))
+    monkeypatch.setattr("app.worker.upsert_summary_comment", lambda repo, pr, md: None)
+    graph = MagicMock()
+    graph.invoke.return_value = {"final_review_markdown": "# Review"}
+    checkouts = MagicMock()
+    job = ReviewJob(repo_full_name="someone/any-repo", pr_number=7, head_sha="abc123")
+
+    review_pull_request(graph, job, InMemoryReviewStatusStore(), checkouts)
+
+    checkouts.tool_context.assert_called_once_with(job)
+    assert graph.invoke.call_args.args[0]["tool_context"] is checkouts.tool_context.return_value
+    print("OK - the agents' tools get the job's repo, not a checkout fixed at startup")
+
+
 # Builds a fake issue comment with a body and an author.
 def make_comment(body: str, login: str) -> MagicMock:
     comment = MagicMock()

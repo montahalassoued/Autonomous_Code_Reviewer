@@ -1,36 +1,37 @@
-from app.bootstrap import check_allowed_repos_match_checkout, repo_full_name_from_url
+from app.jobs.models import ReviewJob
+from app.repo_checkouts import MAX_CACHED_CONTEXTS, RepoCheckouts
 
 
-def test_the_repo_name_is_read_from_https_and_ssh_urls():
-    assert repo_full_name_from_url("https://github.com/Owner/Repo.git") == "owner/repo"
-    assert repo_full_name_from_url("https://github.com/owner/repo/") == "owner/repo"
-    assert repo_full_name_from_url("git@github.com:owner/repo.git") == "owner/repo"
-    assert repo_full_name_from_url("https://gitlab.com/owner/repo.git") is None
-    print("OK - owner/repo from every GitHub clone URL form")
+def job(repo: str, sha: str) -> ReviewJob:
+    return ReviewJob(repo_full_name=repo, pr_number=1, head_sha=sha)
 
 
-def test_the_worker_refuses_an_allowed_repo_it_has_no_checkout_of(monkeypatch):
-    monkeypatch.setenv("TARGET_REPO_URL", "https://github.com/owner/repo.git")
-    monkeypatch.setenv("ALLOWED_REPOS", "owner/repo, owner/other")
+def test_each_job_gets_its_own_repo_at_its_commit_and_repeats_are_cached():
+    fetched = []
 
-    try:
-        check_allowed_repos_match_checkout()
-    except RuntimeError as error:
-        assert "owner/other" in str(error) and "owner/repo" in str(error)
-        print("OK - a second allowed repo stops the worker at startup, with the fix in the message")
-    else:
-        raise AssertionError("a PR of owner/other would be reviewed against owner/repo's code")
+    def checkout(repo, sha, root, token):
+        fetched.append((repo, sha))
+        return f"{root}/{repo}"
+
+    checkouts = RepoCheckouts("/checkouts", checkout=checkout, build_graph=lambda path: f"graph of {path}")
+
+    first = checkouts.tool_context(job("me/api", "a" * 40))
+    other = checkouts.tool_context(job("me/web", "b" * 40))
+    again = checkouts.tool_context(job("Me/API", "a" * 40))
+
+    assert str(first.repo_root).replace("\\", "/") == "/checkouts/me/api" and first.code_graph == "graph of /checkouts/me/api"
+    assert str(other.repo_root).replace("\\", "/") == "/checkouts/me/web", "a second repo, no setting needed"
+    assert again is first and fetched == [("me/api", "a" * 40), ("me/web", "b" * 40)], "a retry reuses the checkout"
+    print("OK - any repo from the event, checked out at its commit; repeats come from the cache")
 
 
-def test_matching_or_unknown_checkouts_start_normally(monkeypatch):
-    monkeypatch.setenv("ALLOWED_REPOS", "Owner/Repo")
-    monkeypatch.setenv("TARGET_REPO_URL", "https://github.com/owner/repo")
-    check_allowed_repos_match_checkout()
+def test_only_the_last_few_call_graphs_stay_in_memory():
+    checkouts = RepoCheckouts("/r", checkout=lambda repo, sha, root, token: f"{root}/{repo}/{sha}", build_graph=lambda p: p)
+    for index in range(MAX_CACHED_CONTEXTS + 2):
+        checkouts.tool_context(job("me/repo", f"{index:040x}"))
 
-    monkeypatch.setenv("TARGET_REPO_URL", "")
-    monkeypatch.setenv("ALLOWED_REPOS", "owner/a, owner/b")
-    check_allowed_repos_match_checkout()  # REPO_PATH: the local checkout's name is unknown
-    print("OK - the same repo (any case) or a local REPO_PATH checkout passes")
+    assert len(checkouts._contexts) == MAX_CACHED_CONTEXTS
+    print(f"OK - at most {MAX_CACHED_CONTEXTS} call graphs are kept")
 
 
 def test_the_worker_refuses_agent_models_whose_provider_is_not_configured(monkeypatch):

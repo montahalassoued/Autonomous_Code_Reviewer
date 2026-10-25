@@ -62,6 +62,7 @@ def test_full_state_initialization():
         "posted_findings": [],
         "final_review_markdown": "",
         "trace_context": None,
+        "tool_context": None,
         "review_deadline": None,
     }
     assert set(state) == set(ReviewState.__annotations__), "the test state covers every ReviewState field"

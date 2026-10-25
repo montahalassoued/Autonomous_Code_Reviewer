@@ -19,7 +19,12 @@ def pr_target(pr_number: int) -> str:
     return f"pr:{pr_number}"
 
 
-# One request to review one commit of one pull request.
+# The reviews.target of a push to a branch: one review per pushed commit per branch.
+def push_target(ref: str) -> str:
+    return f"push:{ref}"
+
+
+# One request to review one commit: the head of a pull request, or the commit a push moved a branch to.
 @dataclass
 class ReviewJob:
 
@@ -30,11 +35,21 @@ class ReviewJob:
     job_id: str = field(default_factory=_new_job_id)
     event: str = "pull_request"
     enqueued_at: str = field(default_factory=_utc_now_iso)
+    # The GitHub App installation that sent the event: its token reads this repo (None with a personal token).
+    installation_id: int | None = None
+    # A push only: the branch, and the commit before it (the diff is base_sha..head_sha).
+    ref: str = ""
+    base_sha: str = ""
+
+    @property
+    def is_push(self) -> bool:
+        return self.event == "push"
 
     # The key of this job's row in the reviews table.
     @property
     def dedupe_key(self) -> "DedupeKey":
-        return DedupeKey(self.repo_full_name, self.head_sha, pr_target(self.pr_number))
+        target = push_target(self.ref) if self.is_push else pr_target(self.pr_number)
+        return DedupeKey(self.repo_full_name, self.head_sha, target)
 
     # Serializes the job to the JSON text stored in the queue.
     def to_json(self) -> str:

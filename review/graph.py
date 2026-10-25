@@ -1,5 +1,4 @@
 import logging
-from functools import partial
 from pathlib import Path
 from typing import Callable
 
@@ -49,15 +48,21 @@ def join_agents_node(state: ReviewState) -> dict:
     return {}
 
 
-# Assembles and compiles the StateGraph.
-def build_graph(graph_index, repo_path: str | None = None):
+# The review's own repo (state["tool_context"], set by the worker per job) wins over the one the graph was built with.
+def with_review_tool_context(node: Callable[..., dict], default_context: ToolContext) -> Callable[[ReviewState], dict]:
+    def run(state: ReviewState) -> dict:
+        return node(state, tool_context=state.get("tool_context") or default_context)
+    return run
+
+
+# Assembles and compiles the StateGraph. graph_index and repo_path: a fixed repo for every review (the eval, tests); the worker passes one per job instead.
+def build_graph(graph_index=None, repo_path: str | None = None):
     graph = StateGraph(ReviewState)
 
-    # The agents' tools read the checkout and the call graph; both stay out of ReviewState.
-    tool_context = ToolContext(repo_root=Path(repo_path) if repo_path else None, code_graph=graph_index)
-    graph.add_node("security", isolate_agent_failure("security", partial(security_node, tool_context=tool_context)))
-    graph.add_node("logic", isolate_agent_failure("logic", partial(logic_node, tool_context=tool_context)))
-    graph.add_node("quality", isolate_agent_failure("quality", partial(quality_node, tool_context=tool_context)))
+    default_context = ToolContext(repo_root=Path(repo_path) if repo_path else None, code_graph=graph_index)
+    graph.add_node("security", isolate_agent_failure("security", with_review_tool_context(security_node, default_context)))
+    graph.add_node("logic", isolate_agent_failure("logic", with_review_tool_context(logic_node, default_context)))
+    graph.add_node("quality", isolate_agent_failure("quality", with_review_tool_context(quality_node, default_context)))
     graph.add_node("join_agents", join_agents_node)
     graph.add_node("synthesizer", synthesizer_node)
 

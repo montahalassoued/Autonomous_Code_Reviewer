@@ -10,6 +10,7 @@ from prometheus_client import start_http_server
 from app.jobs.factory import build_queue, build_review_status
 from app.jobs.models import ReviewJob
 from app.jobs.queue import JobQueue
+from app.repo_checkouts import RepoCheckouts, checkouts_root
 from app.jobs.review_status import SKIP_CLOSED, SKIP_SUPERSEDED, ReviewCost, ReviewStatusStore
 from review.diff_budget import fit_diff, max_diff_chars
 from review.review_metrics import REVIEWS, record_posted_review
@@ -47,7 +48,8 @@ def failure_reason(error: BaseException) -> str:
 
 
 # Runs the full review for one job, records its status and posts the result, unless it went stale.
-def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStatusStore) -> None:
+def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStatusStore,
+                        checkouts: RepoCheckouts | None = None) -> None:
     key = job.dedupe_key
     status_store.mark_running(key)
     started = time.monotonic()
@@ -73,6 +75,8 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
 
     review_state = initial_state(job.pr_number, job.repo_full_name, diff, changed_files_in_diff(diff), unreviewed)
     review_state["review_deadline"] = started + review_deadline_s()
+    # The repo comes from the job: its tools read that repo at the reviewed commit, not a checkout fixed at startup.
+    review_state["tool_context"] = checkouts.tool_context(job) if checkouts else None
 
     # The trace spans the post too, so Langfuse shows whether the review was posted, skipped or failed to post.
     with review_trace(job.repo_full_name, job.pr_number, job.head_sha, job.job_id) as trace:
@@ -191,7 +195,7 @@ def _read_int_env(name: str, default: int) -> int:
     return value
 
 
-# Worker entrypoint: ingest once, build the graph once, then process jobs until SIGTERM/SIGINT.
+# Worker entrypoint: build the graph once, then process jobs (any allowed repo) until SIGTERM/SIGINT.
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -208,6 +212,7 @@ def main() -> None:
     queue = build_queue()
     status_store = build_review_status()
     compiled_graph = build_review_graph()
+    checkouts = RepoCheckouts(checkouts_root())
 
     stop_event = threading.Event()
     for signal_number in (signal.SIGTERM, signal.SIGINT):
@@ -216,7 +221,7 @@ def main() -> None:
     logger.info("Worker started max_attempts=%s visibility_timeout_s=%s", max_attempts, visibility_timeout_s)
     run_forever(
         queue,
-        lambda job: review_pull_request(compiled_graph, job, status_store),
+        lambda job: review_pull_request(compiled_graph, job, status_store, checkouts),
         stop_event,
         max_attempts,
         visibility_timeout_s,

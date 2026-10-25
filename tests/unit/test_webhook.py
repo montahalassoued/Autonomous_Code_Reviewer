@@ -242,14 +242,26 @@ def test_webhook_ignores_pr_from_a_non_collaborator():
     print("OK - an outsider's PR is ignored before the dedupe and the queue")
 
 
-def test_webhook_ignores_repo_not_in_allowed_repos():
+def test_webhook_ignores_repo_not_in_allowed_repos(monkeypatch):
+    monkeypatch.delenv("ALLOWED_OWNERS", raising=False)
     app = make_app()
 
     response = post_event(TestClient(app), make_payload(repo="someone/else"))
 
-    assert response.json() == {"status": "ignored", "reason": "repo someone/else is not in ALLOWED_REPOS"}
+    assert response.json() == {"status": "ignored", "reason": "repo someone/else is not in ALLOWED_OWNERS or ALLOWED_REPOS"}
     assert drain(app.state.job_queue) == []
-    print("OK - only ALLOWED_REPOS are reviewed")
+    print("OK - only allowed repos are reviewed")
+
+
+def test_an_allowed_owner_covers_every_one_of_their_repos(monkeypatch):
+    monkeypatch.setenv("ALLOWED_OWNERS", "Someone")
+    app = make_app()
+
+    response = post_event(TestClient(app), make_payload(repo="someone/brand-new-repo"))
+
+    assert response.status_code == 202, "a repo created today needs no setting"
+    assert drain(app.state.job_queue)[0].job.repo_full_name == "someone/brand-new-repo"
+    print("OK - ALLOWED_OWNERS reviews any repo of that owner, any case")
 
 
 def test_webhook_ignores_drafts_and_reviews_them_when_ready():
@@ -280,10 +292,11 @@ def test_webhook_returns_503_when_the_collaborator_check_fails():
 
 def test_webhook_reviews_nothing_when_allowed_repos_is_unset(monkeypatch):
     monkeypatch.delenv("ALLOWED_REPOS")
+    monkeypatch.delenv("ALLOWED_OWNERS", raising=False)
 
     response = post_event(TestClient(make_app()), PR_OPENED_PAYLOAD)
 
-    assert response.json()["status"] == "ignored" and "ALLOWED_REPOS is not set" in response.json()["reason"]
+    assert response.json()["status"] == "ignored" and "neither ALLOWED_OWNERS nor ALLOWED_REPOS" in response.json()["reason"]
     print("OK - a missing allow-list fails closed")
 
 

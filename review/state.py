@@ -1,6 +1,7 @@
 from typing import TypedDict, Annotated, Literal
 import operator
 
+from review.agents.tools.tool_definition import ToolContext
 from review.secret_redactor import redact_for_llm
 
 
@@ -50,6 +51,8 @@ class ReviewState(TypedDict):
 
     # Where this review's Langfuse trace hangs (review/review_tracing.py); None when tracing is off
     trace_context: dict[str, str] | None
+    # The reviewed repo at the reviewed commit, for the agents' tools; set by the worker per job (None: the graph's own)
+    tool_context: ToolContext | None
 
     # time.monotonic() after which no LLM call starts or waits (set by app/worker.py); None: no deadline
     review_deadline: float | None
@@ -62,6 +65,6 @@ def initial_state(pr_number: int, repo_full_name: str, diff: str, changed_files:
     return ReviewState(
         pr_number=pr_number, repo_full_name=repo_full_name, pr_diff=redact_for_llm(diff), changed_files=changed_files,
         unreviewed_files=unreviewed_files, review_context="", findings=[], failed_agents=[],
-        llm_calls=0, tokens_in=0, tokens_out=0, posted_findings=[], final_review_markdown="", trace_context=None,
+        llm_calls=0, tokens_in=0, tokens_out=0, posted_findings=[], final_review_markdown="", trace_context=None, tool_context=None,
         review_deadline=None,
     )
