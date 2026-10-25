@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.jobs.models import ReviewJob
 from app.jobs.trigger_policy import evaluate_pull_request, evaluate_push
+from tools.github_auth import github_installation
 
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,9 @@ async def _pull_request_job(request: Request, payload: dict, delivery_id: str) -
 
     # Before the dedupe, so a refused event leaves no reviews row and costs no LLM call.
     try:
-        decision = await run_in_threadpool(evaluate_pull_request, payload, request.app.state.is_collaborator)
+        # The App's installation from the event authenticates the collaborator lookup (the thread pool copies it).
+        with github_installation(_installation_id(payload)):
+            decision = await run_in_threadpool(evaluate_pull_request, payload, request.app.state.is_collaborator)
     except Exception as exc:  # GitHub unreachable: refuse for now, the delivery can be redelivered
         logger.exception("Collaborator check failed delivery=%s repo=%s", delivery_id, repo_full_name)
         raise HTTPException(status_code=503, detail="Could not verify the pull request author") from exc

@@ -1,7 +1,8 @@
-import os
 from dataclasses import dataclass
 
-from github import Github, Auth
+from github import Github
+
+from tools.github_auth import bot_login, github_client
 
 from review.output_sanitizer import fit_comment
 
@@ -11,17 +12,9 @@ SUMMARY_MARKER = "<!-- acr:summary -->"
 DIFF_FILE_HEADER = "diff --git "
 
 
-# Reads GITHUB_TOKEN from the environment.
+# The current job's client: the GitHub App installation's token, or GITHUB_TOKEN (tools/github_auth.py).
 def _build_github_client() -> Github:
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token:
-        raise RuntimeError(
-            "GITHUB_TOKEN environment variable is not set. "
-            "Create a personal access token at "
-            "https://github.com/settings/tokens and set it in your "
-            ".env file."
-        )
-    return Github(auth=Auth.Token(token))
+    return github_client()
 
 
 # True when GitHub lists login as a collaborator of the repo (owners and org members with access included).
@@ -92,11 +85,11 @@ def upsert_summary_comment(repo_full_name: str, pr_number: int, markdown: str) -
     client = _build_github_client()
     repo = client.get_repo(repo_full_name)
     pull_request = repo.get_pull(pr_number)
-    bot_login = client.get_user().login
+    own_login = bot_login(client)
 
     for comment in pull_request.get_issue_comments():
         # Only a comment that starts with the marker is ours: LLM text quoting it elsewhere never matches.
-        if (comment.body or "").startswith(SUMMARY_MARKER + "\n") and comment.user.login == bot_login:
+        if (comment.body or "").startswith(SUMMARY_MARKER + "\n") and comment.user.login == own_login:
             comment.edit(body)
             return
 

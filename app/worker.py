@@ -18,6 +18,7 @@ from review.review_tracing import flush_tracing, review_trace
 from review.secret_redactor import environment_secret_values, redact_secrets
 from review.state import initial_state
 from review.synthesizer import unreviewable_markdown
+from tools.github_auth import check_github_credentials, git_token, github_installation
 from tools.github_tools import (changed_files_in_diff, get_pr_diff, get_pull_request_head, get_push_diff, post_commit_comment,
                                 upsert_summary_comment)
 
@@ -54,6 +55,12 @@ def failure_reason(error: BaseException) -> str:
 # Runs the full review for one job, records its status and posts the result, unless it went stale.
 def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStatusStore,
                         checkouts: RepoCheckouts | None = None) -> None:
+    # Every GitHub call of this job uses its App installation's token (or GITHUB_TOKEN without the App).
+    with github_installation(job.installation_id):
+        _review_job(compiled_graph, job, status_store, checkouts)
+
+
+def _review_job(compiled_graph, job: ReviewJob, status_store: ReviewStatusStore, checkouts: RepoCheckouts | None) -> None:
     key = job.dedupe_key
     status_store.mark_running(key)
     started = time.monotonic()
@@ -231,8 +238,9 @@ def main() -> None:
     start_http_server(_read_int_env("WORKER_METRICS_PORT", DEFAULT_METRICS_PORT))
     queue = build_queue()
     status_store = build_review_status()
+    check_github_credentials()
     compiled_graph = build_review_graph()
-    checkouts = RepoCheckouts(checkouts_root())
+    checkouts = RepoCheckouts(checkouts_root(), token_for=lambda job: git_token(job.installation_id))
 
     stop_event = threading.Event()
     for signal_number in (signal.SIGTERM, signal.SIGINT):
