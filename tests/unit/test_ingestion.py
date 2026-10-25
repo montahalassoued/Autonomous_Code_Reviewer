@@ -70,5 +70,34 @@ def test_a_file_in_another_encoding_does_not_stop_the_worker(tmp_path):
     print("OK - a Latin-1 file is parsed with replaced bytes instead of crashing startup")
 
 
+def test_a_private_github_repo_is_cloned_with_the_token_in_a_header_not_the_url(monkeypatch, tmp_path):
+    import base64
+
+    from rag import ingestion
+
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
+    calls = []
+    monkeypatch.setattr(ingestion.git.Repo, "clone_from", lambda url, path, **options: calls.append((url, options)))
+
+    ingestion.clone_repository("https://github.com/owner/private.git", str(tmp_path / "checkout"))
+
+    [(url, options)] = calls
+    assert url == "https://github.com/owner/private.git" and "ghp_secret" not in url
+    expected = base64.b64encode(b"x-access-token:ghp_secret").decode()
+    assert options["env"]["GIT_CONFIG_VALUE_0"] == f"AUTHORIZATION: basic {expected}"
+    assert options["env"]["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader", "sent to github.com only"
+    print("OK - the token reaches git as an environment header, never in the URL or .git/config")
+
+
+def test_no_token_or_another_host_clones_without_a_header(monkeypatch):
+    from rag.ingestion import git_auth_environment
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert git_auth_environment("https://github.com/owner/public.git") == {}
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
+    assert git_auth_environment("https://gitlab.com/owner/repo.git") == {}, "a GitHub token is never sent elsewhere"
+    print("OK - public repos and other hosts get no Authorization header")
+
+
 if __name__ == "__main__":
     print("Run under pytest: this test uses the tmp_path fixture.")

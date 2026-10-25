@@ -1,3 +1,4 @@
+import base64
 import os
 
 import git
@@ -9,15 +10,31 @@ from rag.code_indexer import build_index
 from rag.knowledge_graph import build_resolved_graph
 
 
-# Clone a remote repo into target_dir.
+GITHUB_HTTPS = "https://github.com/"
+
+
+# GITHUB_TOKEN as an HTTP header for github.com, passed in the environment: it never lands in the URL, .git/config,
+# the process list or an error message. Empty for another host or without a token (a public repo needs none).
+def git_auth_environment(repo_url: str) -> dict[str, str]:
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not token or not repo_url.startswith(GITHUB_HTTPS):
+        return {}
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{GITHUB_HTTPS}.extraheader",
+            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"}
+
+
+# Clone a remote repo into target_dir; a private GitHub repo is read with GITHUB_TOKEN.
 def clone_repository(repo_url: str, target_dir: str) -> str:
+    auth = git_auth_environment(repo_url)
     if os.path.isdir(os.path.join(target_dir, ".git")):
         print(f"Existing checkout found at {target_dir}, pulling latest changes...")
         repo = git.Repo(target_dir)
-        repo.remotes.origin.pull()
+        with repo.git.custom_environment(**auth):
+            repo.remotes.origin.pull()
     else:
         print(f"Cloning {repo_url} into {target_dir}...")
-        git.Repo.clone_from(repo_url, target_dir, depth=1)
+        git.Repo.clone_from(repo_url, target_dir, depth=1, env={**os.environ, **auth})
 
     return target_dir
 
