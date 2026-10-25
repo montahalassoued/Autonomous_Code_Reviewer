@@ -9,8 +9,8 @@ from fastapi.responses import JSONResponse
 from prometheus_client import Counter
 from starlette.concurrency import run_in_threadpool
 
-from app.jobs.models import DedupeKey, ReviewJob, pr_target
-from app.jobs.trigger_policy import evaluate_pull_request
+from app.jobs.models import ReviewJob
+from app.jobs.trigger_policy import evaluate_pull_request, evaluate_push
 
 
 logger = logging.getLogger(__name__)
@@ -109,64 +109,99 @@ async def github_webhook(
     return response
 
 
-# Verify, apply the trigger policy, dedupe and queue a review for pull_request events.
+# Verify, decide whether the event is reviewed (a pull request or a push), then dedupe and queue it.
 async def _handle_delivery(request: Request, x_hub_signature_256: str | None, x_github_event: str | None,
                            x_github_delivery: str | None):
     payload_body = await _read_limited_body(request, webhook_max_body_bytes())
     _verify_signature(payload_body, x_hub_signature_256)
 
-    if x_github_event != "pull_request":
+    if x_github_event not in ("pull_request", "push"):
         return {"status": "ignored", "reason": f"unhandled event type: {x_github_event}"}
-
     try:
         payload = json.loads(payload_body)
     except ValueError as exc:  # signed but not JSON: GitHub never sends that, so refuse it cleanly
         raise HTTPException(status_code=400, detail="Webhook payload is not valid JSON") from exc
+
+    if x_github_event == "push":
+        job_or_ignored = _push_job(payload, x_github_delivery or "")
+    else:
+        job_or_ignored = await _pull_request_job(request, payload, x_github_delivery or "")
+    if isinstance(job_or_ignored, dict):
+        return job_or_ignored
+    return await _claim_and_queue(request, job_or_ignored)
+
+
+# The installation of the GitHub App that sent the event; None when a repo webhook sent it (personal token).
+def _installation_id(payload: dict) -> int | None:
+    installation = payload.get("installation") or {}
+    return installation.get("id")
+
+
+async def _pull_request_job(request: Request, payload: dict, delivery_id: str) -> ReviewJob | dict:
     if payload.get("action") not in HANDLED_ACTIONS:
         return {"status": "ignored", "reason": f"unhandled action: {payload.get('action')}"}
-
     pr_number, repo_full_name, head_sha = _extract_pr_fields(payload)
 
     # Before the dedupe, so a refused event leaves no reviews row and costs no LLM call.
     try:
         decision = await run_in_threadpool(evaluate_pull_request, payload, request.app.state.is_collaborator)
     except Exception as exc:  # GitHub unreachable: refuse for now, the delivery can be redelivered
-        logger.exception("Collaborator check failed delivery=%s repo=%s", x_github_delivery, repo_full_name)
+        logger.exception("Collaborator check failed delivery=%s repo=%s", delivery_id, repo_full_name)
         raise HTTPException(status_code=503, detail="Could not verify the pull request author") from exc
     if not decision.allowed:
-        logger.info("Ignored delivery=%s repo=%s pr=%s: %s", x_github_delivery, repo_full_name, pr_number, decision.reason)
+        logger.info("Ignored delivery=%s repo=%s pr=%s: %s", delivery_id, repo_full_name, pr_number, decision.reason)
         return {"status": "ignored", "reason": decision.reason}
+    return ReviewJob(repo_full_name=repo_full_name, pr_number=pr_number, head_sha=head_sha, delivery_id=delivery_id,
+                     installation_id=_installation_id(payload))
+
+
+# A push to a branch: the review covers before..after and is posted on the pushed commit.
+def _push_job(payload: dict, delivery_id: str) -> ReviewJob | dict:
+    try:
+        repo_full_name, head_sha = payload["repository"]["full_name"], payload["after"]
+    except (KeyError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Malformed push payload, missing field: {exc}") from exc
+    decision = evaluate_push(payload)
+    if not decision.allowed:
+        logger.info("Ignored push delivery=%s repo=%s ref=%s: %s", delivery_id, repo_full_name, payload.get("ref"), decision.reason)
+        return {"status": "ignored", "reason": decision.reason}
+    return ReviewJob(repo_full_name=repo_full_name, pr_number=0, head_sha=head_sha, delivery_id=delivery_id,
+                     event="push", ref=payload["ref"], base_sha=payload.get("before", ""),
+                     installation_id=_installation_id(payload))
+
+
+def _where(job: ReviewJob) -> dict:
+    return {"ref": job.ref} if job.is_push else {"pr_number": job.pr_number}
+
+
+async def _claim_and_queue(request: Request, job: ReviewJob):
     dedupe = request.app.state.dedupe
     queue = request.app.state.job_queue
-    dedupe_key = DedupeKey(repo_full_name, head_sha, target=pr_target(pr_number))
+    dedupe_key = job.dedupe_key
 
     # The Azure SDK is blocking, so run it off the event loop.
     try:
         is_new = await run_in_threadpool(dedupe.claim, dedupe_key)
     except Exception as exc:  # storage outage: fail the delivery so it can be redelivered
-        logger.exception("Dedupe claim failed delivery=%s", x_github_delivery)
+        logger.exception("Dedupe claim failed delivery=%s", job.delivery_id)
         raise HTTPException(status_code=503, detail="Dedupe store unavailable") from exc
 
     if not is_new:
-        logger.info("Duplicate delivery=%s repo=%s pr=%s sha=%s", x_github_delivery, repo_full_name, pr_number, head_sha)
-        return {"status": "duplicate", "pr_number": pr_number, "repo": repo_full_name}
+        logger.info("Duplicate delivery=%s repo=%s target=%s sha=%s", job.delivery_id, job.repo_full_name,
+                    dedupe_key.target, job.head_sha)
+        return {"status": "duplicate", **_where(job), "repo": job.repo_full_name}
 
-    job = ReviewJob(
-        repo_full_name=repo_full_name,
-        pr_number=pr_number,
-        head_sha=head_sha,
-        delivery_id=x_github_delivery or "",
-    )
     try:
         await run_in_threadpool(queue.enqueue, job)
     except Exception as exc:
         # Release the claim, otherwise the manual redelivery would be called a duplicate.
-        logger.exception("Enqueue failed job_id=%s delivery=%s", job.job_id, x_github_delivery)
+        logger.exception("Enqueue failed job_id=%s delivery=%s", job.job_id, job.delivery_id)
         await run_in_threadpool(dedupe.release, dedupe_key)
         raise HTTPException(status_code=503, detail="Review queue unavailable") from exc
 
-    logger.info("Queued job_id=%s delivery=%s repo=%s pr=%s sha=%s", job.job_id, x_github_delivery, repo_full_name, pr_number, head_sha)
+    logger.info("Queued job_id=%s delivery=%s repo=%s target=%s sha=%s", job.job_id, job.delivery_id, job.repo_full_name,
+                dedupe_key.target, job.head_sha)
     return JSONResponse(
         status_code=202,
-        content={"status": "queued", "job_id": job.job_id, "pr_number": pr_number, "repo": repo_full_name},
+        content={"status": "queued", "job_id": job.job_id, **_where(job), "repo": job.repo_full_name},
     )

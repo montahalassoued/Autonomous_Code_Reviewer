@@ -8,6 +8,7 @@ from app.jobs.models import DedupeKey
 # Why a review was skipped without posting.
 SKIP_SUPERSEDED = "superseded"  # the PR moved to a newer commit, whose own job reviews it
 SKIP_CLOSED = "closed"  # the PR was closed or merged before the review was posted
+SKIP_NO_CODE = "no reviewable code"  # a push whose diff has nothing the agents review: no comment is posted
 MAX_REASON_CHARS = 500
 
 

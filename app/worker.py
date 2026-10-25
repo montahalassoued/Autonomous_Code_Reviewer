@@ -11,14 +11,15 @@ from app.jobs.factory import build_queue, build_review_status
 from app.jobs.models import ReviewJob
 from app.jobs.queue import JobQueue
 from app.repo_checkouts import RepoCheckouts, checkouts_root
-from app.jobs.review_status import SKIP_CLOSED, SKIP_SUPERSEDED, ReviewCost, ReviewStatusStore
+from app.jobs.review_status import SKIP_CLOSED, SKIP_NO_CODE, SKIP_SUPERSEDED, ReviewCost, ReviewStatusStore
 from review.diff_budget import fit_diff, max_diff_chars
 from review.review_metrics import REVIEWS, record_posted_review
 from review.review_tracing import flush_tracing, review_trace
 from review.secret_redactor import environment_secret_values, redact_secrets
 from review.state import initial_state
 from review.synthesizer import unreviewable_markdown
-from tools.github_tools import changed_files_in_diff, get_pr_diff, get_pull_request_head, upsert_summary_comment
+from tools.github_tools import (changed_files_in_diff, get_pr_diff, get_pull_request_head, get_push_diff, post_commit_comment,
+                                upsert_summary_comment)
 
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,11 @@ MIN_POLL_S = 1.0
 MAX_POLL_S = 10.0
 
 
-# Why this job's review must not be posted: the PR was closed, or moved past the reviewed commit.
+# Why this job's review must not be posted: the PR was closed, or moved past the reviewed commit. A pushed commit
+# never goes stale: its review is posted on that commit.
 def stale_reason(job: ReviewJob) -> str | None:
+    if job.is_push:
+        return None
     state, head_sha = get_pull_request_head(job.repo_full_name, job.pr_number)
     if state != "open":
         return SKIP_CLOSED
@@ -62,10 +66,18 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
         logger.info("Skipped job_id=%s pr=%s sha=%s: %s", job.job_id, job.pr_number, job.head_sha, reason)
         return
 
-    pull_request_diff = get_pr_diff(job.repo_full_name, job.pr_number)
+    if job.is_push:
+        pull_request_diff = get_push_diff(job.repo_full_name, job.base_sha, job.head_sha)
+    else:
+        pull_request_diff = get_pr_diff(job.repo_full_name, job.pr_number)
     # A diff over the budget would fail every agent call on the per-minute token limit: whole files are left out instead.
     diff, over_budget = fit_diff(pull_request_diff.text, max_diff_chars())
     unreviewed = [*pull_request_diff.files_without_patch, *over_budget]
+    if not diff.strip() and job.is_push:
+        status_store.mark_skipped(key, SKIP_NO_CODE)
+        REVIEWS.labels("skipped").inc()
+        logger.info("Nothing to review in push job_id=%s ref=%s sha=%s", job.job_id, job.ref, job.head_sha)
+        return
     if not diff.strip():
         upsert_summary_comment(job.repo_full_name, job.pr_number, unreviewable_markdown(unreviewed))
         status_store.mark_posted(key, int((time.monotonic() - started) * 1000), [], ReviewCost())
@@ -94,12 +106,20 @@ def review_pull_request(compiled_graph, job: ReviewJob, status_store: ReviewStat
                 trace.record_outcome(final_state, f"skipped: {reason}")
             return
 
-        upsert_summary_comment(job.repo_full_name, job.pr_number, final_state["final_review_markdown"])
+        post_review(job, final_state["final_review_markdown"])
         latency_ms = int((time.monotonic() - started) * 1000)
         status_store.mark_posted(key, latency_ms, final_state.get("failed_agents") or [], cost)
         record_posted_review(final_state, latency_ms / 1000)
         if trace:
             trace.record_outcome(final_state, "posted")
+
+
+# A pull request's review edits its one summary comment; a push's is a comment on the pushed commit.
+def post_review(job: ReviewJob, markdown: str) -> None:
+    if job.is_push:
+        post_commit_comment(job.repo_full_name, job.head_sha, markdown)
+    else:
+        upsert_summary_comment(job.repo_full_name, job.pr_number, markdown)
 
 
 # Receives at most one message and handles it.

@@ -48,9 +48,21 @@ def get_pr_diff(repo_full_name: str, pr_number: int) -> PullRequestDiff:
     client = _build_github_client()
     repo = client.get_repo(repo_full_name)
     pull_request = repo.get_pull(pr_number)
+    return _diff_of_files(pull_request.get_files())
 
+
+# A push's diff: base_sha..head_sha, or the head commit alone when the push created the branch (base is 40 zeros).
+def get_push_diff(repo_full_name: str, base_sha: str, head_sha: str) -> PullRequestDiff:
+    repo = _build_github_client().get_repo(repo_full_name)
+    if not base_sha or set(base_sha) == {"0"}:
+        return _diff_of_files(repo.get_commit(head_sha).files)
+    return _diff_of_files(repo.compare(base_sha, head_sha).files)
+
+
+# The unified diff of GitHub file objects (a pull request's, a commit's or a comparison's), files without a patch apart.
+def _diff_of_files(files) -> PullRequestDiff:
     diff_parts, without_patch = [], []
-    for file in pull_request.get_files():
+    for file in files:
         name = file.filename
         if not file.patch:
             without_patch.append(name)
@@ -63,6 +75,12 @@ def get_pr_diff(repo_full_name: str, pr_number: int) -> PullRequestDiff:
 # The files of a diff built by get_pr_diff; a patch line never starts with "diff --git".
 def changed_files_in_diff(diff: str) -> list[str]:
     return [line.rsplit(" b/", 1)[-1] for line in diff.splitlines() if line.startswith(DIFF_FILE_HEADER)]
+
+
+# A push review, posted once on the pushed commit: the dedupe already makes it one review per commit and branch.
+def post_commit_comment(repo_full_name: str, sha: str, markdown: str) -> None:
+    body = fit_comment(markdown if markdown.startswith(SUMMARY_MARKER) else f"{SUMMARY_MARKER}\n{markdown}")
+    _build_github_client().get_repo(repo_full_name).get_commit(sha).create_comment(body)
 
 
 # Creates the review summary comment, or edits it if one already exists.

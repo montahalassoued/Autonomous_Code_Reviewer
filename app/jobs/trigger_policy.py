@@ -49,3 +49,34 @@ def evaluate_pull_request(payload: dict, is_collaborator: Callable[[str, str], b
     if not is_collaborator(repo_full_name, author):
         return TriggerDecision(False, f"author {author} is not a collaborator")
     return TriggerDecision(True)
+
+
+# Source files the agents review; a push touching only docs, images or lock files costs no LLM call.
+CODE_SUFFIXES = (
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".go", ".rb", ".php", ".cs", ".rs", ".c", ".cc", ".cpp", ".h",
+    ".hpp", ".swift", ".scala", ".sql", ".sh",
+)
+NO_COMMIT = "0" * 40
+
+
+def touches_code(paths) -> bool:
+    return any(path.lower().endswith(CODE_SUFFIXES) for path in paths)
+
+
+# Every push to a branch of an allowed repo that adds or changes code; the pusher could write to the repo, so no
+# collaborator lookup is needed. Deleted branches, tags and pushes of no new commit are skipped.
+def evaluate_push(payload: dict) -> TriggerDecision:
+    repo_full_name = payload["repository"]["full_name"]
+    refusal = repo_refusal(repo_full_name)
+    if refusal:
+        return TriggerDecision(False, refusal)
+    if payload.get("deleted") or payload.get("after") == NO_COMMIT:
+        return TriggerDecision(False, "branch deleted")
+    if not str(payload.get("ref", "")).startswith("refs/heads/"):
+        return TriggerDecision(False, "not a branch push")
+    commits = payload.get("commits") or []
+    if not commits:
+        return TriggerDecision(False, "no new commit")
+    if not touches_code(path for commit in commits for path in [*commit.get("added", []), *commit.get("modified", [])]):
+        return TriggerDecision(False, "no code file added or changed")
+    return TriggerDecision(True)
