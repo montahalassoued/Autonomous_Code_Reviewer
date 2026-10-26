@@ -70,10 +70,17 @@ def changed_files_in_diff(diff: str) -> list[str]:
     return [line.rsplit(" b/", 1)[-1] for line in diff.splitlines() if line.startswith(DIFF_FILE_HEADER)]
 
 
-# A push review, posted once on the pushed commit: the dedupe already makes it one review per commit and branch.
+# A push review on the pushed commit, edited if the bot already commented there: a retry after a post never duplicates it.
 def post_commit_comment(repo_full_name: str, sha: str, markdown: str) -> None:
     body = fit_comment(markdown if markdown.startswith(SUMMARY_MARKER) else f"{SUMMARY_MARKER}\n{markdown}")
-    _build_github_client().get_repo(repo_full_name).get_commit(sha).create_comment(body)
+    client = _build_github_client()
+    commit = client.get_repo(repo_full_name).get_commit(sha)
+    own_login = bot_login(client)
+    for comment in commit.get_comments():
+        if (comment.body or "").startswith(SUMMARY_MARKER + "\n") and comment.user.login == own_login:
+            comment.edit(body)
+            return
+    commit.create_comment(body)
 
 
 # Creates the review summary comment, or edits it if one already exists.

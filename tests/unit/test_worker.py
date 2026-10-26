@@ -8,7 +8,8 @@ from app.jobs.models import ReviewJob
 from app.jobs.queue import InMemoryJobQueue
 from app.jobs.review_status import InMemoryReviewStatusStore, ReviewCost, ReviewStatus
 from app.worker import process_one, review_pull_request, run_forever
-from tools.github_tools import SUMMARY_MARKER, PullRequestDiff, changed_files_in_diff, upsert_summary_comment
+from tools.github_tools import (SUMMARY_MARKER, PullRequestDiff, changed_files_in_diff, post_commit_comment,
+                                upsert_summary_comment)
 
 SMALL_DIFF = "diff --git a/app/x.py b/app/x.py\n--- a/app/x.py\n+++ b/app/x.py\n@@ -0,0 +1 @@\n+x = 1"
 VISIBILITY_S = 60
@@ -188,6 +189,38 @@ def test_upsert_ignores_bot_comment_with_marker_not_at_the_start(monkeypatch):
     quoted.edit.assert_not_called()
     pull_request.create_issue_comment.assert_called_once()
     print("OK - only a comment that starts with the marker is edited")
+
+
+# Patches the GitHub client; returns the fake commit holding these comments.
+def fake_commit(monkeypatch, comments: list) -> MagicMock:
+    client = MagicMock()
+    client.get_user.return_value.login = "review-bot"
+    commit = client.get_repo.return_value.get_commit.return_value
+    commit.get_comments.return_value = comments
+    monkeypatch.setattr("tools.github_tools._build_github_client", lambda: client)
+    return commit
+
+
+def test_a_retried_push_review_edits_the_bots_commit_comment(monkeypatch):
+    mine = make_comment(f"{SUMMARY_MARKER}\nold review", "review-bot")
+    impostor = make_comment(f"{SUMMARY_MARKER}\nfake", "someone-else")
+    commit = fake_commit(monkeypatch, [impostor, mine])
+
+    post_commit_comment("owner/repo", "a" * 40, "new review")
+
+    mine.edit.assert_called_once_with(f"{SUMMARY_MARKER}\nnew review")
+    impostor.edit.assert_not_called()
+    commit.create_comment.assert_not_called()
+    print("OK - a retry after a post edits the bot's comment instead of posting a second one")
+
+
+def test_a_push_review_is_created_on_a_commit_without_one(monkeypatch):
+    commit = fake_commit(monkeypatch, [make_comment("nice commit", "someone")])
+
+    post_commit_comment("owner/repo", "a" * 40, "new review")
+
+    commit.create_comment.assert_called_once_with(f"{SUMMARY_MARKER}\nnew review")
+    print("OK - the first push review creates the commit comment")
 
 
 def test_upsert_replaces_an_oversized_body_instead_of_failing(monkeypatch):
