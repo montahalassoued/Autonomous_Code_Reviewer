@@ -25,13 +25,23 @@ def test_each_job_gets_its_own_repo_at_its_commit_and_repeats_are_cached():
     print("OK - any repo from the event, checked out at its commit; repeats come from the cache")
 
 
-def test_only_the_last_few_call_graphs_stay_in_memory():
-    checkouts = RepoCheckouts("/r", checkout=lambda repo, sha, root, token: f"{root}/{repo}/{sha}", build_graph=lambda p: p)
-    for index in range(MAX_CACHED_CONTEXTS + 2):
-        checkouts.tool_context(job("me/repo", f"{index:040x}"))
+def test_only_the_last_few_commits_stay_cached_and_older_folders_are_deleted(tmp_path):
+    def checkout(repo, sha, root, token):
+        folder = tmp_path / repo / sha
+        (folder / ".git").mkdir(parents=True)
+        (folder / ".git" / "pack").write_text("x")
+        (folder / ".git" / "pack").chmod(0o444)  # git writes its objects read-only
+        return str(folder)
+
+    checkouts = RepoCheckouts(str(tmp_path), checkout=checkout, build_graph=lambda p: p)
+    shas = [f"{index:040x}" for index in range(MAX_CACHED_CONTEXTS + 2)]
+    for sha in shas:
+        checkouts.tool_context(job("me/repo", sha))
 
     assert len(checkouts._contexts) == MAX_CACHED_CONTEXTS
-    print(f"OK - at most {MAX_CACHED_CONTEXTS} call graphs are kept")
+    assert not (tmp_path / "me/repo" / shas[0]).exists() and not (tmp_path / "me/repo" / shas[1]).exists()
+    assert all((tmp_path / "me/repo" / sha).exists() for sha in shas[2:]), "cached commits keep their folder"
+    print(f"OK - at most {MAX_CACHED_CONTEXTS} commits are kept, on disk and in memory")
 
 
 def test_the_worker_refuses_agent_models_whose_provider_is_not_configured(monkeypatch):

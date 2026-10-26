@@ -27,8 +27,8 @@ def git_auth_environment(repo_url: str, token: str | None = None) -> dict[str, s
             "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"}
 
 
-# owner/repo at one commit under checkouts_root/owner/repo: only that commit is fetched, and the folder is reused
-# by the next review of the same repo. The working tree is the reviewed code, so the tools see the change itself.
+# owner/repo at one commit under checkouts_root/owner/repo/sha: only that commit is fetched, and each commit has its own
+# folder, so a cached review of an older commit never reads a newer one's files. The working tree is the reviewed code.
 # Both come from a webhook: a name like ../.. would leave checkouts_root, a "sha" starting with - would be a git option.
 def checkout_commit(repo_full_name: str, sha: str, checkouts_root: str, token: str | None = None,
                     remote_url: str | None = None) -> str:
@@ -37,7 +37,7 @@ def checkout_commit(repo_full_name: str, sha: str, checkouts_root: str, token: s
     if not COMMIT_SHA.fullmatch(sha):
         raise ValueError(f"not a commit sha: {sha!r}")
     owner, name = repo_full_name.split("/", 1)
-    path = os.path.join(checkouts_root, owner, name)
+    path = os.path.join(checkouts_root, owner, name, sha)
     repo_url = remote_url or f"{GITHUB_HTTPS}{repo_full_name}.git"
     if os.path.isdir(os.path.join(path, ".git")):
         repo = git.Repo(path)

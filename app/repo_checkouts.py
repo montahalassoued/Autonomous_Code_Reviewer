@@ -1,4 +1,6 @@
 import os
+import shutil
+import stat
 from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
@@ -14,6 +16,14 @@ MAX_CACHED_CONTEXTS = 3
 
 def checkouts_root() -> str:
     return os.environ.get("CHECKOUTS_ROOT", "").strip() or DEFAULT_CHECKOUTS_ROOT
+
+
+# Deletes a commit's folder once its call graph leaves the cache; git's object files are read-only on Windows.
+def remove_checkout(path: Path) -> None:
+    for folder, _, files in os.walk(path):
+        for file_name in files:
+            os.chmod(os.path.join(folder, file_name), stat.S_IWRITE)
+    shutil.rmtree(path, ignore_errors=True)
 
 
 # The agents' tools for one job: that repo at that commit, and its call graph. The repo comes from the event,
@@ -38,5 +48,6 @@ class RepoCheckouts:
         context = ToolContext(repo_root=Path(path), code_graph=self._build_graph(path))
         self._contexts[key] = context
         if len(self._contexts) > MAX_CACHED_CONTEXTS:
-            self._contexts.popitem(last=False)
+            _, evicted = self._contexts.popitem(last=False)
+            remove_checkout(evicted.repo_root)
         return context

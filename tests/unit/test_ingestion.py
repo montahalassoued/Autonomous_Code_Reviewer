@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from rag.ingestion import ingest_repository
 
 
@@ -87,18 +89,20 @@ def make_remote(tmp_path):
     return (tmp_path / "remote").as_uri(), shas
 
 
-def test_a_repo_is_checked_out_at_the_reviewed_commit_and_its_folder_reused(tmp_path):
+def test_each_commit_is_checked_out_in_its_own_folder(tmp_path):
     from rag.ingestion import checkout_commit
 
     remote_url, (first, second) = make_remote(tmp_path)
     root = str(tmp_path / "checkouts")
 
-    path = checkout_commit("owner/demo", first, root, remote_url=remote_url)
-    checked_out = tmp_path / "checkouts" / "owner" / "demo" / "app.py"
-    assert checked_out.read_text(encoding="utf-8") == "VERSION = 'v1'\n"
-    assert checkout_commit("owner/demo", second, root, remote_url=remote_url) == path
-    assert checked_out.read_text(encoding="utf-8") == "VERSION = 'v2'\n"
-    print("OK - each review reads the repo at its own commit; the next one reuses the folder")
+    first_path = Path(checkout_commit("owner/demo", first, root, remote_url=remote_url))
+    second_path = Path(checkout_commit("owner/demo", second, root, remote_url=remote_url))
+
+    assert first_path == tmp_path / "checkouts" / "owner" / "demo" / first
+    assert (first_path / "app.py").read_text(encoding="utf-8") == "VERSION = 'v1'\n", "a newer commit never overwrites it"
+    assert (second_path / "app.py").read_text(encoding="utf-8") == "VERSION = 'v2'\n"
+    assert checkout_commit("owner/demo", first, root, remote_url=remote_url) == str(first_path), "a retry reuses it"
+    print("OK - each review reads the repo at its own commit, in its own folder")
 
 
 def test_a_repo_name_or_sha_from_the_webhook_is_validated_before_git_runs(tmp_path):
