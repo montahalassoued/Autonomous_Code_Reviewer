@@ -225,6 +225,7 @@ def _read_int_env(name: str, default: int) -> int:
 # Worker entrypoint: build the graph once, then process jobs (any allowed repo) until SIGTERM/SIGINT.
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.getLogger("azure").setLevel(logging.WARNING)  # the queue SDK logs every poll at INFO and buries the reviews
 
     from app.bootstrap import build_review_graph  # heavy imports stay out of module import time
 
