@@ -281,3 +281,41 @@ def test_a_clean_diff_still_gets_the_green_verdicts():
     assert "Nice work! ✅" in render([]) and "Needs human review" not in render([])
     assert "✅ **Nothing blocking.**" in render([make_finding("logic", "LOW")])
     print("OK - without injection signals the verdicts are unchanged")
+
+
+PUSH_DIFF = (
+    "diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n@@ -22,3 +22,6 @@ def load_all_orders(user_ids):\n"
+    "     for user_id in user_ids:\n"
+    '         orders += conn.execute("SELECT * FROM orders WHERE user_id = ?", (user_id,)).fetchall()\n'
+    "     return orders\n"
+    "+def run_report(command):\n"
+    "+    import os\n"
+    '+    return os.system("report " + command)\n'
+)
+
+
+def located(agent: str, severity: str, file_path: str, line: int) -> dict:
+    return {**make_finding(agent, severity, f"{agent} at {file_path}:{line}"), "file_path": file_path, "line_number": line}
+
+
+def test_a_finding_on_unchanged_code_of_a_changed_file_is_shown_but_never_blocks():
+    markdown = render([located("security", "CRITICAL", "app.py", 27), located("quality", "HIGH", "app.py", 23)], PUSH_DIFF)
+
+    assert "⛔ **1 blocking issue(s)**" in markdown, "only the finding on an added line blocks"
+    assert "[blocking] CRITICAL - security at app.py:27" in markdown
+    assert "[suggestion] HIGH - quality at app.py:23" in markdown and "`app.py:23` (unchanged line)" in markdown
+    print("OK - older code is still reported, as a suggestion")
+
+
+def test_a_finding_in_a_file_the_change_left_untouched_keeps_its_label():
+    markdown = render([located("logic", "HIGH", "shop/orders.py", 12)], PUSH_DIFF)
+
+    assert "[blocking] HIGH" in markdown and "(file not in this PR)" in markdown
+    print("OK - a caller broken by the change still blocks")
+
+
+def test_a_suggestion_with_a_code_block_starts_the_block_on_its_own_line():
+    finding = {**make_finding("security", "HIGH"), "suggestion": "```python\ndef safe():\n    return 1\n```"}
+
+    assert "**Suggestion:**\n\n```\ndef safe():\n    return 1\n```" in render([finding])
+    print("OK - the suggested code renders as a block, indentation kept")

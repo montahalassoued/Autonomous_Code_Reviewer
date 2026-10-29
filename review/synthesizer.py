@@ -1,7 +1,8 @@
 from review.diff_line_map import map_diff_lines
 from review.finding_merger import merge_cross_agent_findings
 from review.injection_detector import detect_injection
-from review.output_sanitizer import COMMENT_BUDGET_CHARS, code_block, escape_markdown_text, inline_code
+from review.output_sanitizer import (COMMENT_BUDGET_CHARS, code_block, escape_markdown_text,
+                                     escape_markdown_with_code_blocks, inline_code)
 from review.state import ReviewState, Finding
 
 
@@ -12,6 +13,16 @@ DiffLines = dict[str, frozenset[int]]
 def commentable_lines(diff: str, changed_files) -> DiffLines:
     lines = {path: frozenset(file_lines.commentable) for path, file_lines in map_diff_lines(diff).items()}
     return {**{path: frozenset() for path in changed_files}, **lines}
+
+
+# Marks findings on a line the change did not add, in a file it did change: older code, shown but never blocking.
+# A finding in another file is left as is, since a change can break its callers there. The "unchanged_code" key is
+# a display marker recomputed from the diff, not a Finding field: the findings table does not store it.
+def mark_unchanged_code(findings: list[Finding], diff: str) -> list[Finding]:
+    added = {path: file_lines.added for path, file_lines in map_diff_lines(diff).items() if file_lines.added}
+    return [{**finding, "unchanged_code": True}
+            if finding["file_path"] in added and finding["line_number"] not in added[finding["file_path"]] else finding
+            for finding in findings]
 
 
 SEVERITY_ORDER = {
@@ -89,10 +100,11 @@ def _format_summary_table(groups: dict[str, list[Finding]]) -> str:
     return "\n".join(rows)
 
 
-# A low-confidence finding depends on code the agent could not see, so it never blocks a merge.
+# A low-confidence finding depends on code the agent could not see, and one on unchanged code predates the change,
+# so neither blocks a merge.
 def review_label(finding: Finding) -> str:
     label = SEVERITY_LABEL.get(finding["severity"], "nit")
-    if label == "blocking" and finding.get("confidence") == "low":
+    if label == "blocking" and (finding.get("confidence") == "low" or finding.get("unchanged_code")):
         return "suggestion"
     return label
 
@@ -138,6 +150,8 @@ def _format_finding(finding: Finding, diff_lines: DiffLines | None = None) -> st
         location += " (file not in this PR)"
     elif diff_lines and diff_lines[finding["file_path"]] and finding["line_number"] not in diff_lines[finding["file_path"]]:
         location += " (line not in the diff)"
+    elif finding.get("unchanged_code"):
+        location += " (unchanged line)"
     lines = [
         f"#### {emoji} [{review_label(finding)}] {finding['severity']} - {escape_markdown_text(finding['title'], single_line=True)}",
         f"**Location:** {location} · **Confidence:** {finding.get('confidence', 'medium')}",
@@ -146,7 +160,10 @@ def _format_finding(finding: Finding, diff_lines: DiffLines | None = None) -> st
     ]
     if finding["evidence"].strip():
         lines += ["", code_block(finding["evidence"])]
-    lines += ["", f"**Suggestion:** {escape_markdown_text(finding['suggestion'])}"]
+    suggestion = escape_markdown_with_code_blocks(finding["suggestion"])
+    # A fenced block must start on its own line; escaped prose never starts with three backticks.
+    separator = "\n\n" if suggestion.startswith("```") else " "
+    lines += ["", f"**Suggestion:**{separator}{suggestion}"]
     return "\n".join(lines)
 
 
@@ -235,7 +252,7 @@ def _format_injection_note(signals: list) -> str | None:
 
 # LangGraph node: findings -> final review comment.
 def synthesizer_node(state: ReviewState) -> dict:
-    findings = merge_cross_agent_findings(state["findings"])
+    findings = mark_unchanged_code(merge_cross_agent_findings(state["findings"]), state["pr_diff"])
     failed_agents = state.get("failed_agents") or []
     unreviewed = state.get("unreviewed_files") or []
     injection_signals = detect_injection(state["pr_diff"])

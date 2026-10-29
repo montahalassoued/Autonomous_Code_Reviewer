@@ -127,6 +127,20 @@ def code_block(code: str) -> str:
     return f"{fence}\n{code}\n{fence}"
 
 
+FENCED_CODE = re.compile(r"^[ \t]*(`{3,}|~{3,})[^\n]*\n(.*?)\n[ \t]*\1[ \t]*$", re.MULTILINE | re.DOTALL)
+
+
+# LLM text with its fenced code kept as code blocks (indentation intact, info string dropped), the rest escaped.
+def escape_markdown_with_code_blocks(text: str) -> str:
+    text = _normalize_newlines(text)
+    parts, position = [], 0
+    for match in FENCED_CODE.finditer(text):
+        parts += [escape_markdown_text(text[position:match.start()].strip()), code_block(match.group(2))]
+        position = match.end()
+    parts.append(escape_markdown_text(text[position:].strip()))
+    return "\n\n".join(part for part in parts if part)
+
+
 # Last guard before posting: a body over GitHub's limit is replaced, never sent to fail with a 422.
 def fit_comment(body: str, limit_chars: int = MAX_COMMENT_CHARS) -> str:
     return body if len(body) <= limit_chars else OVERSIZED_COMMENT

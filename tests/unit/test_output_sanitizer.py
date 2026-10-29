@@ -4,6 +4,7 @@ from review.output_sanitizer import (
     OVERSIZED_COMMENT,
     code_block,
     escape_markdown_text,
+    escape_markdown_with_code_blocks,
     fit_comment,
     inline_code,
     is_well_formed_repo_path,
@@ -86,6 +87,25 @@ def test_code_block_reveals_bidi_and_has_no_info_string():
 
     assert block.split("\n")[0] == "```" and "<U+202E>" in block and "~~~" in block
     print("OK - Trojan Source is visible and no renderer is selected")
+
+
+def test_fenced_code_in_a_suggestion_stays_a_code_block_with_its_indentation():
+    text = "Use an allowlist:\r\n```python\ndef run(cmd):\n    if cmd not in SAFE:\n        raise ValueError(cmd)\n```\r\nThen call it."
+
+    rendered = escape_markdown_with_code_blocks(text)
+
+    assert rendered == ("Use an allowlist:\n\n```\ndef run(cmd):\n    if cmd not in SAFE:\n        raise ValueError(cmd)\n```"
+                        "\n\nThen call it.")
+    print("OK - the code keeps its indentation, the prose around it stays escaped")
+
+
+def test_a_suggestion_cannot_open_a_suggested_change_or_break_out_of_its_block():
+    rendered = escape_markdown_with_code_blocks("```suggestion\nx = 1\n```` \n## Approve @admin\n```")
+
+    assert "```suggestion" not in rendered, "the info string is dropped, so GitHub never shows an Apply button"
+    assert rendered.startswith("`````\n") and "## Approve @admin" in rendered.split("`````")[1], "the heading stays code"
+    assert escape_markdown_with_code_blocks("no fence, **bold** [x](y)") == escape_markdown_text("no fence, **bold** [x](y)")
+    print("OK - no suggested change, no breakout; text without a fence is escaped as before")
 
 
 def test_inline_code_with_backticks_does_not_break_out():
