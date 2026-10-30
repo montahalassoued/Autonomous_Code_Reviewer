@@ -5,7 +5,8 @@ import pytest
 
 from rag.ast_parser import parse_file
 from rag.knowledge_graph import build_knowledge_graph
-from review.agents.agent_runner import FINAL_ANSWER_REQUEST, AgentFailed, UnusableAgentAnswer, run_agent
+from review.agents.agent_runner import (FINAL_ANSWER_REQUEST, TOOLS_CLOSED_REMINDER, AgentFailed, UnusableAgentAnswer,
+                                        run_agent)
 from review.agents.logic.agent import LOGIC_AGENT
 from review.agents.logic.tools.find_exception_handlers import find_exception_handlers
 from review.agents.quality.agent import QUALITY_AGENT
@@ -306,6 +307,50 @@ def test_tool_calls_stop_at_the_limit(repo):
     assert isinstance(failed.value.__cause__, UnusableAgentAnswer), "a model that never answers gave no review"
     assert failed.value.usage.calls == SECURITY_AGENT.max_tool_calls + 1, "every tool round is a paid model call"
     print(f"OK - at most {SECURITY_AGENT.max_tool_calls} tool calls, then tool_choice='none'; no answer fails the agent")
+
+
+class ToolUseFailed(Exception):
+    status_code = 400
+
+
+# gpt-oss under tool_choice="none": calls a tool anyway `refusals` times (Groq answers 400), then follows the script.
+class ToolCallingAfterLimitGroq(ScriptedGroq):
+
+    def __init__(self, replies: list, refusals: int) -> None:
+        super().__init__(replies)
+        self.refusals = refusals
+
+    def _create(self, **request) -> SimpleNamespace:
+        if request.get("tool_choice") == "none" and self.refusals:
+            self.refusals -= 1
+            self.requests.append(request)
+            raise ToolUseFailed("Error code: 400 - {'error': {'message': 'Tool choice is none, but model called a tool', "
+                                "'code': 'tool_use_failed'}}")
+        return super()._create(**request)
+
+
+def test_a_tool_call_after_the_limit_gets_one_reminder_then_the_answer(repo):
+    keeps_asking = tool_call_reply("c", "search_code", {"text": "login"})
+    client = ToolCallingAfterLimitGroq([keeps_asking] * SECURITY_AGENT.max_tool_calls + [answer_reply([FINDING])] * 3,
+                                       refusals=1)
+
+    result = run_agent(SECURITY_AGENT, build_state(), client, repo)
+
+    assert result["findings"], "the agent answers instead of failing the review"
+    assert client.requests[-1]["messages"][-1] == {"role": "user", "content": TOOLS_CLOSED_REMINDER}
+    assert client.requests[-1]["tool_choice"] == "none"
+    print("OK - Groq's tool_use_failed costs one more call, not the agent's category")
+
+
+def test_a_second_tool_call_after_the_limit_still_fails_the_agent(repo):
+    keeps_asking = tool_call_reply("c", "search_code", {"text": "login"})
+    client = ToolCallingAfterLimitGroq([keeps_asking] * SECURITY_AGENT.max_tool_calls, refusals=2)
+
+    with pytest.raises(AgentFailed) as failed:
+        run_agent(SECURITY_AGENT, build_state(), client, repo)
+
+    assert isinstance(failed.value.__cause__, ToolUseFailed), "one reminder only: the conversation always ends"
+    print("OK - a model that keeps calling tools fails its agent (partial review), it never loops")
 
 
 # Every reply costs 15k tokens, like a ~5k prompt resent with growing tool output.

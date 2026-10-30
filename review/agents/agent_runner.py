@@ -24,6 +24,7 @@ AGENT_MAX_OUTPUT_TOKENS = 4096
 # Each extra call resends the whole prompt, so tool use is capped per agent and per review.
 DEFAULT_MAX_TOOL_CALLS = 3
 FINAL_ANSWER_REQUEST = "Tool call limit reached. Answer now with the JSON array only."
+TOOLS_CLOSED_REMINDER = "Tools are closed: you cannot call them any more. Answer now with the JSON array only, from what you have read."
 # Tokens (in + out) an agent may spend before it must answer without more tool rounds: about 3-4 calls of a ~5k prompt.
 DEFAULT_AGENT_TOKEN_BUDGET = 24_000
 VALID_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
@@ -199,6 +200,11 @@ def _ask_model(client: ReviewLlmClient, model: str, trace_context: TraceContext 
     return choice.message
 
 
+# Groq's 400 "tool_use_failed": the model called a tool the request did not allow.
+def _is_tool_use_failed(exc: Exception) -> bool:
+    return getattr(exc, "status_code", None) == 400 and "tool_use_failed" in str(exc)
+
+
 # Asks models[0]; a 429 the client gave up on (spent quota, retries used) moves the conversation to the next model.
 def _ask_with_fallback(client: ReviewLlmClient, models: list[str], agent_name: str,
                        trace_context: TraceContext | None, *request_args):
@@ -232,9 +238,19 @@ def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_contex
     calls_left = spec.max_tool_calls if tools else 0
     models = list(dict.fromkeys(model for model in (agent_model(spec.name), fallback_agent_model()) if model))
 
+    reminded = False
     while True:
-        message = _ask_with_fallback(client, models, spec.name, trace_context, usage, messages, tool_schemas,
-                                     "auto" if calls_left > 0 else "none")
+        tool_choice = "auto" if calls_left > 0 else "none"
+        try:
+            message = _ask_with_fallback(client, models, spec.name, trace_context, usage, messages, tool_schemas, tool_choice)
+        except Exception as exc:
+            # gpt-oss sometimes calls a tool under tool_choice="none" and Groq rejects that answer: remind it once.
+            if tool_choice != "none" or reminded or not _is_tool_use_failed(exc):
+                raise
+            logger.warning("%s called a tool after the limit, asking once more for the final answer", spec.name)
+            messages.append({"role": "user", "content": TOOLS_CLOSED_REMINDER})
+            reminded = True
+            continue
         tool_calls = getattr(message, "tool_calls", None) or []
         if not tool_calls or calls_left == 0:
             # content can be None (a filtered or empty completion): that is no answer, not "no findings".
