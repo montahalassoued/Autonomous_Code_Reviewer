@@ -14,6 +14,7 @@ from review.agents.quality import agent as quality_agent
 from review.agents.security import agent as security_agent
 from review.diff_line_map import map_diff_lines
 from review.graph import REVIEW_AGENTS
+from review.llm_client import is_tool_use_failed
 from review.untrusted_input import wrap_untrusted
 
 SQL_FINDING = {
@@ -77,6 +78,26 @@ def test_a_recorded_call_replays_without_the_provider_whatever_its_nonce(tmp_pat
     with pytest.raises(CallNotRecorded):
         ask(RecordedGroq(cache, run=2, live_client=None))
     print("OK - recorded calls replay for free; another run is a new sample")
+
+
+class ToolUseFailed(Exception):
+    status_code = 400
+
+
+def test_a_tool_use_failed_answer_is_recorded_and_replayed_as_the_same_error(tmp_path):
+    cache = CallCache(tmp_path / "calls.jsonl")
+    request = {"model": "m", "temperature": 0.1, "max_completion_tokens": 10, "tool_choice": "none",
+               "messages": [{"role": "user", "content": "answer now"}]}
+    refusing = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **_: (_ for _ in ()).throw(ToolUseFailed("400 Tool choice is none, but model called a tool: tool_use_failed")))))
+
+    with pytest.raises(ToolUseFailed):
+        RecordedGroq(cache, run=1, live_client=lambda: refusing).chat.completions.create(**request)
+    with pytest.raises(Exception) as replayed:
+        RecordedGroq(CallCache(tmp_path / "calls.jsonl"), run=1, live_client=None).chat.completions.create(**request)
+
+    assert is_tool_use_failed(replayed.value), "the agent sees the same 400 offline and sends the same reminder"
+    print("OK - the replay follows the agent's reminder path instead of failing on an unrecorded call")
 
 
 def test_a_whole_review_is_scored_per_category_and_as_posted(tmp_path, monkeypatch):

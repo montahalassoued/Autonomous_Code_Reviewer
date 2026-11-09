@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Callable
 
 from eval.benchmark.call_cache import CallCache
-from review.llm_client import MAX_PROVIDER_WAIT_S, is_quota_exhausted, provider_retry_delay_s
+from review.llm_client import MAX_PROVIDER_WAIT_S, is_quota_exhausted, is_tool_use_failed, provider_retry_delay_s
 
 
 # The random nonce of the untrusted-input markers changes on every review; the cache key must not.
@@ -17,6 +17,14 @@ MAX_ATTEMPTS = 4
 # Raised in --offline mode when a call is not recorded yet.
 class CallNotRecorded(RuntimeError):
     pass
+
+
+# A provider error that is part of the conversation (the agent reacts to it), replayed like an answer.
+class RecordedProviderError(RuntimeError):
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def request_key(request: dict, run: int) -> str:
@@ -64,13 +72,22 @@ class RecordedGroq:
             record = self.cache.get(key)
             if record is not None:
                 self.recorded_calls += 1
+                if "provider_error" in record:
+                    raise RecordedProviderError(record["provider_error"]["status_code"], record["provider_error"]["message"])
                 return record_to_response(record)
             if self._live_client is None:
                 self.missing_calls += 1
         if self._live_client is None:
             raise CallNotRecorded(f"{request['model']}: this call is not recorded yet (run without --offline)")
         started = time.monotonic()
-        response = self._call_live(request)
+        try:
+            response = self._call_live(request)
+        except Exception as exc:
+            # The agent answers a tool_use_failed with a reminder: without it on record, the replay could not follow.
+            if is_tool_use_failed(exc):
+                with self._lock:
+                    self.cache.put(key, {"provider_error": {"status_code": exc.status_code, "message": str(exc)}})
+            raise
         with self._lock:
             self.live_calls += 1
             self.cache.put(key, response_to_record(response))

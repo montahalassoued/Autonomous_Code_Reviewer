@@ -7,7 +7,7 @@ from review.agents.prompt_assembler import OTHER_RULE_ID, fill_prompt
 from review.agents.tools.tool_definition import Tool, ToolContext, execute_tool_call
 from review.finding_locator import locate_findings
 from review.finding_merger import merge_duplicate_findings
-from review.llm_client import ReviewLlmClient, build_review_llm_client, llm_deadline
+from review.llm_client import ReviewLlmClient, build_review_llm_client, is_tool_use_failed, llm_deadline
 from review.output_sanitizer import sanitize_finding
 from review.review_tracing import TraceContext, record_llm_response, traced_step
 from review.secret_redactor import environment_secret_values, redact_secrets
@@ -200,11 +200,6 @@ def _ask_model(client: ReviewLlmClient, model: str, trace_context: TraceContext 
     return choice.message
 
 
-# Groq's 400 "tool_use_failed": the model called a tool the request did not allow.
-def _is_tool_use_failed(exc: Exception) -> bool:
-    return getattr(exc, "status_code", None) == 400 and "tool_use_failed" in str(exc)
-
-
 # Asks models[0]; a 429 the client gave up on (spent quota, retries used) moves the conversation to the next model.
 def _ask_with_fallback(client: ReviewLlmClient, models: list[str], agent_name: str,
                        trace_context: TraceContext | None, *request_args):
@@ -245,7 +240,7 @@ def _converse(spec: AgentSpec, prompt: str, client: ReviewLlmClient, tool_contex
             message = _ask_with_fallback(client, models, spec.name, trace_context, usage, messages, tool_schemas, tool_choice)
         except Exception as exc:
             # gpt-oss sometimes calls a tool under tool_choice="none" and Groq rejects that answer: remind it once.
-            if tool_choice != "none" or reminded or not _is_tool_use_failed(exc):
+            if tool_choice != "none" or reminded or not is_tool_use_failed(exc):
                 raise
             logger.warning("%s called a tool after the limit, asking once more for the final answer", spec.name)
             messages.append({"role": "user", "content": TOOLS_CLOSED_REMINDER})

@@ -85,6 +85,11 @@ def is_quota_exhausted(error: str | BaseException | None) -> bool:
     return message.startswith(QUOTA_EXHAUSTED) or bool(DAILY_LIMIT.search(message)) or (delay or 0) > MAX_PROVIDER_WAIT_S
 
 
+# Groq's 400 "tool_use_failed": the model called a tool the request did not allow.
+def is_tool_use_failed(exc: BaseException) -> bool:
+    return getattr(exc, "status_code", None) == 400 and "tool_use_failed" in str(exc)
+
+
 # A request bigger than the model's per-minute token limit (413): no retry or wait can make it fit.
 def is_request_too_large(error: str | BaseException | None) -> bool:
     if error is None:
