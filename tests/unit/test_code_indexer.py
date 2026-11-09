@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 
-from rag.code_indexer import build_index
-from rag.index_writer import INDEXER_SCHEMA_VERSION, write_index
+from code_index.code_indexer import build_index
+from code_index.index_writer import INDEXER_SCHEMA_VERSION, write_index
 
 
 SERVICE = '''def login(name):

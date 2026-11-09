@@ -18,7 +18,7 @@ description: Decide where new code, tests and docs go and how to name them, so e
 | `review/agents/` | The review agents | `agent_runner.py` (executes any agent), `prompt_assembler.py`, shared `prompts/`, and one folder per category |
 | `review/agents/<category>/` | One review agent | `agent.py`, `prompts/NN_topic.md`, `rules.py`, `examples.json`, `tools/` (`toolset.py` + one `find_*.py` per tool only this agent uses, + a role-named helper shared by those tools, e.g. `python_source_scan.py`) |
 | `review/agents/tools/` | Read-only tools shared by agents | `tool_definition.py` (Tool, ToolContext, safe execution), one module per tool family |
-| `rag/` | Code indexing | The Postgres indexer (`file_classifier.py`, `symbol_extractor.py`, `call_resolver.py`, `code_indexer.py`, `index_writer.py`), and the legacy NetworkX graph the agent tools read (`ast_parser.py`, `knowledge_graph.py`, `ingestion.py`) until they use Postgres |
+| `code_index/` | Code indexing | The Postgres indexer (`file_classifier.py`, `symbol_extractor.py`, `call_resolver.py`, `code_indexer.py`, `index_writer.py`), and the legacy NetworkX graph the agent tools read (`ast_parser.py`, `knowledge_graph.py`, `ingestion.py`) until they use Postgres |
 | `tools/` | External service clients | One module per service: `github_tools.py` and so on |
 | `db/` | Storage adapters | `postgres.py` (connection pool), `migration_runner.py`, `migrations/NNN_description.sql` |
 | `eval/` | Quality measurement | Benchmarks and harnesses. Data goes in `eval/dataset/`, outputs in `eval/results/` |

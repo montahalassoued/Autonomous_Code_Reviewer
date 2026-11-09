@@ -136,7 +136,7 @@ Validated in tests/unit/test_pipeline_offline.py.
 
 `file::name` made two classes' `__init__` in one file collide (Chroma
 rejects duplicate ids in one upsert), and nested defs were indexed
-twice. `rag/ast_parser.py` now emits `qualified_name` ("Class.method"),
+twice. `code_index/ast_parser.py` now emits `qualified_name` ("Class.method"),
 keeps nested defs inside their parent only, and suffixes a repeated
 name in one file ("#2", e.g. a property setter). Graph nodes, Chroma
 ids and `all_ids` all use this id; call resolution still uses the
@@ -383,7 +383,7 @@ in the image, one Gemini call per function at every worker start, up to 6 extra
 Groq calls per review, and a second pipeline to maintain. It is removed:
 `START` fans out straight to the three agents, which get the diff, a
 `review_context` that stays empty until the Phase 4 context builder fills it,
-and their bounded tools. `rag/ingestion.py` now only clones, parses with
+and their bounded tools. `code_index/ingestion.py` now only clones, parses with
 tree-sitter and builds the NetworkX call graph the graph tools read.
 Alternatives: keep the legacy path for the A/B (rigorous, but measures a buggy
 baseline and keeps both costs for weeks), or remove only the Gemini chunker
@@ -419,7 +419,7 @@ rename) is deferred to multi-repo support.
 
 The `edges` table feeds the context builder: a false "caller" wastes the token
 budget and misleads the agents, a missing one is listed as "Not verifiable".
-`rag/call_resolver.py` therefore links a call only when one target is certain,
+`code_index/call_resolver.py` therefore links a call only when one target is certain,
 in the documented order: `self`/`cls` methods (also on repo base classes), the
 imported name (relative imports, aliases, re-exports through `__init__.py`, a
 `src/` layout), the same file, then a name unique in the repo. Two candidates
@@ -433,9 +433,9 @@ def count for the enclosing function. A file with a syntax
 error or not in UTF-8 keeps its `files` row with a `parse_error` and no symbols.
 Phase 4 writes a full index (delete the repo's files, cascade, insert) in one
 transaction with `indexed_sha` written last; the incremental upsert that keeps
-symbol ids is Phase 6. The old `rag/ast_parser.py` + NetworkX graph stays until
+symbol ids is Phase 6. The old `code_index/ast_parser.py` + NetworkX graph stays until
 the agent tools read Postgres, so both parsers exist for a while. Alternatives:
-the bare-name matching of `rag/knowledge_graph.py` (links every same-named
+the bare-name matching of `code_index/knowledge_graph.py` (links every same-named
 function, V6), or a type checker such as pyright (precise, but a Node runtime
 and seconds per file). Trade-off: lower recall on dynamic code, which the
 context marks as not verifiable instead of guessing. On this repo: 97 Python

@@ -65,7 +65,7 @@ def github_client() -> Github:
     return Github(auth=Auth.Token(token))
 
 
-# The token git clones with: the installation's under the App; None lets git use GITHUB_TOKEN (rag/ingestion.py).
+# The token git clones with: the installation's under the App; None lets git use GITHUB_TOKEN (code_index/ingestion.py).
 def git_token(installation_id: int | None) -> str | None:
     if github_app_configured() and installation_id is not None:
         return _installation_client(installation_id)[1].token

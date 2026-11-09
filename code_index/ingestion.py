@@ -5,10 +5,10 @@ import re
 import git
 import networkx as nx
 
-from rag.ast_parser import parse_file, ParsedFunction
-from rag.file_classifier import SKIPPED_DIRS
-from rag.code_indexer import build_index
-from rag.knowledge_graph import build_resolved_graph
+from code_index.ast_parser import parse_file, ParsedFunction
+from code_index.file_classifier import SKIPPED_DIRS
+from code_index.code_indexer import build_index
+from code_index.knowledge_graph import build_resolved_graph
 
 
 GITHUB_HTTPS = "https://github.com/"

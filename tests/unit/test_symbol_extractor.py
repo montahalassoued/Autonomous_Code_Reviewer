@@ -1,4 +1,4 @@
-from rag.symbol_extractor import MODULE_SYMBOL, CallSite, ImportedName, extract_module, module_name_of
+from code_index.symbol_extractor import MODULE_SYMBOL, CallSite, ImportedName, extract_module, module_name_of
 
 
 SERVICE_SOURCE = '''import bcrypt

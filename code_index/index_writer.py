@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from rag.code_indexer import CodeIndex
+from code_index.code_indexer import CodeIndex
 
 
 # Bump when the indexer stores something new: a mismatch with repos.schema_version triggers a full rebuild.

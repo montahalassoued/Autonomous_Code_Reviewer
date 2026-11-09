@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from rag.ast_parser import parse_file
-from rag.knowledge_graph import build_knowledge_graph
+from code_index.ast_parser import parse_file
+from code_index.knowledge_graph import build_knowledge_graph
 from review.agents.agent_runner import EMPTY_CONTEXT_SUMMARY
 from review.graph import REVIEW_AGENTS, ReviewAgentsUnavailable, build_graph
 

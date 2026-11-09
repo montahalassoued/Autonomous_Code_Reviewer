@@ -1,6 +1,6 @@
 ---
 name: clean-code
-description: Write clear, readable Python code with comments that anyone can understand. Use whenever writing new code, editing existing code, or refactoring in this project (review/, rag/, tools/, app/, tests/, eval/).
+description: Write clear, readable Python code with comments that anyone can understand. Use whenever writing new code, editing existing code, or refactoring in this project (review/, code_index/, tools/, app/, tests/, eval/).
 ---
 
 # Clean, readable code

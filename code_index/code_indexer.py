@@ -4,9 +4,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from rag.call_resolver import Resolution, resolve_repository
-from rag.file_classifier import MAX_TEXT_FILE_BYTES, SKIPPED_DIRS, language_of
-from rag.symbol_extractor import ParsedModule, extract_module
+from code_index.call_resolver import Resolution, resolve_repository
+from code_index.file_classifier import MAX_TEXT_FILE_BYTES, SKIPPED_DIRS, language_of
+from code_index.symbol_extractor import ParsedModule, extract_module
 
 
 MAX_PYTHON_FILE_BYTES = 1_000_000
@@ -79,12 +79,12 @@ def _head_sha(repo_path: str) -> str:
     return git.Repo(repo_path).head.commit.hexsha
 
 
-# Full index of one checkout into Postgres: python -m rag.code_indexer --repo owner/name --repo-path ./target_repo
+# Full index of one checkout into Postgres: python -m code_index.code_indexer --repo owner/name --repo-path ./target_repo
 def main() -> None:
     import psycopg
 
     from db.postgres import database_url
-    from rag.index_writer import write_index
+    from code_index.index_writer import write_index
 
     parser = argparse.ArgumentParser(description="Index a repository checkout into the Postgres code index.")
     parser.add_argument("--repo", required=True, help="GitHub full name, e.g. owner/name")

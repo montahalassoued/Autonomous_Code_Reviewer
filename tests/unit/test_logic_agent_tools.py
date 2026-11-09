@@ -1,7 +1,7 @@
 import pytest
 
-from rag.ast_parser import parse_file
-from rag.knowledge_graph import build_knowledge_graph
+from code_index.ast_parser import parse_file
+from code_index.knowledge_graph import build_knowledge_graph
 from review.agents.logic.agent import LOGIC_AGENT
 from review.agents.logic.tools.find_call_sites import find_call_sites
 from review.agents.logic.tools.find_return_values import find_return_values

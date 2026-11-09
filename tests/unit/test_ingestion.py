@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from rag.ingestion import ingest_repository
+from code_index.ingestion import ingest_repository
 
 
 AUTH_FILE = '''def hash_password(password):
@@ -90,7 +90,7 @@ def make_remote(tmp_path):
 
 
 def test_each_commit_is_checked_out_in_its_own_folder(tmp_path):
-    from rag.ingestion import checkout_commit
+    from code_index.ingestion import checkout_commit
 
     remote_url, (first, second) = make_remote(tmp_path)
     root = str(tmp_path / "checkouts")
@@ -108,7 +108,7 @@ def test_each_commit_is_checked_out_in_its_own_folder(tmp_path):
 def test_a_repo_name_or_sha_from_the_webhook_is_validated_before_git_runs(tmp_path):
     import pytest
 
-    from rag.ingestion import checkout_commit
+    from code_index.ingestion import checkout_commit
 
     for name, sha in (("../../etc", "a" * 40), ("owner/..", "a" * 40), ("owner/repo", "--upload-pack=evil"),
                       ("owner/repo", "main")):
@@ -120,7 +120,7 @@ def test_a_repo_name_or_sha_from_the_webhook_is_validated_before_git_runs(tmp_pa
 def test_a_token_reaches_git_as_a_header_for_github_only(monkeypatch):
     import base64
 
-    from rag.ingestion import git_auth_environment
+    from code_index.ingestion import git_auth_environment
 
     env = git_auth_environment("https://github.com/owner/private.git", token="ghs_installation")
     expected = base64.b64encode(b"x-access-token:ghs_installation").decode()
@@ -130,7 +130,7 @@ def test_a_token_reaches_git_as_a_header_for_github_only(monkeypatch):
 
 
 def test_no_token_or_another_host_clones_without_a_header(monkeypatch):
-    from rag.ingestion import git_auth_environment
+    from code_index.ingestion import git_auth_environment
 
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     assert git_auth_environment("https://github.com/owner/public.git") == {}

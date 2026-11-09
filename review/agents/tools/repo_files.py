@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from rag.file_classifier import SKIPPED_DIRS, is_secret_file
+from code_index.file_classifier import SKIPPED_DIRS, is_secret_file
 from review.agents.tools.tool_definition import Tool, ToolContext
 
 

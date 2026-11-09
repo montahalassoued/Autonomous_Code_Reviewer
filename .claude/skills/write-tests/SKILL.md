@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: Write pytest tests for this project following its conventions (integration vs unit tests, mocking Groq/GitHub, .env isolation). Use when adding or fixing tests in tests/, or after implementing new code in review/, rag/, tools/, app/.
+description: Write pytest tests for this project following its conventions (integration vs unit tests, mocking Groq/GitHub, .env isolation). Use when adding or fixing tests in tests/, or after implementing new code in review/, code_index/, tools/, app/.
 ---
 
 # Writing tests

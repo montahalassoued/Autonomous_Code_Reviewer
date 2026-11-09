@@ -35,7 +35,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH" \
     PORT=8000
 
-# git is required by rag/ingestion.py (GitPython clones TARGET_REPO_URL).
+# git is required by code_index/ingestion.py (it fetches each reviewed commit).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*

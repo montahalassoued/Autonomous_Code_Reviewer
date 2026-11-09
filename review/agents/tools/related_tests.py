@@ -1,4 +1,4 @@
-from rag.file_classifier import is_test_file
+from code_index.file_classifier import is_test_file
 from review.agents.tools.repo_files import search_lines
 from review.agents.tools.tool_definition import Tool, ToolContext
 

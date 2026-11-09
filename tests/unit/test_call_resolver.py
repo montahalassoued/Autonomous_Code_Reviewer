@@ -1,5 +1,5 @@
-from rag.call_resolver import Edge, UnresolvedCall, resolve_repository
-from rag.symbol_extractor import extract_module
+from code_index.call_resolver import Edge, UnresolvedCall, resolve_repository
+from code_index.symbol_extractor import extract_module
 
 
 MODELS = '''class Base:

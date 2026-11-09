@@ -1,8 +1,8 @@
 import builtins
 from dataclasses import dataclass, field
 
-from rag.file_classifier import is_test_file
-from rag.symbol_extractor import MODULE_SYMBOL, CallSite, ImportedName, ParsedModule, ParsedSymbol
+from code_index.file_classifier import is_test_file
+from code_index.symbol_extractor import MODULE_SYMBOL, CallSite, ImportedName, ParsedModule, ParsedSymbol
 
 
 BUILTIN_NAMES = frozenset(dir(builtins))

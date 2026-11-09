@@ -32,7 +32,7 @@ class RepoCheckouts:
 
     def __init__(self, root: str, token_for: Callable[[ReviewJob], str | None] = lambda job: None,
                  checkout: Callable[..., str] | None = None, build_graph: Callable[[str], object] | None = None) -> None:
-        from rag.ingestion import checkout_commit, ingest_repository  # heavy imports stay out of module import time
+        from code_index.ingestion import checkout_commit, ingest_repository  # heavy imports stay out of module import time
 
         self._root, self._token_for = root, token_for
         self._checkout = checkout or checkout_commit

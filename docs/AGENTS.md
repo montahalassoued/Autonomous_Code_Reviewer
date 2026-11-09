@@ -1,7 +1,7 @@
 # Agents
 
 **File purpose:** what each node of the LangGraph review pipeline does, and how the three review agents share one runner.
-**Target design:** [ARCHITECTURE.md](ARCHITECTURE.md). Retrieval details: [RAG.md](RAG.md).
+**Target design:** [ARCHITECTURE.md](ARCHITECTURE.md). Retrieval details: [CODE_INDEX.md](CODE_INDEX.md).
 
 ## Graph
 
@@ -59,7 +59,7 @@ The implementations shared by several agents (and later by the context subagent)
 
 ## Context
 
-There is no retriever node any more: `START` fans out straight to the three agents. `review_context` stays empty until the Phase 4 context builder fills it, so the prompt tells the agents to use their tools to look outside the diff; see [RAG.md](RAG.md).
+There is no retriever node any more: `START` fans out straight to the three agents. `review_context` stays empty until the Phase 4 context builder fills it, so the prompt tells the agents to use their tools to look outside the diff; see [CODE_INDEX.md](CODE_INDEX.md).
 
 ## Synthesizer (`review/synthesizer.py`)
 

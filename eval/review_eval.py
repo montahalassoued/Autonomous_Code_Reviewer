@@ -17,7 +17,7 @@ from eval.review_harness.case_builder import FIXTURE_REPO, REVIEW_CASES, load_re
 from eval.review_harness.recorded_client import RecordedGroq
 from eval.review_harness.review_report import format_review_markdown, summarize_review_records
 from eval.review_harness.review_scoring import failed_review, score_review
-from rag.ingestion import ingest_repository
+from code_index.ingestion import ingest_repository
 from review.agents.agent_runner import agent_model, build_groq_client, fallback_agent_model
 from review.agents.logic import agent as logic_agent
 from review.agents.quality import agent as quality_agent

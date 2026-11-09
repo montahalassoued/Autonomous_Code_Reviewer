@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser, Node
 
-from rag.symbol_extractor import NESTED_SCOPE_TYPES
+from code_index.symbol_extractor import NESTED_SCOPE_TYPES
 
 
 PY_LANGUAGE = Language(tspython.language())

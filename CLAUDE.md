@@ -27,7 +27,7 @@ These rules override any skill or subagent instruction that says otherwise.
 ```text
 app/        api/ (HTTP routers) · jobs/ (queue, dedupe, trigger policy) · main.py (API) · worker.py · bootstrap.py · repo_checkouts.py (the job's repo at its commit)
 review/     graph.py (LangGraph orchestrator) · state.py · synthesizer.py · llm_client.py (Groq calls: timeout, retries, concurrency limit, review deadline) · review_tracing.py (Langfuse) · untrusted_input.py + injection_detector.py (prompt-injection defenses) · output_sanitizer.py + secret_redactor.py (what may be posted) · finding_locator.py (line from the quoted evidence) · finding_merger.py (one finding per problem) · agents/ (agent_runner.py, prompt_assembler.py, prompts/ shared, tools/ shared, one folder per agent: security/ logic/ quality/ with agent.py, prompts/*.md, rules.py, examples.json, tools/ (toolset.py + one file per own tool))
-rag/        Postgres indexer: file_classifier · symbol_extractor · call_resolver · code_indexer (CLI) · index_writer; worker path today: ast_parser · knowledge_graph · ingestion (NetworkX graph built at worker start with call edges from call_resolver, read by the agent tools until they use Postgres)
+code_index/        Postgres indexer: file_classifier · symbol_extractor · call_resolver · code_indexer (CLI) · index_writer; worker path today: ast_parser · knowledge_graph · ingestion (NetworkX graph built at worker start with call edges from call_resolver, read by the agent tools until they use Postgres)
 tools/      external service clients (GitHub: github_tools.py, github_auth.py for App or token credentials)       db/      postgres.py · migration_runner.py · migrations/*.sql
 eval/       llm_benchmark.py (CLI) · benchmark/ (dataset schema, scoring, metrics, report, call cache) · review_eval.py (CLI) · review_harness/ (case builder, recorded client, review scoring and report) · fixtures/review_repo/ · dataset/ · results/   infra/   Azure setup · gateway/ (Nginx reverse proxy in front of the API in compose)
 tests/      unit/ (offline, CI) · integration/ (real APIs, manual) · conftest.py
@@ -70,13 +70,13 @@ Copy `.env.example` to `.env`. You need `GROQ_API_KEY`, `GITHUB_WEBHOOK_SECRET`,
 - **Tests:** `tests/unit/` (offline, mocked, run in CI) and `tests/integration/` (real APIs, auto-marked `integration`). Use the `write-tests` skill.
 - **Architecture decisions** go in `docs/DECISIONS.md`. Use the `log-decision` skill.
 - **Commits** are a single title line `type(scope): summary` with no Co-Authored-By or Claude attribution. Use the `commit-message` skill. A hook enforces this.
-- Build order and status: `docs/PROGRESS.md`. Deeper docs: `docs/ARCHITECTURE.md`, `docs/RAG.md`, `docs/AGENTS.md`.
+- Build order and status: `docs/PROGRESS.md`. Deeper docs: `docs/ARCHITECTURE.md`, `docs/CODE_INDEX.md`, `docs/AGENTS.md`.
 
 ## Gotchas
 
 - The routing functions in `review/graph.py` return real node names. `add_conditional_edges` must **not** get a mapping dict when fanning out to a list.
 - The graph is forward-only. Domain agents point to `join_agents`, which goes straight to `synthesizer`. Never add an edge back to the agents after `join_agents`, because the old supervisor loop never terminated on clean PRs.
-- Call-graph node ids are `file::Class.method` (`_node_id` in `rag/knowledge_graph.py`), with a `#2` suffix from `rag/ast_parser.py` for duplicate names. Never build ids by hand.
+- Call-graph node ids are `file::Class.method` (`_node_id` in `code_index/knowledge_graph.py`), with a `#2` suffix from `code_index/ast_parser.py` for duplicate names. Never build ids by hand.
 - Implementation roadmap: `docs/IMPLEMENTATION_PLAN.md` (Phase 0 is done). What is built today: `docs/PROGRESS.md`.
 - Langfuse tracing is forced off in `tests/conftest.py` (`LANGFUSE_TRACING_ENABLED=false`), because the real `.env` may hold keys; tracing tests swap in a fake client.
 - Tests that set env vars must **force** them (`os.environ[...] = ...`), not use `setdefault`, because other tests `load_dotenv()` the real `.env`.

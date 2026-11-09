@@ -1,7 +1,11 @@
-# Retrieval
+# Code index and retrieval
 
-**File purpose:** what retrieval does in the reviewer, before and after the structural-context redesign.
+**File purpose:** how the reviewer finds the code around a change (`code_index/`), and why it is not classic RAG.
 **Target design:** [ARCHITECTURE.md](ARCHITECTURE.md) (code index, context assembly, context subagent).
+
+## Why not classic RAG
+
+Classic RAG embeds documents, stores them in a vector database and pastes the top-k most *similar* chunks into the prompt. A review asks about *relationships* instead: who calls this function, which test imports it, which guard protects this endpoint. Those answers are exact, and they are rarely similar text. So retrieval here is structural: `code_index/` parses each reviewed commit with tree-sitter into symbols and resolved call edges (no LLM, no embedding), and the agents query it through read-only tools (`find_callers`, `find_tests`, `read_file`, ...), which makes it agentic retrieval. The folder was called `rag/` while it held the removed semantic pipeline.
 
 ## New role of retrieval
 
@@ -24,8 +28,8 @@ The semantic pipeline (Gemini context sentences, Voyage embeddings in ChromaDB, 
 
 Until the Phase 4 context builder exists:
 
-1. The worker clones the target repo and parses it with tree-sitter (`rag/ast_parser.py`, via `rag/ingestion.py`). No LLM or embedding call.
-2. It builds an in-memory NetworkX call graph (`rag/knowledge_graph.py`), read by the agents' graph tools (`find_callers`, `find_callees`, `find_return_values`, `find_similar_functions`).
+1. The worker clones the target repo and parses it with tree-sitter (`code_index/ast_parser.py`, via `code_index/ingestion.py`). No LLM or embedding call.
+2. It builds an in-memory NetworkX call graph (`code_index/knowledge_graph.py`), read by the agents' graph tools (`find_callers`, `find_callees`, `find_return_values`, `find_similar_functions`).
 3. The agents get the diff, an empty `review_context`, and their bounded read-only tools to look at the checkout and the graph ([AGENTS.md](AGENTS.md)).
 
 **Why similarity was the wrong signal:** a caller that breaks when a signature changes is rarely textually similar to the change, and module-level code (router dependencies, middleware) was not indexed at all.

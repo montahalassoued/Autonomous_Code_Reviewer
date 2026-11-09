@@ -1,6 +1,6 @@
 from typing import Callable, Iterator
 
-from rag.file_classifier import is_test_file
+from code_index.file_classifier import is_test_file
 from review.agents.tools.repo_files import MAX_SEARCH_HITS, iter_repo_files, resolve_inside_repo, under_prefix
 from review.agents.tools.tool_definition import ToolContext
 

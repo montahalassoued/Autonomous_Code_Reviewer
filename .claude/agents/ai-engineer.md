@@ -44,7 +44,7 @@ Target:       Postgres index of main → deterministic context builder fills rev
 | LLM text is posted raw and unbounded | `review/synthesizer.py`, `tools/github_tools.py` | Mentions, links or broken Markdown in a public comment; a 422 over 65,536 chars |
 | `file_path` / `line_number` are not checked against the diff | `agent_runner.py` `to_finding` | Invented locations are posted; blocks the inline review |
 | The tools read `main` cloned at worker start, not the PR head | `app/bootstrap.py`, `review/agents/tools/` | Files added by the PR are missing; line numbers can differ |
-| Call resolution by bare name creates false edges | `rag/knowledge_graph.py` | `find_callers` can show functions that don't really call the target |
+| Call resolution by bare name creates false edges | `code_index/knowledge_graph.py` | `find_callers` can show functions that don't really call the target |
 | Only a model benchmark exists (`eval/llm_benchmark.py`), not a full review eval | `eval/` | Prompt and context changes can't be measured end to end yet |
 
 ## When invoked

@@ -20,7 +20,7 @@ MAX_TOOL_OUTPUT_CHARS = 4000
 @dataclass(frozen=True)
 class ToolContext:
     repo_root: Path | None = None
-    code_graph: Any = None  # networkx.DiGraph from rag/knowledge_graph.py, until the Postgres edges table
+    code_graph: Any = None  # networkx.DiGraph from code_index/knowledge_graph.py, until the Postgres edges table
 
 
 # A read-only tool an agent may call: its JSON schema for the model, and the function that runs it.

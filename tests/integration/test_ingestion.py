@@ -2,7 +2,7 @@ import os
 
 import git
 
-from rag.ingestion import checkout_commit
+from code_index.ingestion import checkout_commit
 
 
 # A tiny, stable public repo - fast to fetch, unlikely to ever disappear.

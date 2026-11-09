@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from db.migration_runner import apply_migrations  # noqa: E402 - .env must be loaded before DATABASE_URL is read
-from rag.code_indexer import build_index  # noqa: E402
-from rag.index_writer import write_index  # noqa: E402
+from code_index.code_indexer import build_index  # noqa: E402
+from code_index.index_writer import write_index  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="needs DATABASE_URL (docker compose up postgres)")
 

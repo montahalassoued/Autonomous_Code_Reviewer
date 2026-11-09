@@ -1,6 +1,6 @@
 import networkx as nx
-from rag.ast_parser import ParsedFunction
-from rag.call_resolver import Edge
+from code_index.ast_parser import ParsedFunction
+from code_index.call_resolver import Edge
 
 
 # Builds a unique node identifier for a function.
@@ -49,7 +49,7 @@ def build_knowledge_graph(functions: list[ParsedFunction]) -> nx.DiGraph:
     return graph
 
 
-# The worker's graph: function nodes, with only the call edges rag/call_resolver.py proved, not every same-named function.
+# The worker's graph: function nodes, with only the call edges code_index/call_resolver.py proved, not every same-named function.
 def build_resolved_graph(functions: list[ParsedFunction], edges: list[Edge]) -> nx.DiGraph:
     graph = nx.DiGraph()
     for fn in functions:

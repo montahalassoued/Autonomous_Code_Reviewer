@@ -28,7 +28,7 @@ Full description: [ARCHITECTURE.md](ARCHITECTURE.md). In short:
 
 ## Verified problems the plan fixes
 
-Status (2026-10-18): V1, V2 and V8 were fixed in Phase 0. V3, V4 and V7 disappeared with the semantic retrieval, and the files they name no longer exist. V5 is fixed except `self.x()` calls, V6 is fixed for the worker (its call graph takes only the edges `rag/call_resolver.py` proves; the bare-name builder remains for small tool tests), V10 is fixed, and V12 is fixed (offline graph tests).
+Status (2026-10-18): V1, V2 and V8 were fixed in Phase 0. V3, V4 and V7 disappeared with the semantic retrieval, and the files they name no longer exist. V5 is fixed except `self.x()` calls, V6 is fixed for the worker (its call graph takes only the edges `code_index/call_resolver.py` proves; the bare-name builder remains for small tool tests), V10 is fixed, and V12 is fixed (offline graph tests).
 
 | # | Problem | Where |
 |---|---|---|
@@ -36,9 +36,9 @@ Status (2026-10-18): V1, V2 and V8 were fixed in Phase 0. V3, V4 and V7 disappea
 | V2 | Empty retrieval after 3 attempts loops back to the retriever the same way | `review/graph.py:77-78`, `:90-95` |
 | V3 | Agents get no code: Chroma stores code only in `documents`, and `retriever.py` reads `metadata["code"]` | `db/chroma.py:78-92`, `rag/hybrid_search.py:173-174`, `review/retriever.py:80` |
 | V4 | The reranker and the judge see only names, and the reranker duplicates the best chunk | `rag/reranker.py:86`, `:151`; `review/retriever.py:100-103` |
-| V5 | Parser: decorators are excluded, nested defs are double-counted, methods aren't class-qualified, `self.x()` calls are ignored | `rag/ast_parser.py:61-122` |
-| V6 | Call resolution by bare name creates false edges | `rag/knowledge_graph.py:70-86` |
-| V7 | Full re-ingest on every startup, with no deletes, no 429 retry and one unbatched Voyage call | `rag/ingestion.py`, `app/main.py:70-72`, `rag/contextual_chunker.py:79-84`, `rag/embedder.py:64` |
+| V5 | Parser: decorators are excluded, nested defs are double-counted, methods aren't class-qualified, `self.x()` calls are ignored | `code_index/ast_parser.py:61-122` |
+| V6 | Call resolution by bare name creates false edges | `code_index/knowledge_graph.py:70-86` |
+| V7 | Full re-ingest on every startup, with no deletes, no 429 retry and one unbatched Voyage call | `code_index/ingestion.py`, `app/main.py:70-72`, `rag/contextual_chunker.py:79-84`, `rag/embedder.py:64` |
 | V8 | `message.content` can be None, which crashes `.strip()`, and the decomposer accepts `[]` | `rag/query_decomposer.py:84,91`, `review/retriever.py:112`, `review/agents/security_agent.py:119,199` |
 | V10 | Webhook: no dedupe, no head SHA, no error handling, no repo guard, PR only, a new comment each time | `app/api/webhook.py:98-171`, `tools/github_tools.py:88` |
 | V12 | No test of the graph routing or of what the agents actually receive. Most tests make real API calls | `tests/` |
@@ -59,8 +59,8 @@ Kept for history: the retriever, Chroma and reranker items below refer to code r
 - **Real code reaches the agents**
   - `db/chroma.py`: store `code` and `qualified_name` in the metadata.
   - `graph_retriever._node_to_metadata`: add `code`.
-  - `rag/ingestion.py`: delete stale ids after each upsert.
-- **Chunk identity** (`rag/ast_parser.py`)
+  - `code_index/ingestion.py`: delete stale ids after each upsert.
+- **Chunk identity** (`code_index/ast_parser.py`)
   - Emit `qualified_name` (`Class.method`).
   - Include decorators in the chunk.
   - Don't recurse into function bodies.

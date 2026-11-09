@@ -1,4 +1,4 @@
-from rag.file_classifier import is_secret_file, is_test_file, language_of
+from code_index.file_classifier import is_secret_file, is_test_file, language_of
 
 
 def test_test_files_are_recognized():
