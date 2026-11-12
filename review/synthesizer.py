@@ -109,6 +109,22 @@ def review_label(finding: Finding) -> str:
     return label
 
 
+# A serious claim its own agent is unsure of: shown under "Worth a look", never counted as a finding.
+# A small remark with low confidence (a missing test) stays where it is, since it cannot alarm anyone.
+def is_unconfirmed(finding: Finding) -> bool:
+    return finding.get("confidence") == "low" and SEVERITY_ORDER.get(finding["severity"], len(SEVERITY_ORDER)) <= SEVERITY_ORDER["MEDIUM"]
+
+
+UNCONFIRMED_NOTE = ("The reviewers were not sure about these: each depends on code they could not check. "
+                    "They are not counted as findings and never block the merge.")
+
+
+# Unconfirmed claims, folded at the end so they never bury the confirmed findings.
+def _format_unconfirmed_section(findings: list[Finding], diff_lines: DiffLines) -> str:
+    return (f"### 🔍 Worth a look ({len(findings)})\n\n{UNCONFIRMED_NOTE}\n\n"
+            f"<details>\n<summary>{len(findings)} unconfirmed finding(s)</summary>\n\n{_join_findings(findings, diff_lines)}\n\n</details>")
+
+
 # Added + removed lines in a unified diff (file headers excluded).
 def _count_changed_lines(diff: str) -> int:
     return sum(
@@ -190,7 +206,8 @@ def _format_category_section(category: str, findings: list[Finding], diff_lines:
 
 # The findings that fit in the comment, blocking first: whatever is left out is counted, never cut mid-Markdown.
 def _findings_within_budget(findings: list[Finding], diff_lines: DiffLines, budget_chars: int) -> list[Finding]:
-    ranked = sorted(findings, key=lambda f: (LABEL_ORDER[review_label(f)], SEVERITY_ORDER.get(f["severity"], len(SEVERITY_ORDER))))
+    ranked = sorted(findings, key=lambda f: (is_unconfirmed(f), LABEL_ORDER[review_label(f)],
+                                             SEVERITY_ORDER.get(f["severity"], len(SEVERITY_ORDER))))
     kept, used = [], 0
     for finding in ranked:
         size = len(_format_finding(finding, diff_lines)) + 10
@@ -252,7 +269,10 @@ def _format_injection_note(signals: list) -> str | None:
 
 # LangGraph node: findings -> final review comment.
 def synthesizer_node(state: ReviewState) -> dict:
-    findings = mark_unchanged_code(merge_cross_agent_findings(state["findings"]), state["pr_diff"])
+    merged = mark_unchanged_code(merge_cross_agent_findings(state["findings"]), state["pr_diff"])
+    findings = [finding for finding in merged if not is_unconfirmed(finding)]
+    unconfirmed = [finding for finding in merged if is_unconfirmed(finding)]
+    diff_lines = commentable_lines(state["pr_diff"], state.get("changed_files") or ())
     failed_agents = state.get("failed_agents") or []
     unreviewed = state.get("unreviewed_files") or []
     injection_signals = detect_injection(state["pr_diff"])
@@ -263,25 +283,31 @@ def synthesizer_node(state: ReviewState) -> dict:
 
     if not findings:
         reviewed = [CATEGORY_TITLES[agent].split(" ", 1)[1].lower() for agent in CATEGORY_TITLES if agent not in failed_agents]
-        clean = f"No issues found by the {', '.join(reviewed)} review(s)."
+        clean = f"No {'confirmed ' if unconfirmed else ''}issues found by the {', '.join(reviewed)} review(s)."
         if injection_signals:
             clean = f"{NEEDS_HUMAN_REVIEW} {clean}"
-        elif not (failed_agents or unreviewed):
+        elif not (failed_agents or unreviewed or unconfirmed):
             clean += " Nice work! ✅"
         sections = [REVIEW_HEADING, clean, *notes]
+        if unconfirmed:
+            sections.append(_format_unconfirmed_section(unconfirmed, diff_lines))
         return {"final_review_markdown": "\n\n".join(sections) + "\n", "posted_findings": []}
 
-    diff_lines = commentable_lines(state["pr_diff"], state.get("changed_files") or ())
     groups = _group_by_category(findings)
     sections = [REVIEW_HEADING, _format_verdict(findings, bool(injection_signals)), *notes, _format_summary_table(groups)]
 
     # The verdict and the table count every finding; only the detailed sections are budgeted.
-    budget = COMMENT_BUDGET_CHARS - sum(len(section) for section in sections) - SECTION_OVERHEAD_CHARS * len(groups)
-    shown = {id(finding) for finding in _findings_within_budget(findings, diff_lines, budget)}
+    budget = (COMMENT_BUDGET_CHARS - sum(len(section) for section in sections)
+              - SECTION_OVERHEAD_CHARS * (len(groups) + bool(unconfirmed)) - len(UNCONFIRMED_NOTE))
+    # Unconfirmed claims are ranked last, so the size limit drops them before any confirmed finding.
+    shown = {id(finding) for finding in _findings_within_budget(findings + unconfirmed, diff_lines, budget)}
     for category, group in groups.items():
         visible = [finding for finding in group if id(finding) in shown]
         sections.append(_format_category_section(category, visible, diff_lines, len(group)))
-    hidden = len(findings) - len(shown)
+    visible_unconfirmed = [finding for finding in unconfirmed if id(finding) in shown]
+    if visible_unconfirmed:
+        sections.append(_format_unconfirmed_section(visible_unconfirmed, diff_lines))
+    hidden = len(findings) + len(unconfirmed) - len(shown)
     if hidden:
         sections.append(f"ℹ️ {hidden} more finding(s) not shown (GitHub comment size limit).")
 

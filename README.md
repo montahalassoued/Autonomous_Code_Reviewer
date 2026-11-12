@@ -26,7 +26,7 @@ A GitHub App that reviews every push and pull request on your repositories. Thre
 | What | Result |
 | --- | --- |
 | Model benchmark (30 cases, 3 runs) | gpt-oss-120b chosen, quality 0.99 |
-| 12 golden pull requests, whole reviews | recall 1.00, precision 0.50 (from 0.43), ~30k tokens per review |
+| 12 golden pull requests, whole reviews | recall 1.00, precision 0.59 (from 0.43), ~30k tokens per review |
 | CI regression gate | the 12 reviews are replayed on every push; a worse review fails the build |
 
 ## Quick start

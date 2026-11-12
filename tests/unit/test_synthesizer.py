@@ -131,8 +131,34 @@ def test_synthesizer_low_confidence_never_blocks():
 
     assert "[suggestion] CRITICAL - Maybe unprotected" in markdown
     assert "**Confidence:** low" in markdown
-    assert "Nothing blocking" in markdown
-    print("OK - a low-confidence CRITICAL is a suggestion, not a blocker")
+    assert "No confirmed issues found" in markdown and "⛔" not in markdown and "Nice work" not in markdown
+    print("OK - a low-confidence CRITICAL is shown as unconfirmed, never as a blocker or a clean review")
+
+
+# The real noise of the 12 golden PRs: idor HIGH/low and data_exposure MEDIUM/low were all false alarms.
+def test_a_serious_claim_with_low_confidence_goes_to_worth_a_look():
+    confirmed = make_finding("security", "HIGH", "SQL injection")
+    guess = {**make_finding("security", "HIGH", "Possible IDOR"), "confidence": "low"}
+    small = {**make_finding("quality", "LOW", "Missing test"), "confidence": "low"}
+
+    result = synthesizer_node(build_state([guess, confirmed, small]))
+    markdown = result["final_review_markdown"]
+
+    assert "⛔ **1 blocking issue(s)** to fix before merging, out of 2 finding(s)." in markdown
+    assert markdown.find("Missing test") < markdown.find("### 🔍 Worth a look (1)") < markdown.find("Possible IDOR")
+    assert [finding["title"] for finding in result["posted_findings"]] == ["SQL injection", "Missing test"]
+    assert "| 🔒 Security | - | 1 |" in markdown, "the table counts confirmed findings only"
+    print("OK - an unsure serious claim is shown at the end, not counted; a small unsure remark stays")
+
+
+def test_unconfirmed_claims_are_dropped_before_any_confirmed_finding_at_the_size_limit():
+    confirmed = [make_finding("logic", "MEDIUM", f"Real {i}", evidence="x" * 3000) for i in range(18)]
+    guesses = [{**make_finding("security", "HIGH", f"Guess {i}", evidence="y" * 3000), "confidence": "low"} for i in range(5)]
+
+    markdown = render(guesses + confirmed)
+
+    assert "Guess 0" not in markdown and "more finding(s) not shown" in markdown
+    print("OK - the comment size limit drops unconfirmed claims first")
 
 
 def test_synthesizer_verdict_when_nothing_blocks():

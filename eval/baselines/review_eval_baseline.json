@@ -202,7 +202,7 @@
       "blocking_noise": 0,
       "duplicates": 0,
       "forbidden": 0,
-      "noise": 2,
+      "noise": 0,
       "score": 1.0,
       "tp": 1,
       "tp_strict": 1
@@ -274,7 +274,7 @@
       "blocking_noise": 0,
       "duplicates": 0,
       "forbidden": 0,
-      "noise": 1,
+      "noise": 0,
       "score": 1.0,
       "tp": 1,
       "tp_strict": 1
@@ -435,7 +435,7 @@
   },
   "provenance": {
     "dataset_sha256": "d7e4843c2e28894f",
-    "git_commit": "74142c9",
+    "git_commit": "a5d8213",
     "models": {
       "logic": "openai/gpt-oss-120b",
       "quality": "openai/gpt-oss-120b",
