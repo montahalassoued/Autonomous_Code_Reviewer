@@ -307,10 +307,10 @@
       "tp_strict": 0
     },
     "sec_command_injection_export#run1#review": {
-      "blocking_noise": 4,
+      "blocking_noise": 3,
       "duplicates": 0,
       "forbidden": 0,
-      "noise": 4,
+      "noise": 3,
       "score": 1.0,
       "tp": 1,
       "tp_strict": 1
@@ -343,10 +343,10 @@
       "tp_strict": 0
     },
     "sec_missing_authorization_delete#run1#review": {
-      "blocking_noise": 2,
+      "blocking_noise": 1,
       "duplicates": 0,
       "forbidden": 0,
-      "noise": 3,
+      "noise": 2,
       "score": 1.0,
       "tp": 1,
       "tp_strict": 1
@@ -382,7 +382,7 @@
       "blocking_noise": 1,
       "duplicates": 0,
       "forbidden": 0,
-      "noise": 2,
+      "noise": 1,
       "score": 1.0,
       "tp": 1,
       "tp_strict": 1
@@ -435,7 +435,7 @@
   },
   "provenance": {
     "dataset_sha256": "d7e4843c2e28894f",
-    "git_commit": "264ae49",
+    "git_commit": "74142c9",
     "models": {
       "logic": "openai/gpt-oss-120b",
       "quality": "openai/gpt-oss-120b",

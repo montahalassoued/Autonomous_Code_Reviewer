@@ -101,3 +101,35 @@ def test_agents_on_different_lines_or_with_unrelated_rules_are_never_merged():
     assert len(merge_cross_agent_findings([injection, same_agent])) == 2, "one agent's own duplicates are merge_duplicate_findings' job"
     print("OK - only one line and a vague or paired rule make two agents' findings one")
 
+
+
+# The real review of sec_command_injection_export: logic described the injection's symptom on the same line.
+def test_a_logic_symptom_on_an_injection_line_folds_into_the_injection():
+    injection = finding(rule_id="command_injection", severity="HIGH", line_number=5, title="Command injection in export")
+    unquoted = finding(agent="logic", rule_id="wrong_api_usage", line_number=5, title="Filename not quoted in shell command")
+    quote = finding(agent="logic", rule_id="unhandled_edge_case", line_number=5, title="Fails when the name has a quote")
+
+    merged = merge_cross_agent_findings([unquoted, quote, injection])
+
+    assert [(f["agent"], f["rule_id"]) for f in merged] == [("security", "command_injection")], "at equal severity the cause wins"
+    assert "Also reported by the logic review as wrong_api_usage" in merged[0]["description"]
+    print("OK - one injection, one comment, named by its cause")
+
+
+# The real review of sec_missing_authorization_delete: logic called the missing admin check an unhandled role.
+def test_an_unchecked_role_and_a_missing_authentication_are_one_bug():
+    missing = finding(rule_id="missing_authentication", severity="CRITICAL", line_number=20)
+    role = finding(agent="logic", rule_id="missed_state", line_number=20, title="admin_delete_order does not enforce admin")
+
+    assert len(merge_cross_agent_findings([role, missing])) == 1
+    print("OK - logic's missed_state on an endpoint's auth line is the same bug")
+
+
+def test_a_symptom_rule_away_from_the_injection_or_without_one_stays():
+    injection = finding(rule_id="sql_injection", line_number=19)
+    elsewhere = finding(agent="logic", rule_id="unhandled_edge_case", line_number=23, title="Missing key raises KeyError")
+    beside_a_leak = finding(agent="logic", rule_id="unhandled_edge_case", line_number=19, title="Empty list")
+
+    assert len(merge_cross_agent_findings([injection, elsewhere])) == 2, "another line is another bug"
+    assert len(merge_cross_agent_findings([finding(rule_id="data_exposure", line_number=19), beside_a_leak])) == 2
+    print("OK - a symptom folds only into an injection on its own line")

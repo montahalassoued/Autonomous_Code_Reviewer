@@ -8,9 +8,13 @@ RELATED_RULE_GROUPS = (
     frozenset({"n_plus_one", "io_in_loop", "repeated_work_in_loop"}),
     frozenset({"unbounded_query", "whole_data_in_memory"}),
 )
-# Rules of two agents that describe one bug from each side: an inverted check is also a missing authorization.
+INJECTION_RULES = frozenset({"sql_injection", "nosql_injection", "command_injection", "code_injection", "template_injection"})
+# Logic rules that name what breaks, not why: on an injection's line, "fails with a quote" is the injection itself.
+SYMPTOM_RULES = frozenset({"unhandled_edge_case", "wrong_api_usage", "missed_state"})
+# Rules of two agents that describe one bug from each side: an inverted check or an unchecked role is also a missing authorization.
 CROSS_AGENT_RULE_GROUPS = (
-    frozenset({"wrong_condition", "missing_authorization", "missing_authentication"}),
+    frozenset({"wrong_condition", "missed_state", "missing_authorization", "missing_authentication"}),
+    INJECTION_RULES | {"unhandled_edge_case", "wrong_api_usage"},
 )
 # Findings this close are about the same statement or function (decorator, def and body lines).
 MAX_LINE_GAP = 5
@@ -51,9 +55,9 @@ def same_problem_across_agents(a: Finding, b: Finding) -> bool:
 
 
 def _merge(findings: list[Finding], is_duplicate, note) -> list[Finding]:
-    # A named rule beats "other", then the most severe and confident finding is kept.
+    # A named rule beats "other", then the most severe, then the cause over a symptom, then the most confident.
     ranked = sorted(findings, key=lambda finding: (finding["rule_id"] == CATCH_ALL_RULE, SEVERITY_RANK[finding["severity"]],
-                                                   CONFIDENCE_RANK[finding["confidence"]]))
+                                                   finding["rule_id"] in SYMPTOM_RULES, CONFIDENCE_RANK[finding["confidence"]]))
     kept: list[Finding] = []
     for finding in ranked:
         primary = next((other for other in kept if is_duplicate(other, finding)), None)
