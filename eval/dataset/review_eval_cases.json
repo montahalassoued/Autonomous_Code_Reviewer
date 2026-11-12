@@ -284,6 +284,254 @@
         ]}
       ],
       "expected_issues": []
+    },
+    {
+      "id": "hard_sec_idor_order_detail",
+      "about": "A new endpoint checks the caller is logged in but never that the order is theirs; the order lookup is in another file.",
+      "tags": ["security", "hard", "tools"],
+      "edits": [
+        {"file": "shop/orders.py", "find": ["from shop.db import fetch_all"], "replace": ["from shop.db import fetch_all, fetch_one"]},
+        {"file": "shop/orders.py", "find": ["def order_items(order_id):"], "replace": [
+          "def get_order(order_id):",
+          "    row = fetch_one(\"SELECT id, user_id, status FROM orders WHERE id = ?\", (order_id,))",
+          "    return {\"id\": row[0], \"user_id\": row[1], \"status\": row[2]} if row else None",
+          "",
+          "",
+          "def order_items(order_id):"
+        ]},
+        {"file": "shop/api.py", "find": ["from shop.orders import checkout_total, list_orders"], "replace": ["from shop.orders import checkout_total, get_order, list_orders, order_items"]},
+        {"file": "shop/api.py", "find": ["def order_checkout(request, order_id):"], "replace": [
+          "def order_detail(request, order_id):",
+          "    user = get_user(request[\"user_id\"])",
+          "    if user is None:",
+          "        raise Forbidden(\"login required\")",
+          "    order = get_order(order_id)",
+          "    return {\"order\": order, \"items\": order_items(order_id)}",
+          "",
+          "",
+          "def order_checkout(request, order_id):"
+        ]}
+      ],
+      "expected_issues": [
+        {"agent": "security", "file": "shop/api.py", "rule_ids": ["idor", "missing_authorization"], "severity": ["HIGH", "CRITICAL"], "at": "order = get_order(order_id)", "at_end": "\"items\": order_items(order_id)}", "keywords": ["owner", "user_id", "idor", "cwe-639"]}
+      ],
+      "allowed_findings": [
+        {"agent": "security", "file": "shop/orders.py", "rule_ids": ["idor", "missing_authorization"], "why": "the same missing ownership check, reported on the query"},
+        {"agent": "logic", "file": "shop/api.py", "rule_ids": ["unhandled_none", "unchecked_external_result"], "max_severity": "MEDIUM", "why": "a missing order returns {'order': None} instead of a 404"},
+        {"file": "shop/api.py", "rule_ids": ["missing_test"], "why": "the endpoint has no test"}
+      ]
+    },
+    {
+      "id": "hard_sec_path_traversal_weak_sanitizer",
+      "about": "An invoice download strips '../' once, which '....//' or an absolute path gets around.",
+      "tags": ["security", "hard"],
+      "edits": [
+        {"file": "shop/api.py", "find": ["from shop.orders import checkout_total, list_orders"], "replace": [
+          "import os",
+          "",
+          "from shop.orders import checkout_total, list_orders"
+        ]},
+        {"file": "shop/api.py", "find": ["def my_orders(request):"], "replace": [
+          "INVOICE_DIR = \"/srv/shop/invoices\"",
+          "",
+          "",
+          "def download_invoice(request, filename):",
+          "    if get_user(request[\"user_id\"]) is None:",
+          "        raise Forbidden(\"login required\")",
+          "    safe_name = filename.replace(\"../\", \"\")",
+          "    with open(os.path.join(INVOICE_DIR, safe_name), \"rb\") as invoice:",
+          "        return invoice.read()",
+          "",
+          "",
+          "def my_orders(request):"
+        ]}
+      ],
+      "expected_issues": [
+        {"agent": "security", "file": "shop/api.py", "rule_ids": ["path_traversal"], "severity": ["HIGH", "CRITICAL"], "at": "safe_name = filename.replace", "at_end": "os.path.join(INVOICE_DIR, safe_name)", "keywords": ["traversal", "....//", "absolute", "realpath", "basename", "cwe-22"]}
+      ],
+      "allowed_findings": [
+        {"agent": "security", "file": "shop/api.py", "rule_ids": ["idor", "missing_authorization"], "why": "any logged-in user may read any invoice"},
+        {"agent": "quality", "file": "shop/api.py", "rule_ids": ["whole_data_in_memory", "missing_test", "magic_number"], "max_severity": "MEDIUM", "why": "the whole file is read; no test"}
+      ]
+    },
+    {
+      "id": "hard_sec_predictable_reset_token",
+      "about": "A password reset token is a sha256 of the email and the current second: it looks strong but can be guessed.",
+      "tags": ["security", "hard", "holdout"],
+      "edits": [
+        {"file": "shop/users.py", "find": ["from shop.db import fetch_one"], "replace": [
+          "import hashlib",
+          "import time",
+          "",
+          "from shop.db import fetch_one"
+        ]},
+        {"file": "shop/users.py", "find": ["def is_admin(user):"], "replace": [
+          "def create_reset_token(user):",
+          "    # Emailed to the user; whoever presents it may set a new password.",
+          "    seed = f\"{user['email']}:{int(time.time())}\"",
+          "    return hashlib.sha256(seed.encode()).hexdigest()",
+          "",
+          "",
+          "def is_admin(user):"
+        ]}
+      ],
+      "expected_issues": [
+        {"agent": "security", "file": "shop/users.py", "rule_ids": ["insecure_randomness", "weak_crypto"], "severity": ["MEDIUM", "HIGH", "CRITICAL"], "at": "seed = f\"{user['email']}", "at_end": "hashlib.sha256(seed.encode())", "keywords": ["predictable", "guess", "secrets", "token_urlsafe", "cwe-338"]}
+      ],
+      "allowed_findings": [
+        {"agent": "logic", "file": "shop/users.py", "rule_ids": ["unhandled_none"], "max_severity": "MEDIUM", "why": "user may be None"},
+        {"file": "shop/users.py", "rule_ids": ["missing_test"], "why": "users.py has no test"}
+      ]
+    },
+    {
+      "id": "hard_logic_double_discount",
+      "about": "A receipt endpoint applies the coupon to a total that checkout_total already discounted, so the coupon counts twice.",
+      "tags": ["logic", "hard", "tools"],
+      "edits": [
+        {"file": "shop/api.py", "find": ["from shop.orders import checkout_total, list_orders"], "replace": [
+          "from shop.orders import checkout_total, list_orders",
+          "from shop.pricing import apply_discount"
+        ]},
+        {"file": "shop/api.py", "find": ["    return {\"total\": checkout_total(order_id, request.get(\"coupon\", 0))}"], "replace": [
+          "    return {\"total\": checkout_total(order_id, request.get(\"coupon\", 0))}",
+          "",
+          "",
+          "def order_receipt(request, order_id):",
+          "    coupon = request.get(\"coupon\", 0)",
+          "    total = checkout_total(order_id, coupon)",
+          "    return {\"order_id\": order_id, \"coupon\": coupon, \"total\": apply_discount(total, coupon)}"
+        ]}
+      ],
+      "expected_issues": [
+        {"agent": "logic", "file": "shop/api.py", "rule_ids": ["numeric_error", "wrong_return", "wrong_api_usage"], "severity": ["MEDIUM", "HIGH", "CRITICAL"], "at": "\"total\": apply_discount(total, coupon)", "keywords": ["twice", "double", "already", "checkout_total"]}
+      ],
+      "allowed_findings": [
+        {"agent": "security", "file": "shop/api.py", "why": "the coupon and the order id come from the request, as in the existing order_checkout"},
+        {"agent": "quality", "file": "shop/api.py", "rule_ids": ["duplicated_logic", "missing_test"], "why": "the receipt repeats checkout_total's work"}
+      ]
+    },
+    {
+      "id": "hard_logic_needle_in_big_diff",
+      "about": "Twenty lines of correct order helpers hide one condition that is always true, so shipped and delivered orders can be cancelled.",
+      "tags": ["logic", "hard"],
+      "edits": [
+        {"file": "shop/orders.py", "find": ["def page_of(items, page, size):"], "replace": [
+          "OPEN_STATUSES = (\"pending\", \"paid\", \"shipped\")",
+          "",
+          "",
+          "def orders_by_status(user_id):",
+          "    grouped = {\"open\": [], \"closed\": []}",
+          "    for order_id, status in list_orders(user_id):",
+          "        grouped[\"open\" if status in OPEN_STATUSES else \"closed\"].append(order_id)",
+          "    return grouped",
+          "",
+          "",
+          "def can_cancel(status):",
+          "    return status != \"shipped\" or status != \"delivered\"",
+          "",
+          "",
+          "def cancellable_orders(user_id):",
+          "    return [order_id for order_id, status in list_orders(user_id) if can_cancel(status)]",
+          "",
+          "",
+          "def order_count(user_id):",
+          "    return len(list_orders(user_id))",
+          "",
+          "",
+          "def recent_page(user_id, page, size=20):",
+          "    return page_of(list_orders(user_id), page, size)",
+          "",
+          "",
+          "def page_of(items, page, size):"
+        ]}
+      ],
+      "expected_issues": [
+        {"agent": "logic", "file": "shop/orders.py", "rule_ids": ["wrong_condition", "missed_state"], "severity": ["MEDIUM", "HIGH", "CRITICAL"], "at": "return status != \"shipped\" or", "keywords": ["always true", "always", " and ", "not in"]}
+      ],
+      "allowed_findings": [
+        {"agent": "quality", "file": "shop/orders.py", "rule_ids": ["missing_test", "magic_number", "unbounded_query", "whole_data_in_memory", "repeated_work_in_loop", "duplicated_logic", "misleading_name"], "max_severity": "MEDIUM", "why": "fair remarks on the helpers, none blocking"}
+      ]
+    },
+    {
+      "id": "hard_logic_race_stock_reservation",
+      "about": "Stock is read, checked, then written back: two buyers at once both pass the check and the item is oversold.",
+      "tags": ["logic", "hard", "holdout"],
+      "edits": [
+        {"file": "shop/db.py", "find": ["def fetch_one(query, params=()):"], "replace": [
+          "def execute(query, params=()):",
+          "    with get_connection() as connection:",
+          "        connection.execute(query, params)",
+          "",
+          "",
+          "def fetch_one(query, params=()):"
+        ]},
+        {"file": "shop/orders.py", "find": ["from shop.db import fetch_all"], "replace": ["from shop.db import execute, fetch_all, fetch_one"]},
+        {"file": "shop/orders.py", "find": ["def page_of(items, page, size):"], "replace": [
+          "def reserve_item(product_id, quantity):",
+          "    row = fetch_one(\"SELECT stock FROM products WHERE id = ?\", (product_id,))",
+          "    if row is None or row[0] < quantity:",
+          "        return False",
+          "    execute(\"UPDATE products SET stock = ? WHERE id = ?\", (row[0] - quantity, product_id))",
+          "    return True",
+          "",
+          "",
+          "def page_of(items, page, size):"
+        ]}
+      ],
+      "expected_issues": [
+        {"agent": "logic", "file": "shop/orders.py", "rule_ids": ["race_condition", "partial_update"], "severity": ["MEDIUM", "HIGH", "CRITICAL"], "at": "row = fetch_one(\"SELECT stock", "at_end": "execute(\"UPDATE products", "keywords": ["concurrent", "oversell", "atomic", "stock - ?", "lock", "transaction"]}
+      ],
+      "allowed_findings": [
+        {"agent": "logic", "file": "shop/orders.py", "rule_ids": ["unhandled_edge_case"], "why": "a negative quantity raises the stock"},
+        {"agent": "quality", "file": "shop/orders.py", "rule_ids": ["missing_test", "missing_index"], "max_severity": "MEDIUM", "why": "no test"}
+      ]
+    },
+    {
+      "id": "hard_quality_n_plus_one_hidden",
+      "about": "A list endpoint calls checkout_total per order; the query per order is two calls down, in order_items.",
+      "tags": ["quality", "hard", "tools"],
+      "edits": [
+        {"file": "shop/api.py", "find": ["def order_checkout(request, order_id):"], "replace": [
+          "def my_orders_with_totals(request):",
+          "    orders = list_orders(request[\"user_id\"])",
+          "    return [{\"id\": order_id, \"status\": status, \"total\": checkout_total(order_id)}",
+          "            for order_id, status in orders]",
+          "",
+          "",
+          "def order_checkout(request, order_id):"
+        ]}
+      ],
+      "expected_issues": [
+        {"agent": "quality", "file": "shop/api.py", "rule_ids": ["n_plus_one", "io_in_loop"], "severity": ["MEDIUM", "HIGH"], "at": "\"total\": checkout_total(order_id)}", "at_end": "for order_id, status in orders]", "keywords": ["order_items", "query", "per order", "batch", "join"]}
+      ],
+      "allowed_findings": [
+        {"agent": "quality", "file": "shop/api.py", "rule_ids": ["unbounded_query", "missing_test"], "max_severity": "MEDIUM", "why": "no pagination, no test"}
+      ]
+    },
+    {
+      "id": "hard_clean_allowlisted_sort",
+      "about": "ORDER BY is built with an f-string, but only from a fixed dict of sort orders: it looks like an injection and is safe.",
+      "tags": ["clean", "hard", "holdout"],
+      "edits": [
+        {"file": "shop/orders.py", "find": ["def order_items(order_id):"], "replace": [
+          "SORT_ORDERS = {\"newest\": \"id DESC\", \"oldest\": \"id ASC\", \"status\": \"status, id DESC\"}",
+          "",
+          "",
+          "def list_orders_sorted(user_id, sort=\"newest\"):",
+          "    order_by = SORT_ORDERS.get(sort, SORT_ORDERS[\"newest\"])",
+          "    return fetch_all(f\"SELECT id, status FROM orders WHERE user_id = ? ORDER BY {order_by}\", (user_id,))",
+          "",
+          "",
+          "def order_items(order_id):"
+        ]}
+      ],
+      "expected_issues": [],
+      "allowed_findings": [
+        {"agent": "quality", "file": "shop/orders.py", "rule_ids": ["unbounded_query", "missing_test", "missing_index", "duplicated_logic"], "max_severity": "MEDIUM", "why": "no pagination or test, as list_orders"}
+      ],
+      "forbidden_findings": [
+        {"file": "shop/orders.py", "rule_ids": ["sql_injection"], "why": "the ORDER BY text comes from a fixed dict, never from the caller"}
+      ]
     }
   ]
 }
