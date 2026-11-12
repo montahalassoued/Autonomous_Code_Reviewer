@@ -51,7 +51,7 @@ GitHub push / pull_request
 | --- | --- |
 | First push / empty repo (`before` = `000…`) | Full index, review row `skipped` (`initial_import`). No LLM calls |
 | Push to `main` | Review `before...after`, post as commit comments, then update the index |
-| Push to a branch with an open PR | Ignored: the PR event reviews it |
+| Push to a branch with an open PR | Ignored: the PR event reviews it (target; today every push of code to a branch is reviewed, also when a PR is open) |
 | PR `opened` / `synchronize` | Diff from the merge-base. PR title, description and commit messages are inputs, so agents can judge whether the change matches its stated intent. Inline comments + one summary edited in place; later commits post only new findings. PR code is never written to the index |
 | Docs-only, formatting-only, lockfile-only | `skipped` by rule-based triage, zero LLM calls |
 | Rapid pushes | Coalesced: jobs are enqueued with a ~60 s visibility delay and the latest push reviews the whole range |

@@ -3,7 +3,7 @@
 #   and push to main. On push to main (or a manual run from
 #   main) it pushes one image to Azure Container Registry and deploys it to two Azure Container
 #   Apps: the API (verifies webhooks and enqueues reviews, starts in seconds) and the review
-#   worker (ingests the repo, then runs reviews from the queue). It then smoke-tests both.
+#   worker (runs reviews from the queue, checking out each job's commit). It then smoke-tests both.
 # Inputs: The repository source.
 #   GitHub secrets:    AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID (OIDC, no passwords).
 #   GitHub variables:  AZURE_RESOURCE_GROUP, ACR_NAME, CONTAINER_APP_NAME (the API),
@@ -250,9 +250,9 @@ jobs:
       #   - If the new worker fails (bad image, missing setting), the job stops here and the
       #     webhook path is untouched. The old API keeps serving its old code.
       #   - The old API (from before the queue change) never enqueues, so it cannot split
-      #     work with the new worker. The worker's ingestion does not affect the old API.
-      #   Caveat: a new worker shows "Running" as soon as its container starts, but it only
-      #   reads the queue after ingestion (minutes). Reviews queued in that time wait; none are lost.
+      #     work with the new worker.
+      #   Caveat: a new worker shows "Running" as soon as its container starts. Reviews queued
+      #   before it reads the queue wait there; none are lost.
       - name: Deploy new image to the worker
         run: |
           az containerapp update \
@@ -267,8 +267,7 @@ jobs:
       #   a. The LATEST revision runs this commit's image, and it is the latest READY revision.
       #   b. Its runningState is "Running" and stays "Running" for 60 s (a crash loop would
       #      leave that state within the window).
-      # NOT checked: that ingestion has finished. Running starts before ingestion, so this
-      # step cannot prove the worker is consuming the queue yet. The step needs the worker
+      # NOT checked: that the worker is consuming the queue yet. The step needs the worker
       # to keep at least one replica running. If it scales to zero when idle, runningState
       # will not be "Running" and this step fails. Not yet verified against a live app.
       - name: Smoke test worker (no HTTP, waits up to 5 minutes)

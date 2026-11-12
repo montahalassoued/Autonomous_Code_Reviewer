@@ -25,7 +25,7 @@ GitHub (pull_request webhook)
                                         | Worker Container App          |
                                         | ca-code-reviewer-worker       |
                                         | python -m app.worker          |
-                                        | - clone + ingest repo at start|
+                                        | - checkout commit per job    |
                                         | - run review graph (LLMs)     |
                                         | - upsert PR comment on GitHub |
                                         | - delete message on success   |
@@ -174,7 +174,7 @@ The federated credential only trusts workflows running on the **main branch**. I
    - Content type: `application/json`
    - Secret: the same value as `GITHUB_WEBHOOK_SECRET`
    - Events: "Let me select", then **Pull requests** only.
-3. After the pipeline has deployed, check `https://<fqdn>/health`. The webhook's "Recent Deliveries" tab shows the response code per delivery; a successful delivery returns 202 (queued). The review itself appears minutes later, once the worker has finished its startup ingestion.
+3. After the pipeline has deployed, check `https://<fqdn>/health`. The webhook's "Recent Deliveries" tab shows the response code per delivery; a successful delivery returns 202 (queued). The review itself appears minutes later, once the worker has run it.
 
 ## Logs
 
@@ -184,7 +184,7 @@ API:
 az containerapp logs show -n <APP_NAME> -g <RESOURCE_GROUP> --follow
 ```
 
-Worker (startup ingestion, "Worker started", "Review done", failures with stack traces):
+Worker ("Worker started", "Review done", failures with stack traces):
 
 ```bash
 az containerapp logs show -n <WORKER_APP_NAME> -g <RESOURCE_GROUP> --follow

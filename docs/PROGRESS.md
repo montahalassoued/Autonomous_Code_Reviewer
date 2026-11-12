@@ -1,17 +1,18 @@
 # Progress
 
 **File purpose:** what is actually built today, versus the target design in [ARCHITECTURE.md](ARCHITECTURE.md) and the phases in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
-**Last updated:** 2026-10-22.
+**Last updated:** 2026-11-12.
 
 ## Done (in code)
 
 | Area | What exists | Where |
 | --- | --- | --- |
-| Code parsing | tree-sitter parse and an in-memory NetworkX call graph for the agents' graph tools, built at worker start with no LLM call; its call edges come from `code_index/call_resolver.py` (imports, `self`/`cls`, same file, unique name), not bare-name matches (823 edges on this repo instead of 968). The worker refuses to start if `ALLOWED_REPOS` lists a repo other than its `TARGET_REPO_URL` checkout. The semantic retrieval (Gemini, Voyage, Chroma, BM25, reranker, judge loop) was removed | `code_index/` |
+| Code parsing | tree-sitter parse and an in-memory NetworkX call graph for the agents' graph tools, built per job from the reviewed commit with no LLM call; its call edges come from `code_index/call_resolver.py` (imports, `self`/`cls`, same file, unique name), not bare-name matches (823 edges on this repo instead of 968). The semantic retrieval (Gemini, Voyage, Chroma, BM25, reranker, judge loop) was removed | `code_index/` |
 | Review graph | Forward-only graph, `START` fans out to the 3 agents, `file::qualified_name` ids, None guards, offline end-to-end test | `review/graph.py`, `tests/unit/test_pipeline_offline.py` |
 | Agents (Phase 3, part) | 3 review agents (Security, Logic, Quality) on one shared runner with strict finding validation and `REVIEW_AGENT_MODEL` (`openai/gpt-oss-120b` for all three, chosen by the benchmark); synthesizer with one section per category. Security checks authn/authz/IDOR on changed endpoints. An answer cut off at the output cap, empty, or not a JSON array fails its agent (partial review) instead of reading as "no issues" | `review/`, `review/agents/` |
 | LLM client (Phase 3, part) | One Groq client for the agents: a timeout, logged retries on per-minute 429s, 5xx and timeouts only (the SDK's silent retries are off), a spent daily quota raised at once so a fallback model can take over, a process-wide limit on concurrent calls, and a review deadline (`REVIEW_DEADLINE_S`, 600 s, under the queue's visibility timeout) after which no call starts or waits | `review/llm_client.py` |
 | Tracing (Phase 3, part) | Langfuse 5 traces, on only when both keys are set and forced off in tests: one trace per review (session = the PR) with an agent span per agent, a generation per Groq call (prompt, answer, tokens, latency, finish reason) and a span per tool call, ending after the post with `posted` / `skipped: <reason>` or an error. Everything sent is secret-masked and capped at 60k characters | `review/review_tracing.py`, `app/worker.py` |
+| Monitoring | Prometheus metrics from the API (`/metrics`) and the worker (`:9100`), scraped every 15 s, and a provisioned Grafana dashboard at `http://localhost:3000`, both in docker compose | `review/review_metrics.py`, `infra/monitoring/`, `docker-compose.yml` |
 | Durable jobs (Phase 2, part) | Webhook verifies HMAC, dedupes on (repo, target, head_sha) in the Postgres `reviews` table, enqueues to Azure Storage Queue; worker with retries and poison queue, the `reviews` lifecycle (`running` → `posted` / `skipped` / `failed` with a redacted reason, latency and missing categories), a stale check of the PR head before reviewing and before posting, partial reviews when one agent fails, and a redelivery that reopens a failed review | `app/api/webhook.py`, `app/jobs/`, `app/worker.py`, `review/graph.py` |
 | Any repo, any push (Phase 7, part) | A GitHub App installed on all repositories sends every push and pull request; the worker checks out the event's repo at the reviewed commit and builds its call graph per job (`app/repo_checkouts.py`, a few cached), so no repo URL is configured and the tools read the change itself. A push of code to a branch is reviewed over before..after and posted as a commit comment. Installation tokens (an hour, minted once per installation) authenticate every GitHub call of a job, with `GITHUB_TOKEN` as the local fallback | `app/repo_checkouts.py`, `tools/github_auth.py`, `docs/GITHUB_APP.md` |
 | Trigger policy (Phase 2, part) | Before the dedupe, the webhook ignores repos whose owner is not in `ALLOWED_OWNERS` (or listed in `ALLOWED_REPOS`), pushes that add or change no code, deleted branches and tags, draft PRs and authors GitHub does not list as collaborators; an unreachable GitHub gives 503 (fail closed); `ready_for_review` reviews a draft once it is ready | `app/jobs/trigger_policy.py`, `app/api/webhook.py` |
@@ -35,7 +36,7 @@
 - Phase 4: running the indexer from the worker (initial import), symbol diff, triage, structural context, PR text as input, agent tools reading Postgres instead of NetworkX. (Postgres, the schema, the `reviews` dedupe and the indexer itself are done.)
 - Phase 4b: context subagent.
 - Phase 5: inline review, only-new findings by fingerprint.
-- Phase 6: incremental Postgres sync (the worker still parses the whole repo at startup, with no LLM call).
+- Phase 6: incremental Postgres sync (each job still parses its whole checkout in memory, with no LLM call).
 - Phase 7: push reviews, push coalescing.
 - Azure resources: the setup script exists but has not been run, and it does not create a Postgres server yet (a deployed API fails at startup without `DATABASE_URL`).
 
@@ -43,5 +44,5 @@
 
 - 3-run baseline of gpt-oss-120b (2026-10-22, `eval/results/llm_benchmark_20261022_084512.md`): quality 0.99, recall 1.00, strict recall 0.98, precision 0.95, clean pass 0.96, 0 invalid answers. Its one failure is a false HIGH on the clean case `logic_clean_in_place_filter` (an invented missing `expires_at` key, confidence "high" without a visible trigger) plus a MEDIUM `>=` boundary remark; the logic prompt was left as is for now.
 - No fallback model: gpt-oss-20b gets 413 on the security and quality prompts at Groq's 8k tokens/min (`..._090610.md`), qwen3.8-27b cannot answer on the free tier, Cerebras needs a card, and NVIDIA's free endpoints had retired gpt-oss-120b and timed out or refused the other candidates. A spent 120b quota posts that category as a partial review.
-- The tool-free benchmark measures the prompt only; the agents' tools in a live review are measured by the review eval, which has run few cases live so far.
+- Review eval of the 12 golden PRs (2026-11-09): recall 1.00 but posted-review precision 0.43 (10 true findings, 13 false alarms). The noise sits on the security PRs (command injection 4, missing authorization 3, prompt injection 2) and the None-dereference PR (2); both clean PRs get none. The baseline does not store rule ids, so a live run is needed to rank the noisy rules.
 - qwen/qwen3.8-27b cannot answer on the Groq free tier: its 1000 output tokens per minute are less than one review answer.

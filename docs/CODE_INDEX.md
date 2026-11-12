@@ -28,7 +28,7 @@ The semantic pipeline (Gemini context sentences, Voyage embeddings in ChromaDB, 
 
 Until the Phase 4 context builder exists:
 
-1. The worker clones the target repo and parses it with tree-sitter (`code_index/ast_parser.py`, via `code_index/ingestion.py`). No LLM or embedding call.
+1. For each job, the worker checks out the event's repo at the reviewed commit (`app/repo_checkouts.py`, a few cached) and parses it with tree-sitter (`code_index/ast_parser.py`, via `code_index/ingestion.py`). No LLM or embedding call.
 2. It builds an in-memory NetworkX call graph (`code_index/knowledge_graph.py`), read by the agents' graph tools (`find_callers`, `find_callees`, `find_return_values`, `find_similar_functions`).
 3. The agents get the diff, an empty `review_context`, and their bounded read-only tools to look at the checkout and the graph ([AGENTS.md](AGENTS.md)).
 

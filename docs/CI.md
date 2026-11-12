@@ -44,13 +44,13 @@ This job builds the production image from the [`Dockerfile`](../Dockerfile) to p
 
 ## Job 3: Deploy
 
-This job runs only on `main`, and only once the Azure variables exist in GitHub. Until then it shows as **skipped**, not failed. Two Container Apps run the same image: the **API** (`CONTAINER_APP_NAME`) verifies webhooks and enqueues reviews, and the **worker** (`WORKER_APP_NAME`) ingests the repo and runs the reviews from the queue. When it does run:
+This job runs only on `main`, and only once the Azure variables exist in GitHub. Until then it shows as **skipped**, not failed. Two Container Apps run the same image: the **API** (`CONTAINER_APP_NAME`) verifies webhooks and enqueues reviews, and the **worker** (`WORKER_APP_NAME`) runs the reviews from the queue, checking out each job's commit. When it does run:
 
 1. Log in to Azure with OIDC, so no password is stored in GitHub.
 2. Push the image to Azure Container Registry, tagged with the commit SHA.
 3. Update the **worker** to that image and wait until its new revision is running (up to 5 minutes). It has no public URL, so there is no HTTP check.
 4. Update the **API** to that image and wait up to 3 minutes until the **new** revision's `/health` returns `ok`.
 
-The worker goes first, so a consumer exists before the API starts enqueueing. The worker's "running" check does not wait for ingestion, which takes minutes. Reviews queued in that time wait in the queue.
+The worker goes first, so a consumer exists before the API starts enqueueing. The worker's "running" check only proves its container started. Reviews queued before it reads the queue wait there; none are lost.
 
 The setup is in [`infra/README.md`](../infra/README.md).
